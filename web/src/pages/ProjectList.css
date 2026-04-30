@@ -337,3 +337,42 @@
     margin-top: var(--space-3);
   }
 }
+
+/* Phone-class breakpoints — touch targets, hero scaling, no x-overflow */
+@media (max-width: 480px) {
+  .projects {
+    padding: var(--space-4) var(--space-4) var(--space-7);
+  }
+  .hero {
+    padding: var(--space-5) 0 var(--space-6);
+  }
+  .hero__lede {
+    font-size: var(--t-sm);
+  }
+  .board__columns,
+  .entry {
+    grid-template-columns: 48px 1fr;
+    gap: var(--space-3);
+  }
+  .entry {
+    padding: var(--space-5) 0;
+  }
+  .entry__num-fig {
+    font-size: 28px;
+  }
+  .entry__name {
+    font-size: var(--t-lg);
+  }
+  /* Touch target ≥ 44px and full width so the tap area is obvious */
+  .cta {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-3) var(--space-4);
+  }
+  .progress-track {
+    width: 100%;
+    max-width: 100%;
+  }
+}

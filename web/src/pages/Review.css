@@ -121,6 +121,7 @@
 .player__box {
   position: relative;
   width: 360px;
+  max-width: 100%;
   aspect-ratio: 9 / 16;
   background: var(--ink-elevated);
   border: 1px solid var(--ink-line-strong);
@@ -758,5 +759,95 @@
   }
   .why__body {
     grid-template-columns: 1fr;
+  }
+}
+
+/* Phone-class — stack breadcrumb, scroll timeline, tappable buttons */
+@media (max-width: 600px) {
+  .review {
+    padding: var(--space-5) var(--space-4) var(--space-7);
+    gap: var(--space-6);
+  }
+  .bread {
+    grid-template-columns: 1fr;
+    gap: var(--space-2);
+  }
+  .bread__title {
+    font-size: var(--t-sm);
+  }
+  .bread__score {
+    justify-self: start;
+  }
+  .bread__score-fig {
+    font-size: var(--t-lg);
+  }
+  .player__caption {
+    flex-wrap: wrap;
+  }
+  .why__head {
+    grid-template-columns: 1fr;
+    gap: var(--space-2);
+  }
+  .why__score {
+    justify-self: start;
+  }
+  /* Timeline: horizontal scroll on phones, larger tap cells */
+  .tl__strip {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+  }
+  .tl__cell {
+    flex: 0 0 auto !important;
+    min-width: 36px;
+    min-height: 48px;
+  }
+  /* Action buttons: full width, stacked, ≥44px tap targets */
+  .actions {
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+  .action {
+    flex: 1 1 100%;
+    min-width: 0;
+    min-height: 56px;
+    padding: var(--space-3) var(--space-4);
+  }
+  .action__label {
+    font-size: var(--t-md);
+  }
+  /* Modal: trim padding and headline on small viewports */
+  .modal-scrim {
+    padding: var(--space-4);
+    align-items: flex-end;
+  }
+  .modal {
+    padding: var(--space-5);
+    max-height: 90vh;
+    overflow-y: auto;
+  }
+  .modal::before {
+    top: var(--space-5);
+    bottom: var(--space-5);
+  }
+  .modal__title {
+    font-size: var(--t-xl);
+  }
+  .modal__lede {
+    font-size: var(--t-sm);
+  }
+  .modal__actions .cta {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+  }
+  /* Toast: edge-anchored on phones (skip slide-in to avoid translateX(-50%) flash) */
+  .toast {
+    left: var(--space-4);
+    right: var(--space-4);
+    transform: none;
+    bottom: var(--space-4);
+    font-size: var(--t-xs);
+    animation: none;
   }
 }
