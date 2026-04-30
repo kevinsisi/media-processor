@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+dist/
+*.log
+npm-debug.log*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Project
+.env
+.env.local
+samples/capcut_draft/
+samples/carsmeet_screenshots/
+samples/blurred/
+*.mp4
+*.MOV
+*.mov
+!tests/fixtures/*.mp4
+
+# Docker
+*.log
