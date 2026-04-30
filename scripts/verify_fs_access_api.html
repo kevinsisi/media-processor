@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>FS Access API smoke test</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 700px; margin: 2em auto; padding: 0 1em; }
+  button { padding: 0.5em 1em; font-size: 1em; margin: 0.5em 0; }
+  pre { background: #f4f4f4; padding: 1em; overflow: auto; }
+</style>
+</head>
+<body>
+<h1>File System Access API smoke test</h1>
+<p>Run this on the girlfriend's Mac in Chrome / Edge / Brave to confirm browser-based directory write works for the auto-sync feature.</p>
+
+<ol>
+  <li>Click <b>Pick directory</b> and choose any folder (later: her CapCut draft folder).</li>
+  <li>Click <b>Write file</b>. A file <code>mp-test.txt</code> should appear in that folder.</li>
+  <li>Reload the page; click <b>Pick saved directory</b> — should reuse without re-prompting (persistent permission).</li>
+  <li>Click <b>Write again</b>. Should succeed without re-prompting.</li>
+</ol>
+
+<button id="pick">Pick directory</button>
+<button id="write">Write file</button>
+<button id="picksaved">Pick saved directory</button>
+<button id="writeagain">Write again</button>
+<pre id="log"></pre>
+
+<script>
+const log = (msg) => { document.getElementById('log').textContent += msg + '\n'; };
+const dbName = 'fs-access-smoke';
+let dirHandle = null;
+
+async function saveHandle(handle) {
+  const db = await new Promise((res, rej) => {
+    const r = indexedDB.open(dbName, 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('handles');
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+  const tx = db.transaction('handles', 'readwrite');
+  tx.objectStore('handles').put(handle, 'capcut');
+  await new Promise((res) => (tx.oncomplete = res));
+}
+
+async function loadHandle() {
+  const db = await new Promise((res, rej) => {
+    const r = indexedDB.open(dbName, 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('handles');
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+  return new Promise((res) => {
+    const r = db.transaction('handles').objectStore('handles').get('capcut');
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => res(null);
+  });
+}
+
+document.getElementById('pick').onclick = async () => {
+  try {
+    dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+    await saveHandle(dirHandle);
+    log('Picked: ' + dirHandle.name);
+  } catch (e) { log('Pick failed: ' + e.message); }
+};
+
+document.getElementById('write').onclick = async () => {
+  try {
+    if (!dirHandle) { log('No dir handle. Pick first.'); return; }
+    const fileHandle = await dirHandle.getFileHandle('mp-test.txt', { create: true });
+    const w = await fileHandle.createWritable();
+    await w.write(`smoke test ${new Date().toISOString()}`);
+    await w.close();
+    log('Wrote mp-test.txt');
+  } catch (e) { log('Write failed: ' + e.message); }
+};
+
+document.getElementById('picksaved').onclick = async () => {
+  try {
+    const stored = await loadHandle();
+    if (!stored) { log('No saved handle.'); return; }
+    const perm = await stored.queryPermission({ mode: 'readwrite' });
+    if (perm === 'granted') { dirHandle = stored; log('Reused saved handle: ' + stored.name); return; }
+    const req = await stored.requestPermission({ mode: 'readwrite' });
+    if (req === 'granted') { dirHandle = stored; log('Re-granted saved handle: ' + stored.name); }
+    else { log('Permission denied.'); }
+  } catch (e) { log('Pick saved failed: ' + e.message); }
+};
+
+document.getElementById('writeagain').onclick = async () => {
+  try {
+    if (!dirHandle) { log('No dir handle. Pick saved first.'); return; }
+    const fileHandle = await dirHandle.getFileHandle('mp-test-2.txt', { create: true });
+    const w = await fileHandle.createWritable();
+    await w.write(`re-write ${new Date().toISOString()}`);
+    await w.close();
+    log('Wrote mp-test-2.txt');
+  } catch (e) { log('Write again failed: ' + e.message); }
+};
+</script>
+</body>
+</html>
