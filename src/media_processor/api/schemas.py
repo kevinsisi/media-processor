@@ -109,3 +109,20 @@ class ReviewOut(BaseModel):
     action: str
     prompt_feedback: str | None
     reviewed_at: datetime
+
+
+class DraftPatchRequest(BaseModel):
+    """Body for POST /drafts/{id}/patch — Stage 4.5 prompt patch input."""
+
+    user_feedback: str = Field(..., min_length=1, max_length=4000)
+
+
+class DraftPatchResponse(BaseModel):
+    """The Stage 4.5 LLM patch result, with the resulting tag_weights applied."""
+
+    draft_id: int
+    profile_name: str
+    tag_weight_deltas: dict[str, float]
+    required_segments_overrides: dict[str, Any]
+    patched_tag_weights: dict[str, float]
+    patched_required_segments: dict[str, Any]

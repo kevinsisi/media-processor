@@ -19,6 +19,15 @@ class Settings(BaseSettings):
     api_host: str = Field(default="0.0.0.0")
     api_port: int = Field(default=8000)
 
+    # Stage 4.5 LLM Patcher — reads a comma-separated key pool (ai-core style)
+    # so callers can rotate across multiple Gemini API keys on quota errors.
+    # Empty pool disables the /drafts/{id}/patch endpoint at request time.
+    llm_api_keys: str = Field(default="")
+    llm_model: str = Field(default="gemini-2.0-flash")
+    llm_timeout_s: float = Field(default=30.0)
+
+    profiles_dir: str = Field(default="profiles")
+
     @property
     def postgres_dsn(self) -> str:
         return (
