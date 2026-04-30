@@ -1,0 +1,54 @@
+name: carsmeet-luxury
+description: 豪車經銷展間 cinematic 風（Rolls-Royce / Bentley / Lambo / Porsche）
+
+tag_weights:
+  logo_close_up: 1.5
+  integral_hero_shot: 1.4
+  body_line_pan: 1.2
+  light_reflection: 1.1
+  wheel_caliper: 0.8
+  interior_leather: 0.8
+  dashboard: 0.7
+  star_ceiling: 0.9
+  exhaust_pipe: 0.7
+  stranger_face: -0.8
+  parking_lot_other_car: -0.6
+  blur: -1.0
+  overexposed: -0.7
+
+filters:
+  min_quality_score: 0.5
+  max_blur: 0.4
+  min_segment_duration_ms: 200
+  max_segment_duration_ms: 2000
+
+editing_rules:
+  target_duration_ms: 30000
+  min_cuts: 25
+  max_cuts: 50
+  diversity_penalty:
+    same_tag_consecutive: 0.3
+  required_segments:
+    opening_hero: true
+    closing_hero: true
+
+reframe:
+  subject_class: car
+  subject_padding_pct: 15
+  smoothing_window_frames: 30
+  fallback: center_crop
+
+captions:
+  enabled: true
+  language: zh
+  font: PingFangTC-Regular
+  font_size: 48
+  position: bottom_center
+  outline: true
+  outline_color: "#000000"
+
+face_blur:
+  mode: selective
+  blur_identities_dir: ./profiles/carsmeet-luxury/blur_faces/
+  blur_style: gaussian
+  blur_strength: 25

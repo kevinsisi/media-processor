@@ -1,0 +1,34 @@
+name: universal
+description: 通用，畫面品質為主，無特定主題偏好
+
+tag_weights:
+  face_clear: 0.5
+  composition_centered: 0.3
+  motion_smooth: 0.4
+  blur: -1.0
+  overexposed: -0.7
+  underexposed: -0.6
+
+filters:
+  min_quality_score: 0.5
+  max_blur: 0.4
+  min_segment_duration_ms: 300
+  max_segment_duration_ms: 3000
+
+editing_rules:
+  target_duration_ms: 30000
+  min_cuts: 15
+  max_cuts: 40
+
+reframe:
+  subject_class: auto
+  subject_padding_pct: 20
+  smoothing_window_frames: 30
+  fallback: center_crop
+
+captions:
+  enabled: true
+  language: zh
+
+face_blur:
+  mode: "off"
