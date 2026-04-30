@@ -29,7 +29,8 @@ async def ping_redis() -> bool:
         # redis-py's stubs declare Redis.ping as `Awaitable[bool] | bool` because
         # the same class serves both sync and async modes; in async mode the call
         # is always awaitable, but mypy can't see that. Cast keeps strict mode.
-        from typing import Awaitable, cast
+        from collections.abc import Awaitable
+        from typing import cast
 
         result = cast(Awaitable[bool], client.ping())
         return bool(await result)
