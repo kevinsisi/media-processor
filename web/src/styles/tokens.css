@@ -1,0 +1,65 @@
+/* Design tokens — single source of truth for the editorial-cinematic theme.
+ * Used by every screen in the review inbox; derived from carsmeet's
+ * dark-showroom + champagne brand language.
+ */
+
+:root {
+  /* Surfaces (warm-tinted near-black) */
+  --ink-base: #0e0d0c;
+  --ink-elevated: #161513;
+  --ink-overlay: #1f1d1a;
+  --ink-line: rgba(243, 238, 229, 0.08);
+  --ink-line-strong: rgba(243, 238, 229, 0.18);
+
+  /* Type colors */
+  --text-primary: #f3eee5;
+  --text-secondary: #a8a39a;
+  --text-tertiary: #65605a;
+  --text-disabled: #3a3733;
+
+  /* Accent — champagne, not yellow */
+  --gold: #c9a961;
+  --gold-bright: #e8c882;
+  --gold-soft: rgba(201, 169, 97, 0.18);
+
+  /* Status (sage / rust / champagne — never neon) */
+  --status-up: #7fa583;
+  --status-down: #c47474;
+  --status-degraded: var(--gold);
+
+  /* Typography */
+  --font-display: "Fraunces", "Times New Roman", serif;
+  --font-body: "Geist", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  /* Scale */
+  --t-xs: 11px;
+  --t-sm: 13px;
+  --t-md: 15px;
+  --t-lg: 18px;
+  --t-xl: 24px;
+  --t-display-sm: 40px;
+  --t-display-md: 64px;
+  --t-display-lg: 96px;
+
+  /* Spacing */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+  --space-9: 96px;
+  --space-10: 128px;
+
+  /* Motion */
+  --ease-linear: cubic-bezier(0, 0, 1, 1);
+  --ease-out: cubic-bezier(0.2, 0.7, 0.25, 1);
+  --ease-editorial: cubic-bezier(0.32, 0.08, 0, 1);
+
+  /* Layout */
+  --page-max: 880px;
+  --rule-thickness: 1px;
+}

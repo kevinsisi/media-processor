@@ -1,0 +1,302 @@
+/* Editorial-cinematic landing for the Media Processor.
+ * Layout = magazine masthead + table-of-contents-style status block.
+ * Motion = staggered reveal on first paint; gentle pulse on degraded status.
+ */
+
+.page {
+  position: relative;
+  max-width: var(--page-max);
+  margin: 0 auto;
+  padding: var(--space-9) var(--space-6) var(--space-8);
+  min-height: 100vh;
+}
+
+/* Vertical gold rule on the left margin — subtle brand anchor */
+.rule-left {
+  position: absolute;
+  top: var(--space-9);
+  bottom: var(--space-8);
+  left: var(--space-6);
+  width: var(--rule-thickness);
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    var(--gold) 12%,
+    var(--gold) 88%,
+    transparent 100%
+  );
+  opacity: 0.55;
+  animation: rule-grow 1100ms var(--ease-editorial) both;
+  transform-origin: top;
+}
+
+@keyframes rule-grow {
+  from {
+    transform: scaleY(0);
+    opacity: 0;
+  }
+  to {
+    transform: scaleY(1);
+    opacity: 0.55;
+  }
+}
+
+/* Masthead — editorial title block */
+.masthead {
+  padding-left: var(--space-6);
+  margin-bottom: var(--space-9);
+  animation: rise 900ms var(--ease-editorial) both;
+}
+
+.kicker {
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
+  letter-spacing: 0.22em;
+  /* No text-transform: preserves Greek α (otherwise Chrome casts it to Latin A). */
+  color: var(--gold);
+  margin-bottom: var(--space-4);
+  opacity: 0.86;
+}
+
+.title {
+  font-family: var(--font-display);
+  font-weight: 350;
+  font-style: normal;
+  font-size: clamp(56px, 9vw, var(--t-display-lg));
+  line-height: 0.95;
+  letter-spacing: -0.022em;
+  color: var(--text-primary);
+  font-variation-settings: "opsz" 144, "SOFT" 30;
+}
+
+.title-em {
+  font-style: italic;
+  color: var(--gold);
+  font-variation-settings: "opsz" 144, "SOFT" 100;
+  margin: 0 0.05em;
+}
+
+.subtitle {
+  margin-top: var(--space-4);
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 300;
+  font-size: var(--t-md);
+  color: var(--text-secondary);
+  letter-spacing: 0;
+}
+
+/* Status sections */
+.block {
+  padding-left: var(--space-6);
+  margin-bottom: var(--space-7);
+  opacity: 0;
+  animation: rise 900ms var(--ease-editorial) forwards;
+}
+
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  margin-bottom: var(--space-4);
+}
+
+.row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  border-bottom: 1px dashed var(--ink-line);
+}
+
+.row:last-child {
+  border-bottom: none;
+}
+
+.row-key {
+  font-size: var(--t-md);
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.row-key.mono {
+  font-family: var(--font-mono);
+  font-size: var(--t-sm);
+  letter-spacing: 0.04em;
+}
+
+/* Dot leader — fills left-to-right on reveal, classic editorial TOC */
+.leader {
+  flex: 1;
+  height: 1em;
+  background-image: radial-gradient(
+    circle at center,
+    var(--text-disabled) 0.5px,
+    transparent 1px
+  );
+  background-size: 6px 1em;
+  background-position: 0 75%;
+  background-repeat: repeat-x;
+  margin: 0 var(--space-3);
+  transform-origin: left;
+  animation: leader-draw 1400ms var(--ease-editorial) both;
+  animation-delay: inherit;
+}
+
+@keyframes leader-draw {
+  from {
+    transform: scaleX(0);
+    opacity: 0;
+  }
+  to {
+    transform: scaleX(1);
+    opacity: 0.65;
+  }
+}
+
+.row-val {
+  font-size: var(--t-md);
+  color: var(--text-primary);
+  text-align: right;
+  flex-shrink: 0;
+  font-feature-settings: "tnum";
+}
+
+.row-val.mono {
+  font-family: var(--font-mono);
+  font-size: var(--t-sm);
+  letter-spacing: 0.04em;
+}
+
+.row-val--accent {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 400;
+  font-size: var(--t-lg);
+  letter-spacing: -0.005em;
+}
+
+/* Status colors */
+.status--ok,
+.status--up {
+  color: var(--status-up);
+}
+
+.status--ok::before,
+.status--up::before {
+  content: "● ";
+  font-size: 0.8em;
+  margin-right: 0.2em;
+  opacity: 0.85;
+}
+
+.status--down {
+  color: var(--status-down);
+}
+
+.status--down::before {
+  content: "○ ";
+  font-size: 0.8em;
+  margin-right: 0.2em;
+}
+
+.status--degraded {
+  color: var(--status-degraded);
+  animation: pulse 2.2s ease-in-out infinite;
+}
+
+.status--degraded::before {
+  content: "◐ ";
+  font-size: 0.8em;
+  margin-right: 0.2em;
+}
+
+.status--unknown {
+  color: var(--text-tertiary);
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 0.7;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* Colophon — bottom meta strip */
+.colophon {
+  padding-left: var(--space-6);
+  margin-top: var(--space-9);
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--space-3);
+  align-items: end;
+  opacity: 0;
+  animation: rise 900ms var(--ease-editorial) forwards;
+}
+
+.hairline {
+  grid-column: 1 / -1;
+  height: 1px;
+  background: var(--ink-line-strong);
+  margin-bottom: var(--space-4);
+  width: 64px;
+}
+
+.meta {
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
+  letter-spacing: 0.08em;
+  color: var(--text-tertiary);
+  text-transform: lowercase;
+}
+
+.meta-right {
+  justify-self: end;
+}
+
+.meta a {
+  border-bottom: 1px solid transparent;
+  padding-bottom: 1px;
+  transition: border-color 280ms var(--ease-out), color 280ms var(--ease-out);
+}
+
+.meta a:hover {
+  color: var(--gold);
+  border-bottom-color: var(--gold);
+}
+
+.meta-error {
+  color: var(--status-down);
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Smaller screens — tighten the masthead */
+@media (max-width: 640px) {
+  .page {
+    padding: var(--space-7) var(--space-5) var(--space-7);
+  }
+  .rule-left {
+    top: var(--space-7);
+    bottom: var(--space-7);
+    left: var(--space-5);
+  }
+  .masthead,
+  .block,
+  .colophon {
+    padding-left: var(--space-5);
+  }
+}
