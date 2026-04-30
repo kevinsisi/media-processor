@@ -720,7 +720,15 @@ WebSocket 推給 web app，Inbox UI 顯示「Pipeline 處理中 (stage 5/8 refra
 
 ## 11. 動工前必驗證（Step 0）
 
-下列項目在第一行 production code 之前必須先驗證：
+下列項目在第一行 production code 之前必須先驗證。每項目前的狀態欄反映實際進度：
+
+| # | 項目 | 腳本/工具 | 狀態 | 缺什麼 |
+|---|-----|----------|------|--------|
+| 11.1 | CapCut 草稿 schema 反向工程 | `tools/capcut_schema_parser/parse_sample.py` + `tests/unit/test_capcut_parser.py` | 程式碼就緒 | 女朋友寄 mp_sample_001 zip |
+| 11.2 | CLIP zero-shot 準度 | `scripts/clip_zero_shot_probe.py` | 程式碼就緒 | 30 張 carsmeet 截圖 + labels.csv |
+| 11.3 | SMB 連通性 | `scripts/verify_smb.md` checklist | 文件就緒 | 雙方實際操作 |
+| 11.4 | WSL2 GPU passthrough | `scripts/verify_gpu.sh` | 腳本就緒 | Windows host 跑、貼 log |
+| 11.5 | FS Access API | `scripts/verify_fs_access_api.html` + `docs/fs_access_api_findings.md` | 程式碼就緒 | 女朋友 Mac Chrome 跑 |
 
 ### 11.1 CapCut 草稿 schema 反向工程
 
@@ -728,9 +736,10 @@ WebSocket 推給 web app，Inbox UI 顯示「Pipeline 處理中 (stage 5/8 refra
 
 1. 新建簡單草稿（拖 3 個素材 + 1 段 BGM + 1 段字幕）
 2. 把整個草稿資料夾打包傳給開發者
-3. 開發者拆 `draft_content.json` 確認 schema
+3. 開發者拆 `draft_content.json` 確認 schema（用 `python -m tools.capcut_schema_parser.parse_sample`）
 4. 確認的點：素材引用、轉場、BGM 軌、字幕軌、位置/縮放關鍵幀的 JSON 結構與欄位
 5. 鎖定她當下版本（記錄版本號）為 MVP 的 ground truth
+6. 把 findings 寫進 `docs/capcut_draft_schema_findings.md`
 
 **沒這個 step Stage 7 寫不下去**。
 
@@ -738,27 +747,34 @@ WebSocket 推給 web app，Inbox UI 顯示「Pipeline 處理中 (stage 5/8 refra
 
 抓 30 張 carsmeet 既有 reels 的截圖：
 
-- 跑 CLIP zero-shot tag（"logo close-up", "leather seat", "exhaust pipe"…）
-- 統計準度與 false positive
+- 放到 `samples/carsmeet_screenshots/`，建 `labels.csv` 標每張的 expected_tag
+- 跑 `python scripts/clip_zero_shot_probe.py`
+- 統計準度與 false positive，寫進 `docs/clip_zero_shot_findings.md`
 - 不行就調 prompt 用語、或回退到 review 階段手動修正 tag → Phase β fine-tune
 
 ### 11.3 SMB 連通性
 
+依 `scripts/verify_smb.md` 全跑：
+
 - Windows host 開 SMB share `\\<windows-ip>\MediaProcessor`
 - Mac 走 Finder「連線到伺服器」`smb://<windows-ip>/MediaProcessor` 掛載
 - 測試讀寫權限、效能（拖 5GB 影片計時）
+- WSL2 端確認 `/mnt/c/MediaProcessor/assets` 看得到 Mac 丟進來的檔
+- Result log 填回 checklist
 
 ### 11.4 WSL2 GPU passthrough
 
 - Windows host 安裝 NVIDIA Container Toolkit for WSL2
-- `docker run --gpus all nvidia/cuda:12.x-base nvidia-smi` 應看到 RTX 2070
+- 跑 `bash scripts/verify_gpu.sh 2>&1 | tee scripts/verify_gpu.log` 確認三層都過：host nvidia-smi、`docker run --gpus all`、PyTorch CUDA
 - 測試 ultralytics / faster-whisper / insightface 在 container 內能用 GPU
 
 ### 11.5 File System Access API 在她 Mac 行為
 
-- Chrome on macOS 開 demo 頁面，授權目錄寫入測試
+- 在開發者 Windows 起 `python -m http.server` 託管 `scripts/verify_fs_access_api.html`
+- 女朋友 Mac Chrome / Edge / Brave 開 LAN 或 Tailscale URL
+- 走完 4 顆按鈕：pick → write → reload pick saved → write again
 - 確認 `FileSystemDirectoryHandle` 持久化跨 session 保留授權
-- 確認 JSZip 解壓寫入大量小檔效能（CapCut 草稿一個約 10–50 個檔）
+- Findings 寫進 `docs/fs_access_api_findings.md`
 
 ---
 
@@ -867,6 +883,10 @@ WebSocket 推給 web app，Inbox UI 顯示「Pipeline 處理中 (stage 5/8 refra
 | LLM 加指令重剪 | MVP 啟用，Anthropic Claude API | 提升審片到產出的迴圈速度，成本可忽略 |
 | GPU 使用模式 | 序列化 mode 預設開 | 2070 8GB 跑多 GPU stage 風險 OOM |
 | Profile 起手 | carsmeet-luxury + universal | 一個專用 + 一個通用，覆蓋常見場景 |
+| Web router | react-router-dom v6 | 三頁切換（清單 / 審片 / 工程師 health），不開新 stack |
+| `/health` URL | 從 `/` 移到 `/health` | 端用戶看到的不該是工程師儀表板；首頁讓位給案件清單 |
+| Mockup 早做 | 在 backend 之前先做 ProjectList + Review 視覺 mockup（mock data） | 使用者預覽未來介面、早給設計 feedback、避免 M4 才知道方向錯 |
+| 設計語言 | Editorial dark luxury — Fraunces + Geist + JetBrains Mono、暖黑底 + 香檳金 | 對齊 carsmeet 品牌；克制不刺眼適合長時間 review；token 化未來元件直接套 |
 
 ---
 
@@ -885,4 +905,6 @@ WebSocket 推給 web app，Inbox UI 顯示「Pipeline 處理中 (stage 5/8 refra
 
 | 日期 | 變更 | 作者 |
 |------|------|------|
-| 2026-04-30 | 初版 Draft | 開發者 + Claude（brainstorming session） |
+| 2026-04-30 | 初版 Draft（brainstorming session 產出） | 開發者 + Claude |
+| 2026-04-30 | 寫 Step 0 + M1 implementation plan 並執行：repo scaffold、profile YAML、5 個 Step 0 腳本、docker-compose、FastAPI hello + /health、Alembic skeleton、CI、editorial dark Web shell（Fraunces + Geist + JetBrains Mono） | 開發者 + Claude |
+| 2026-04-30 | 補 Web ProjectList + Review mockup（mock data, react-router-dom v6）；/health 從 / 移到 /health；新增決策三條（router、URL 改址、設計語言）；新增 §11 Step 0 狀態欄；版號 0.1.0 → 0.2.0 | 開發者 + Claude |

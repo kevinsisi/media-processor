@@ -8,7 +8,7 @@ from media_processor.core.db import ping_postgres, ping_redis
 
 router = APIRouter()
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 
 
 @router.get("/health")

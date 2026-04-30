@@ -70,3 +70,26 @@ artefact is captured.
 
 The remaining items run on the developer's Windows host once Step 0
 verification completes.
+
+## Web preview (mockup, no backend required)
+
+A non-functional UI mockup ships with this milestone so the end user
+can see what the review-inbox flow will look like before the AI
+pipeline lands. Three routes:
+
+| Route | Purpose |
+|-------|---------|
+| `/` | ProjectList — editorial TOC of mock issues across statuses |
+| `/projects/:id/review` | Review — 9:16 player + AI intel sidebar + interactive timeline + 5-action row + prompt modal |
+| `/health` | Developer-facing status dashboard (formerly the landing) |
+
+Mock data lives at `web/src/data/mockData.ts` and mirrors the entity
+shape from spec §4 — swapping to real API later is a data-source
+change, not a UI rewrite.
+
+Run locally:
+
+```bash
+cd web && npm install && npm run dev
+# open http://localhost:5173/
+```

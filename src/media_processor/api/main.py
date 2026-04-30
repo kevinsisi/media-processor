@@ -6,7 +6,7 @@ from media_processor.api.routers import health
 
 app = FastAPI(
     title="media-processor API",
-    version="0.1.0",
+    version="0.2.0",
 )
 
 app.include_router(health.router)
