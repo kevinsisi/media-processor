@@ -1,0 +1,6 @@
+# Copy to docker-compose.override.yml for local development overrides.
+# E.g., expose Postgres on 0.0.0.0 for dev tools, or attach a worker GPU service.
+services:
+  postgres:
+    ports:
+      - "5432:5432"
