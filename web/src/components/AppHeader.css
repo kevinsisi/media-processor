@@ -1,0 +1,116 @@
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background:
+    linear-gradient(to bottom, var(--ink-base) 70%, transparent);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  padding-top: var(--space-5);
+}
+
+.app-header__inner {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 0 var(--space-7);
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: baseline;
+  gap: var(--space-6);
+}
+
+.app-header__brand {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  color: var(--text-primary);
+}
+
+.brand-mark {
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
+  letter-spacing: 0.18em;
+  color: var(--gold);
+  border: 1px solid var(--gold);
+  padding: 2px 6px;
+  text-transform: none;
+  border-radius: 1px;
+  opacity: 0.86;
+}
+
+.brand-word {
+  font-family: var(--font-display);
+  font-weight: 350;
+  font-size: var(--t-xl);
+  letter-spacing: -0.01em;
+  font-variation-settings: "opsz" 144, "SOFT" 30;
+}
+
+.brand-word .em {
+  color: var(--gold);
+  font-style: italic;
+  font-variation-settings: "opsz" 144, "SOFT" 100;
+  margin: 0 0.05em;
+}
+
+.app-header__nav {
+  display: flex;
+  gap: var(--space-5);
+  align-items: baseline;
+}
+
+.nav-link {
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  padding: var(--space-1) 0;
+  border-bottom: 1px solid transparent;
+  transition: color 240ms var(--ease-out), border-color 240ms var(--ease-out);
+}
+
+.nav-link:hover {
+  color: var(--gold);
+}
+
+.nav-link.active {
+  color: var(--gold);
+  border-bottom-color: var(--gold);
+}
+
+.nav-link--quiet {
+  color: var(--text-tertiary);
+}
+
+.app-header__rule {
+  max-width: 1180px;
+  margin: var(--space-4) auto 0;
+  padding: 0 var(--space-7);
+  height: 1px;
+  background: var(--ink-line);
+  position: relative;
+}
+
+.app-header__rule::after {
+  content: "";
+  position: absolute;
+  left: var(--space-7);
+  top: 0;
+  width: 64px;
+  height: 1px;
+  background: var(--gold);
+  opacity: 0.6;
+}
+
+@media (max-width: 720px) {
+  .app-header__inner {
+    padding: 0 var(--space-5);
+  }
+  .app-header__rule {
+    padding: 0 var(--space-5);
+  }
+  .app-header__rule::after {
+    left: var(--space-5);
+  }
+}
