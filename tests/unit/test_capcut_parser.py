@@ -1,8 +1,8 @@
 """Snapshot test for CapCut draft schema parsing."""
+
 from pathlib import Path
 
 import pytest
-
 from tools.capcut_schema_parser.parse_sample import parse_draft
 
 SAMPLE = Path("samples/capcut_draft/mp_sample_001")

@@ -1,4 +1,5 @@
 """Health endpoint smoke test."""
+
 from fastapi.testclient import TestClient
 
 from media_processor.api.main import app

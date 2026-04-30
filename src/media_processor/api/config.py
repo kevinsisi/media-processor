@@ -1,4 +1,5 @@
 """Application settings loaded from environment via pydantic-settings."""
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
