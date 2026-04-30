@@ -1,16 +1,27 @@
 import { Link } from "react-router-dom";
-import { MOCK_PROJECTS, type MockProject } from "../data/mockData";
+import type { ProjectSummary } from "../api/types";
+import { useProjects } from "../hooks";
 import "./ProjectList.css";
 
-function StatusCell({ project }: { project: MockProject }) {
-  if (project.status === "drafted" && project.draftVersion) {
+function formatCreatedAt(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mi = String(d.getMinutes()).padStart(2, "0");
+  return `${yyyy}·${mm}·${dd} · ${hh}:${mi}`;
+}
+
+function StatusCell({ project }: { project: ProjectSummary }) {
+  if (project.status === "drafted" && project.latest_draft_version != null) {
     return (
       <div className="status-cell status-cell--ready">
         <div className="status-line">
           <span className="dot dot--gold" />
           <span className="status-text">
-            draft v{project.draftVersion} ready
-            {project.pendingReview ? ` · ${project.pendingReview} pending` : ""}
+            draft v{project.latest_draft_version} ready
           </span>
         </div>
         <Link to={`/projects/${project.id}/review`} className="cta cta--primary">
@@ -20,19 +31,15 @@ function StatusCell({ project }: { project: MockProject }) {
     );
   }
 
-  if (project.status === "analyzing" && project.pipelineStage) {
-    const { stage, total, label } = project.pipelineStage;
-    const pct = (stage / total) * 100;
+  if (project.status === "analyzing") {
     return (
       <div className="status-cell status-cell--processing">
         <div className="status-line">
           <span className="dot dot--processing" />
-          <span className="status-text">
-            pipeline · stage {stage}/{total} {label}
-          </span>
+          <span className="status-text">pipeline running</span>
         </div>
         <div className="progress-track" aria-hidden>
-          <div className="progress-bar" style={{ width: `${pct}%` }} />
+          <div className="progress-bar" style={{ width: "55%" }} />
         </div>
       </div>
     );
@@ -43,7 +50,7 @@ function StatusCell({ project }: { project: MockProject }) {
       <div className="status-cell status-cell--approved">
         <div className="status-line">
           <span className="dot dot--up" />
-          <span className="status-text">approved · downloaded</span>
+          <span className="status-text">approved</span>
         </div>
         <Link to={`/projects/${project.id}/review`} className="cta cta--quiet">
           Open →
@@ -63,11 +70,14 @@ function StatusCell({ project }: { project: MockProject }) {
 }
 
 export default function ProjectList() {
+  const { data: projects, error, loading } = useProjects();
+  const list = projects ?? [];
+
   return (
     <main className="page projects">
       <section className="hero">
         <div className="hero__kicker">
-          OPEN BOARD &nbsp;·&nbsp; {MOCK_PROJECTS.length} ISSUES
+          OPEN BOARD &nbsp;·&nbsp; {loading ? "…" : `${list.length} ISSUES`}
         </div>
         <h1 className="hero__title">
           Issues, in <em>review</em>.
@@ -85,27 +95,47 @@ export default function ProjectList() {
           <span>Status</span>
         </div>
 
+        {error && (
+          <div className="board__notice" role="alert">
+            <span className="mono">api error · {error.message}</span>
+          </div>
+        )}
+
+        {loading && !projects && (
+          <div className="board__notice">
+            <span className="mono">loading…</span>
+          </div>
+        )}
+
+        {!loading && projects && list.length === 0 && (
+          <div className="board__notice">
+            <span className="mono">no projects yet</span>
+          </div>
+        )}
+
         <ol className="board__list">
-          {MOCK_PROJECTS.map((p, i) => (
+          {list.map((p, i) => (
             <li
               key={p.id}
               className="entry"
               style={{ animationDelay: `${100 + i * 90}ms` }}
             >
               <div className="entry__num">
-                <div className="entry__num-fig">{p.number}</div>
-                <div className="entry__num-when">{p.createdAt}</div>
+                <div className="entry__num-fig">
+                  {String(p.id).padStart(3, "0")}
+                </div>
+                <div className="entry__num-when">
+                  {formatCreatedAt(p.created_at)}
+                </div>
               </div>
 
               <div className="entry__body">
-                <div className="entry__client">
-                  {p.client === "carsmeet" ? "carsmeet" : "freelance"}
-                </div>
+                <div className="entry__client">{p.client ?? "freelance"}</div>
                 <h2 className="entry__name">{p.name}</h2>
                 <div className="entry__meta">
-                  <span>{p.assetCount} 素材</span>
+                  <span>{p.asset_count} 素材</span>
                   <span className="entry__meta-sep">·</span>
-                  <span className="mono">profile {p.profileName}</span>
+                  <span className="mono">profile {p.profile_name}</span>
                 </div>
               </div>
 

@@ -305,6 +305,17 @@
   to   { transform: translateX(100%); }
 }
 
+/* Loading / error / empty notice rendered inside the board */
+.board__notice {
+  padding: var(--space-5) 0;
+  font-size: var(--t-sm);
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--rule);
+}
+.board__notice[role="alert"] {
+  color: var(--rust, #b34b3a);
+}
+
 /* Compact layout for narrow screens */
 @media (max-width: 880px) {
   .projects {

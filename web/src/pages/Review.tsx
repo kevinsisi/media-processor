@@ -1,13 +1,27 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import type {
+  DraftDetail,
+  DraftSegmentOut,
+  DraftSummary,
+  ProjectDetail,
+  ReviewAction,
+} from "../api/types";
 import {
-  MOCK_DRAFT,
-  TAG_DISPLAY,
-  findProject,
-  type MockSegment,
-  type SegmentTag,
-} from "../data/mockData";
+  useDraft,
+  useProject,
+  useProjectDrafts,
+  useReviewMutation,
+} from "../hooks";
 import "./Review.css";
+
+// Deterministic decorative tone for a segment block. The API does not yet
+// expose per-segment tags / scores (M3 work), so the timeline cycles through
+// tones based on order to keep visual variety without faking semantic data.
+const TONE_CYCLE = ["gold", "hero", "wheel", "body", "interior"] as const;
+function toneFor(order: number): (typeof TONE_CYCLE)[number] {
+  return TONE_CYCLE[order % TONE_CYCLE.length];
+}
 
 function ScoreStars({ score }: { score: number }) {
   const filled = Math.round((score / 10) * 5);
@@ -21,10 +35,12 @@ function ScoreStars({ score }: { score: number }) {
 
 function PromptDialog({
   open,
+  busy,
   onClose,
   onSubmit,
 }: {
   open: boolean;
+  busy: boolean;
   onClose: () => void;
   onSubmit: (text: string) => void;
 }) {
@@ -50,18 +66,15 @@ function PromptDialog({
           autoFocus
         />
         <div className="modal__actions">
-          <button className="cta cta--quiet" onClick={onClose}>
+          <button className="cta cta--quiet" onClick={onClose} disabled={busy}>
             Cancel
           </button>
           <button
             className="cta cta--primary"
-            disabled={!text.trim()}
-            onClick={() => {
-              onSubmit(text);
-              onClose();
-            }}
+            disabled={!text.trim() || busy}
+            onClick={() => onSubmit(text)}
           >
-            Re-cut →
+            {busy ? "Re-cutting…" : "Re-cut →"}
           </button>
         </div>
       </div>
@@ -69,18 +82,332 @@ function PromptDialog({
   );
 }
 
+function pickLatestDraft(drafts: DraftSummary[] | null): DraftSummary | null {
+  if (!drafts || drafts.length === 0) return null;
+  return drafts.reduce((acc, d) => (d.version > acc.version ? d : acc));
+}
+
+interface ReviewBodyProps {
+  project: ProjectDetail;
+  draft: DraftDetail;
+}
+
+function ReviewBody({ project, draft }: ReviewBodyProps) {
+  const segments = draft.segments;
+  const durationMs = useMemo(() => {
+    if (segments.length === 0) return 0;
+    return Math.max(...segments.map((s) => s.on_timeline_end_ms));
+  }, [segments]);
+
+  const [selectedIdx, setSelectedIdx] = useState<number>(0);
+  const [promptOpen, setPromptOpen] = useState(false);
+  const [pendingAction, setPendingAction] = useState<ReviewAction | null>(null);
+
+  const review = useReviewMutation();
+
+  const submitAction = async (
+    action: ReviewAction,
+    promptFeedback?: string,
+  ) => {
+    setPendingAction(action);
+    try {
+      await review.submit({
+        draft_id: draft.id,
+        action,
+        prompt_feedback: promptFeedback ?? null,
+      });
+    } catch {
+      // surface via review.error → toast
+    } finally {
+      setPendingAction(null);
+    }
+  };
+
+  const aiScore = draft.ai_score ?? 0;
+  const selectedSegment: DraftSegmentOut | undefined = segments[selectedIdx];
+
+  return (
+    <>
+      <div className="bread">
+        <Link to="/" className="bread__back">
+          ← Issues
+        </Link>
+        <div className="bread__title">
+          <span className="bread__num">№ {String(project.id).padStart(3, "0")}</span>
+          <span className="bread__sep">·</span>
+          <span className="bread__client">{project.client ?? "freelance"}</span>
+          <span className="bread__sep">·</span>
+          <span className="bread__name">{project.name}</span>
+          <span className="bread__sep">·</span>
+          <span className="bread__draft">draft v{draft.version}</span>
+        </div>
+        <div className="bread__score">
+          <span className="mono">AI confidence</span>
+          <span className="bread__score-fig">{aiScore.toFixed(1)}</span>
+          <span className="mono">/ 10</span>
+        </div>
+      </div>
+
+      <div className="stage">
+        <figure className="player" aria-label="video preview">
+          <div className="player__frame">
+            <div className="player__box">
+              <PreviewArtwork />
+              <div className="player__overlay">
+                <div className="player__time mono">
+                  00:{Math.floor((selectedSegment?.on_timeline_start_ms ?? 0) / 1000)
+                    .toString()
+                    .padStart(2, "0")}
+                  &nbsp;/&nbsp; 00:{Math.floor(durationMs / 1000)
+                    .toString()
+                    .padStart(2, "0")}
+                </div>
+              </div>
+            </div>
+          </div>
+          <figcaption className="player__caption">
+            <span className="mono">9:16 reframe preview</span>
+            <span className="mono">·</span>
+            <span className="mono">{segments.length} cuts</span>
+          </figcaption>
+        </figure>
+
+        <aside className="intel">
+          <div className="intel__eyebrow">DRAFT</div>
+
+          <div className="intel__score">
+            <div className="intel__score-fig">{aiScore.toFixed(1)}</div>
+            <div className="intel__score-of">/ 10</div>
+            <ScoreStars score={aiScore} />
+          </div>
+
+          <ul className="intel__list">
+            <li className="intel__row">
+              <span className="pill pill--quiet">v</span>
+              <span className="intel__row-label">draft version</span>
+              <span className="intel__row-count mono">{draft.version}</span>
+            </li>
+            <li className="intel__row">
+              <span className="pill pill--quiet">#</span>
+              <span className="intel__row-label">cuts</span>
+              <span className="intel__row-count mono">{segments.length}</span>
+            </li>
+            <li className="intel__row">
+              <span className="pill pill--quiet">⏱</span>
+              <span className="intel__row-label">duration</span>
+              <span className="intel__row-count mono">
+                {(durationMs / 1000).toFixed(1)}s
+              </span>
+            </li>
+            <li className="intel__row">
+              <span className="pill pill--quiet">P</span>
+              <span className="intel__row-label">profile</span>
+              <span className="intel__row-count mono">{draft.profile_name}</span>
+            </li>
+            <li className="intel__row">
+              <span className="pill pill--quiet">S</span>
+              <span className="intel__row-label">status</span>
+              <span className="intel__row-count mono">{draft.status}</span>
+            </li>
+          </ul>
+        </aside>
+      </div>
+
+      <section className="tl">
+        <div className="tl__head">
+          <div className="tl__eyebrow">TIMELINE</div>
+          <div className="tl__hint mono">click any block · see segment timing</div>
+        </div>
+        <div className="tl__strip" role="list">
+          {segments.map((seg, i) => {
+            const tone = toneFor(seg.order);
+            const segDuration = seg.on_timeline_end_ms - seg.on_timeline_start_ms;
+            const widthPct = durationMs > 0 ? (segDuration / durationMs) * 100 : 0;
+            const isSel = selectedIdx === i;
+            return (
+              <button
+                key={seg.order}
+                className={`tl__cell tl__cell--${tone}${isSel ? " tl__cell--selected" : ""}`}
+                style={{ flex: `${widthPct} 1 0` }}
+                onClick={() => setSelectedIdx(i)}
+                title={`segment #${seg.order} · ${(segDuration / 1000).toFixed(1)}s`}
+                role="listitem"
+                aria-pressed={isSel}
+              >
+                <span className="tl__cell-letter">{seg.order + 1}</span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="tl__ruler mono">
+          <span>0:00</span>
+          <span>0:{Math.floor(durationMs / 2000).toString().padStart(2, "0")}</span>
+          <span>0:{Math.floor(durationMs / 1000).toString().padStart(2, "0")}</span>
+        </div>
+      </section>
+
+      {selectedSegment && (
+        <section className="why">
+          <div className="why__head">
+            <div className="why__eyebrow">
+              SEGMENT #{selectedSegment.order.toString().padStart(2, "0")}
+            </div>
+            <div className="why__time mono">
+              {(selectedSegment.on_timeline_start_ms / 1000).toFixed(1)}s —{" "}
+              {(selectedSegment.on_timeline_end_ms / 1000).toFixed(1)}s
+              <span className="why__src">
+                · asset_segment {selectedSegment.asset_segment_id}
+              </span>
+            </div>
+            <div className="why__score">
+              <span className="why__score-label mono">transition</span>
+              <span className="why__score-fig">
+                {selectedSegment.transition ?? "—"}
+              </span>
+            </div>
+          </div>
+        </section>
+      )}
+
+      <div className="actions">
+        <button
+          className={`action action--approve${review.result?.action === "approve" ? " action--done" : ""}`}
+          disabled={review.submitting}
+          onClick={() => submitAction("approve")}
+        >
+          <span className="action__glyph">✓</span>
+          <span className="action__label">
+            {pendingAction === "approve" ? "Approving…" : "Approve"}
+          </span>
+          <span className="action__hint mono">→ auto-sync to CapCut</span>
+        </button>
+        <button
+          className={`action${review.result?.action === "repatch" && !review.result?.prompt_feedback ? " action--done" : ""}`}
+          disabled={review.submitting}
+          onClick={() => submitAction("repatch")}
+        >
+          <span className="action__glyph">↺</span>
+          <span className="action__label">
+            {pendingAction === "repatch" && !promptOpen
+              ? "Regenerating…"
+              : "Regenerate"}
+          </span>
+          <span className="action__hint mono">re-pick segments, same profile</span>
+        </button>
+        <button
+          className="action action--prompt"
+          disabled={review.submitting}
+          onClick={() => setPromptOpen(true)}
+        >
+          <span className="action__glyph">❉</span>
+          <span className="action__label">Re-cut with prompt</span>
+          <span className="action__hint mono">tell the AI what to change</span>
+        </button>
+        <button
+          className={`action${review.result?.action === "download" ? " action--done" : ""}`}
+          disabled={review.submitting}
+          onClick={() => submitAction("download")}
+        >
+          <span className="action__glyph">↓</span>
+          <span className="action__label">
+            {pendingAction === "download" ? "Logging…" : "Download zip"}
+          </span>
+          <span className="action__hint mono">manual copy to CapCut</span>
+        </button>
+        <button
+          className={`action action--reject${review.result?.action === "reject" ? " action--done" : ""}`}
+          disabled={review.submitting}
+          onClick={() => submitAction("reject")}
+        >
+          <span className="action__glyph">×</span>
+          <span className="action__label">
+            {pendingAction === "reject" ? "Rejecting…" : "Reject"}
+          </span>
+          <span className="action__hint mono">discard draft v{draft.version}</span>
+        </button>
+      </div>
+
+      {(review.result || review.error) && (
+        <div className="toast">
+          <span className="mono">
+            {review.error
+              ? `× api error · ${review.error.message}`
+              : review.result?.action === "approve"
+                ? "✓ approved · syncing to CapCut draft folder"
+                : review.result?.action === "repatch"
+                  ? "↺ repatch queued"
+                  : review.result?.action === "reject"
+                    ? "× draft rejected"
+                    : "↓ download recorded · move zip to CapCut folder manually"}
+          </span>
+          <button className="toast__close" onClick={review.reset}>
+            ×
+          </button>
+        </div>
+      )}
+
+      <PromptDialog
+        open={promptOpen}
+        busy={review.submitting}
+        onClose={() => setPromptOpen(false)}
+        onSubmit={async (text) => {
+          await submitAction("repatch", text);
+          setPromptOpen(false);
+        }}
+      />
+    </>
+  );
+}
+
 export default function Review() {
   const { id } = useParams<{ id: string }>();
-  const project = id ? findProject(id) : undefined;
-  const draft = MOCK_DRAFT;
+  const projectId = id ? Number(id) : null;
 
-  const [selected, setSelected] = useState<number>(13);
-  const [promptOpen, setPromptOpen] = useState(false);
-  const [decision, setDecision] = useState<
-    null | "approved" | "rejected" | "regenerating" | "downloaded"
-  >(null);
+  const projectQ = useProject(projectId);
+  const draftsQ = useProjectDrafts(projectId);
 
-  if (!project) {
+  const latestDraftSummary = pickLatestDraft(draftsQ.data);
+  const draftQ = useDraft(latestDraftSummary?.id ?? null);
+
+  if (projectId == null || Number.isNaN(projectId)) {
+    return (
+      <main className="page review">
+        <p>Invalid project id.</p>
+        <Link to="/">← back</Link>
+      </main>
+    );
+  }
+
+  const error = projectQ.error ?? draftsQ.error ?? draftQ.error;
+  if (error) {
+    return (
+      <main className="page review">
+        <div className="bread">
+          <Link to="/" className="bread__back">
+            ← Issues
+          </Link>
+        </div>
+        <p className="mono" role="alert">
+          api error · {error.message}
+        </p>
+      </main>
+    );
+  }
+
+  if (projectQ.loading || draftsQ.loading || draftQ.loading) {
+    return (
+      <main className="page review">
+        <div className="bread">
+          <Link to="/" className="bread__back">
+            ← Issues
+          </Link>
+        </div>
+        <p className="mono">loading…</p>
+      </main>
+    );
+  }
+
+  if (!projectQ.data) {
     return (
       <main className="page review">
         <p>Project not found.</p>
@@ -89,241 +416,30 @@ export default function Review() {
     );
   }
 
-  const selectedSegment: MockSegment | undefined = draft.segments[selected];
+  if (!draftQ.data) {
+    return (
+      <main className="page review">
+        <div className="bread">
+          <Link to="/" className="bread__back">
+            ← Issues
+          </Link>
+          <div className="bread__title">
+            <span className="bread__name">{projectQ.data.name}</span>
+          </div>
+        </div>
+        <p className="mono">no draft yet for this project.</p>
+      </main>
+    );
+  }
 
   return (
     <main className="page review">
-      {/* Top breadcrumb / title strip */}
-      <div className="bread">
-        <Link to="/" className="bread__back">
-          ← Issues
-        </Link>
-        <div className="bread__title">
-          <span className="bread__num">№ {project.number}</span>
-          <span className="bread__sep">·</span>
-          <span className="bread__client">{project.client}</span>
-          <span className="bread__sep">·</span>
-          <span className="bread__name">{project.name}</span>
-          <span className="bread__sep">·</span>
-          <span className="bread__draft">draft v{draft.version}</span>
-        </div>
-        <div className="bread__score">
-          <span className="mono">AI confidence</span>
-          <span className="bread__score-fig">{draft.aiScore.toFixed(1)}</span>
-          <span className="mono">/ 10</span>
-        </div>
-      </div>
-
-      {/* Main two-pane: video + intel */}
-      <div className="stage">
-        <figure className="player" aria-label="video preview">
-          <div className="player__frame">
-            <div className="player__box">
-              <PreviewArtwork />
-              <div className="player__overlay">
-                <div className="player__time mono">
-                  00:{(Math.floor((selectedSegment?.startMs ?? 0) / 1000))
-                    .toString()
-                    .padStart(2, "0")}
-                  &nbsp;/&nbsp; 00:30
-                </div>
-              </div>
-            </div>
-          </div>
-          <figcaption className="player__caption">
-            <span className="mono">9:16 reframe preview</span>
-            <span className="mono">·</span>
-            <span className="mono">{draft.segments.length} cuts</span>
-          </figcaption>
-        </figure>
-
-        <aside className="intel">
-          <div className="intel__eyebrow">INTEL</div>
-
-          <div className="intel__score">
-            <div className="intel__score-fig">{draft.aiScore.toFixed(1)}</div>
-            <div className="intel__score-of">/ 10</div>
-            <ScoreStars score={draft.aiScore} />
-          </div>
-
-          <ul className="intel__list">
-            {Object.entries(draft.intel.counts).map(([tag, count]) => {
-              const t = TAG_DISPLAY[tag as SegmentTag];
-              return (
-                <li key={tag} className="intel__row">
-                  <span className={`pill pill--${t.tone}`}>{t.short}</span>
-                  <span className="intel__row-label">{t.label}</span>
-                  <span className="intel__row-count mono">{count}</span>
-                </li>
-              );
-            })}
-            <li className="intel__divider" aria-hidden />
-            <li className="intel__row intel__row--note">
-              <span className="pill pill--warn">F</span>
-              <span className="intel__row-label">陌生人臉（未在打馬清單）</span>
-              <span className="intel__row-count mono">
-                {draft.intel.strangerFacesNotInBlurList}
-              </span>
-            </li>
-            <li className="intel__row intel__row--note">
-              <span className="pill pill--quiet">字</span>
-              <span className="intel__row-label">字幕行數</span>
-              <span className="intel__row-count mono">
-                {draft.intel.captionsLines}
-              </span>
-            </li>
-            <li className="intel__row intel__row--note">
-              <span className="pill pill--quiet">♪</span>
-              <span className="intel__row-label">BPM 對拍切點</span>
-              <span className="intel__row-count mono">
-                {draft.intel.bpmAlignedCuts}/{draft.beatGridCount}
-              </span>
-            </li>
-          </ul>
-        </aside>
-      </div>
-
-      {/* Timeline strip */}
-      <section className="tl">
-        <div className="tl__head">
-          <div className="tl__eyebrow">TIMELINE</div>
-          <div className="tl__hint mono">click any block · see why AI picked it</div>
-        </div>
-        <div className="tl__strip" role="list">
-          {draft.segments.map((seg, i) => {
-            const t = TAG_DISPLAY[seg.tag];
-            const widthPct = ((seg.endMs - seg.startMs) / draft.durationMs) * 100;
-            const isSel = selected === i;
-            return (
-              <button
-                key={seg.order}
-                className={`tl__cell tl__cell--${t.tone}${isSel ? " tl__cell--selected" : ""}`}
-                style={{ flex: `${widthPct} 1 0` }}
-                onClick={() => setSelected(i)}
-                title={`${t.label} · ${seg.score.toFixed(1)}`}
-                role="listitem"
-                aria-pressed={isSel}
-              >
-                <span className="tl__cell-letter">{t.short}</span>
-              </button>
-            );
-          })}
-        </div>
-        <div className="tl__ruler mono">
-          <span>0:00</span>
-          <span>0:15</span>
-          <span>0:30</span>
-        </div>
-      </section>
-
-      {/* Why-this-clip panel */}
-      {selectedSegment && (
-        <section className="why">
-          <div className="why__head">
-            <div className="why__eyebrow">SEGMENT #{selectedSegment.order.toString().padStart(2, "0")}</div>
-            <div className="why__time mono">
-              {(selectedSegment.startMs / 1000).toFixed(1)}s — {(selectedSegment.endMs / 1000).toFixed(1)}s
-              <span className="why__src">· {selectedSegment.assetName}</span>
-            </div>
-            <div className="why__score">
-              <span className="why__score-label mono">total</span>
-              <span className="why__score-fig">{selectedSegment.score.toFixed(1)}</span>
-              <span className="mono">/ 10</span>
-            </div>
-          </div>
-
-          <div className="why__body">
-            <div className="why__col">
-              <div className="why__sub">why AI picked it</div>
-              <ul className="why__reasons">
-                {selectedSegment.reasons.map((r) => (
-                  <li key={r}>{r}</li>
-                ))}
-              </ul>
-            </div>
-            <div className="why__col">
-              <div className="why__sub">tag</div>
-              <div className={`pill pill--${TAG_DISPLAY[selectedSegment.tag].tone} pill--lg`}>
-                {TAG_DISPLAY[selectedSegment.tag].short} &nbsp; {TAG_DISPLAY[selectedSegment.tag].label}
-              </div>
-              {selectedSegment.beat !== undefined && (
-                <div className="why__beat mono">
-                  aligned to beat #{selectedSegment.beat}
-                </div>
-              )}
-            </div>
-          </div>
-        </section>
-      )}
-
-      {/* Actions */}
-      <div className="actions">
-        <button
-          className={`action action--approve${decision === "approved" ? " action--done" : ""}`}
-          onClick={() => setDecision("approved")}
-        >
-          <span className="action__glyph">✓</span>
-          <span className="action__label">Approve</span>
-          <span className="action__hint mono">→ auto-sync to CapCut</span>
-        </button>
-        <button
-          className={`action${decision === "regenerating" ? " action--done" : ""}`}
-          onClick={() => setDecision("regenerating")}
-        >
-          <span className="action__glyph">↺</span>
-          <span className="action__label">Regenerate</span>
-          <span className="action__hint mono">re-pick segments, same profile</span>
-        </button>
-        <button
-          className="action action--prompt"
-          onClick={() => setPromptOpen(true)}
-        >
-          <span className="action__glyph">❉</span>
-          <span className="action__label">Re-cut with prompt</span>
-          <span className="action__hint mono">tell the AI what to change</span>
-        </button>
-        <button
-          className={`action${decision === "downloaded" ? " action--done" : ""}`}
-          onClick={() => setDecision("downloaded")}
-        >
-          <span className="action__glyph">↓</span>
-          <span className="action__label">Download zip</span>
-          <span className="action__hint mono">manual copy to CapCut</span>
-        </button>
-        <button
-          className={`action action--reject${decision === "rejected" ? " action--done" : ""}`}
-          onClick={() => setDecision("rejected")}
-        >
-          <span className="action__glyph">×</span>
-          <span className="action__label">Reject</span>
-          <span className="action__hint mono">discard draft v{draft.version}</span>
-        </button>
-      </div>
-
-      {decision && (
-        <div className="toast">
-          <span className="mono">
-            {decision === "approved" && "✓ approved · syncing to CapCut draft folder"}
-            {decision === "regenerating" && "↺ regenerating with same profile…"}
-            {decision === "rejected" && "× draft rejected"}
-            {decision === "downloaded" && "↓ zip downloaded · move to CapCut folder manually"}
-          </span>
-          <button className="toast__close" onClick={() => setDecision(null)}>×</button>
-        </div>
-      )}
-
-      <PromptDialog
-        open={promptOpen}
-        onClose={() => setPromptOpen(false)}
-        onSubmit={() => setDecision("regenerating")}
-      />
+      <ReviewBody project={projectQ.data} draft={draftQ.data} />
     </main>
   );
 }
 
 function PreviewArtwork() {
-  // Layered abstract artwork — evokes a luxury car shot in low key without
-  // shipping any actual content. Pure SVG / CSS.
   return (
     <svg
       viewBox="0 0 360 640"
@@ -351,13 +467,11 @@ function PreviewArtwork() {
         </linearGradient>
       </defs>
       <rect width="360" height="640" fill="url(#floorlight)" />
-      {/* Vehicle silhouette suggested by curves */}
       <path
         d="M -40 460 C 60 380, 110 360, 180 360 C 260 360, 320 400, 410 460 L 410 540 L -40 540 Z"
         fill="url(#bodyhi)"
         opacity="0.95"
       />
-      {/* Roof curve */}
       <path
         d="M 80 380 C 130 320, 230 320, 290 380"
         stroke="#2c2820"
@@ -365,14 +479,11 @@ function PreviewArtwork() {
         fill="none"
         opacity="0.7"
       />
-      {/* Wheel arches */}
       <ellipse cx="100" cy="500" rx="42" ry="22" fill="#0e0d0c" />
       <ellipse cx="270" cy="500" rx="42" ry="22" fill="#0e0d0c" />
       <ellipse cx="100" cy="500" rx="22" ry="11" fill="#1a1612" />
       <ellipse cx="270" cy="500" rx="22" ry="11" fill="#1a1612" />
-      {/* Light streak — body line highlight */}
       <rect x="40" y="430" width="280" height="2" fill="url(#goldstreak)" />
-      {/* Subtle vignette overlay */}
       <radialGradient id="vig" cx="50%" cy="50%" r="80%">
         <stop offset="60%" stopColor="#000" stopOpacity="0" />
         <stop offset="100%" stopColor="#000" stopOpacity="0.6" />

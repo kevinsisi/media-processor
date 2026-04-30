@@ -1,8 +1,10 @@
 // HTTP client for the media-processor API.
 //
-// The mockup screens (ProjectList, Review) intentionally still consume mock
-// data — wiring them to the live backend is M3/M4 work. Shipping the typed
-// surface in M2 keeps that wiring mechanical.
+// Base URL resolution:
+//   1. VITE_API_URL env var if set (use for prod or non-proxied dev)
+//   2. "/api" default — vite dev server proxies /api → http://localhost:8000
+//      (see web/vite.config.ts), and prod deployments are expected to expose
+//      the backend under the same /api path via reverse proxy.
 
 import type {
   AssetDetail,
@@ -14,7 +16,7 @@ import type {
   ReviewOut,
 } from "./types";
 
-const DEFAULT_BASE_URL = "/api";
+const DEFAULT_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
 
 export class ApiError extends Error {
   constructor(
