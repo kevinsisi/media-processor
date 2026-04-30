@@ -42,3 +42,31 @@ make test       # Run all tests
 - Format: `ruff format src tests`
 - Type check: `mypy src`
 - Tests: `pytest`
+
+## Step 0 verification status
+
+| Check | Status | Doc |
+|-------|--------|-----|
+| SMB share Mac ↔ Windows | PENDING (girlfriend) | `scripts/verify_smb.md` |
+| WSL2 + NVIDIA GPU passthrough | PENDING (Windows host) | `scripts/verify_gpu.sh` |
+| CapCut draft schema captured | PENDING (girlfriend's sample) | `docs/capcut_draft_schema_findings.md` |
+| CLIP zero-shot probe | PENDING (30 carsmeet screenshots) | `docs/clip_zero_shot_findings.md` |
+| File System Access API on her Mac | PENDING (girlfriend Chrome) | `docs/fs_access_api_findings.md` |
+
+Update each row to PASS / FAIL with a date once the corresponding
+artefact is captured.
+
+## M1 acceptance
+
+- [x] `docker compose config` validates the stack (services declared correctly)
+- [x] `pytest -v` passes (2 health tests pass, 2 capcut tests skip pending sample)
+- [x] `ruff check src tests` and `ruff format --check src tests` are clean
+- [x] `mypy src` is clean (strict mode)
+- [x] `npm run build` produces a working web bundle
+- [ ] `docker compose up -d --build` brings all services up — depends on Step 0 GPU + SMB checks
+- [ ] `curl http://127.0.0.1:8000/health` returns `{"status":"ok"}` once Postgres + Redis are running
+- [ ] `curl http://127.0.0.1:8080/api/health` returns the same through the Nginx proxy
+- [ ] CI green on `main`
+
+The remaining items run on the developer's Windows host once Step 0
+verification completes.
