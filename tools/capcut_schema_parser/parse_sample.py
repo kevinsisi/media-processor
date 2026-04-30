@@ -1,7 +1,8 @@
 """Read a CapCut/JianyingPro draft folder and extract its top-level structure."""
+
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 
 def parse_draft(draft_dir: Path) -> dict[str, Any]:
@@ -14,7 +15,7 @@ def parse_draft(draft_dir: Path) -> dict[str, Any]:
     content_path = draft_dir / "draft_content.json"
     if not content_path.exists():
         raise FileNotFoundError(f"draft_content.json not found in {draft_dir}")
-    return json.loads(content_path.read_text(encoding="utf-8"))
+    return cast(dict[str, Any], json.loads(content_path.read_text(encoding="utf-8")))
 
 
 def summarize(draft_dir: Path) -> None:

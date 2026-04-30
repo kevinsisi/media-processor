@@ -5,6 +5,8 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
+from media_processor.models import Base
+
 config = context.config
 
 if config.config_file_name is not None:
@@ -21,7 +23,7 @@ for var in (
     if var in os.environ:
         config.set_main_option(var, os.environ[var])
 
-target_metadata = None  # No models yet — schema added in later plans
+target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:

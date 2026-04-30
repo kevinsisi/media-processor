@@ -1,17 +1,26 @@
-"""Pytest fixtures for media_processor tests."""
+"""Pytest fixtures for media_processor tests.
 
-import pytest
+`media_processor.api.config` instantiates a `Settings()` at import time, which
+in turn requires `POSTGRES_*` env vars. Setting them in an autouse fixture is
+too late: collection-time imports trigger validation before the fixture runs.
+We populate the env at conftest *module load* so every test module sees them.
+"""
 
+from __future__ import annotations
 
-@pytest.fixture(autouse=True)
-def _set_test_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Set environment variables required for the API to start in tests."""
-    monkeypatch.setenv("POSTGRES_USER", "test")
-    monkeypatch.setenv("POSTGRES_PASSWORD", "test")
-    monkeypatch.setenv("POSTGRES_DB", "test")
-    monkeypatch.setenv("POSTGRES_HOST", "localhost")
-    monkeypatch.setenv("POSTGRES_PORT", "5432")
-    monkeypatch.setenv("REDIS_HOST", "localhost")
-    monkeypatch.setenv("REDIS_PORT", "6379")
-    monkeypatch.setenv("API_HOST", "0.0.0.0")
-    monkeypatch.setenv("API_PORT", "8000")
+import os
+
+_DEFAULTS = {
+    "POSTGRES_USER": "test",
+    "POSTGRES_PASSWORD": "test",
+    "POSTGRES_DB": "test",
+    "POSTGRES_HOST": "localhost",
+    "POSTGRES_PORT": "5432",
+    "REDIS_HOST": "localhost",
+    "REDIS_PORT": "6379",
+    "API_HOST": "0.0.0.0",
+    "API_PORT": "8000",
+}
+
+for key, value in _DEFAULTS.items():
+    os.environ.setdefault(key, value)

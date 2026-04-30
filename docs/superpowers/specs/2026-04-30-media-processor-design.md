@@ -908,3 +908,4 @@ WebSocket 推給 web app，Inbox UI 顯示「Pipeline 處理中 (stage 5/8 refra
 | 2026-04-30 | 初版 Draft（brainstorming session 產出） | 開發者 + Claude |
 | 2026-04-30 | 寫 Step 0 + M1 implementation plan 並執行：repo scaffold、profile YAML、5 個 Step 0 腳本、docker-compose、FastAPI hello + /health、Alembic skeleton、CI、editorial dark Web shell（Fraunces + Geist + JetBrains Mono） | 開發者 + Claude |
 | 2026-04-30 | 補 Web ProjectList + Review mockup（mock data, react-router-dom v6）；/health 從 / 移到 /health；新增決策三條（router、URL 改址、設計語言）；新增 §11 Step 0 狀態欄；版號 0.1.0 → 0.2.0 | 開發者 + Claude |
+| 2026-04-30 | M2 落地：OpenSpec change `m2-data-models-and-core-services`（5 capabilities）；9 個 SQLAlchemy ORM entity + Alembic `0001_init`；profile YAML 型別載入器；§6.3 cut planner（greedy + diversity + hero pin）；CapCut writer 骨架（SCHEMA_VERSION = step0-pending）；FastAPI 路由 `/projects` `/drafts` `/assets` `/reviews`；Web `api/client.ts` typed surface；版號 0.2.0 → 0.3.0；46 unit tests pass、ruff & mypy strict 全綠 | 開發者 + Claude |
