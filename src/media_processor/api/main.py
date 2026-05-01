@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -52,9 +53,11 @@ app.include_router(uploads.router)
 
 # Static-serve generated thumbnail JPEGs. The directory is the in-container
 # path; on the dispatch host this resolves under MEDIA_STORAGE_DIR. mkdir on
-# startup so the mount doesn't fail on a fresh deploy.
-Path(settings.thumbnails_dir).mkdir(parents=True, exist_ok=True)
-Path(settings.drafts_dir).mkdir(parents=True, exist_ok=True)
+# startup so the mount doesn't fail on a fresh deploy. Swallow OSError so
+# import still works in environments without write access (CI test runner).
+for _media_dir in (settings.thumbnails_dir, settings.drafts_dir):
+    with contextlib.suppress(OSError):
+        Path(_media_dir).mkdir(parents=True, exist_ok=True)
 app.add_middleware(
     StaticCacheMiddleware,
     prefix="/media/thumbnails",
