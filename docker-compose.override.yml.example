@@ -1,6 +1,17 @@
 # Copy to docker-compose.override.yml for local development overrides.
-# E.g., expose Postgres on 0.0.0.0 for dev tools, or attach a worker GPU service.
+# E.g., expose Postgres on 0.0.0.0 for remote dev tools, or attach a worker GPU service.
+#
+# Default ports (host:container):
+#   web      0.0.0.0:8523:80     (Tailscale-accessible frontend)
+#   api      127.0.0.1:8623:8000 (FastAPI; nginx in web also proxies /api/ internally)
+#   postgres 127.0.0.1:5433:5432 (5433 host-side avoids conflict with native Postgres on 5432)
+#   redis    127.0.0.1:6379:6379
+#
+# 8623 / 8523 sit clear of Hyper-V's TCP excluded ranges (verify on this host
+# with `netsh int ipv4 show excludedportrange protocol=tcp` — on the dispatch
+# host that range covered ~7498-8502 in contiguous 100-port blocks). 5433 is
+# used host-side because native Postgres holds 5432.
 services:
   postgres:
     ports:
-      - "5432:5432"
+      - "5433:5432"

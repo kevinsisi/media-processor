@@ -8,15 +8,20 @@ interface HealthResponse {
 }
 
 const STATUS_LABEL: Record<HealthResponse["status"], string> = {
-  ok: "operational",
-  degraded: "degraded",
+  ok: "正常運作",
+  degraded: "降級中",
+};
+
+const DEPENDENCY_LABEL: Record<"up" | "down", string> = {
+  up: "正常",
+  down: "離線",
 };
 
 function formatRelative(seconds: number): string {
-  if (seconds < 1) return "just now";
-  if (seconds < 60) return `${Math.floor(seconds)} seconds ago`;
+  if (seconds < 1) return "剛才";
+  if (seconds < 60) return `${Math.floor(seconds)} 秒前`;
   const m = Math.floor(seconds / 60);
-  return m === 1 ? "1 minute ago" : `${m} minutes ago`;
+  return `${m} 分鐘前`;
 }
 
 export default function Health() {
@@ -63,47 +68,47 @@ export default function Health() {
 
       <header className="masthead">
         <div className="kicker">
-          № 001 &nbsp;·&nbsp; PHASE α &nbsp;·&nbsp; STEP 0 + M1
+          編號 001 &nbsp;·&nbsp; 階段 α &nbsp;·&nbsp; STEP 0 + M1
         </div>
         <h1 className="title">
           Media <span className="title-em">·</span> Processor
         </h1>
         <div className="subtitle">
-          a content factory for short-form video — issue zero
+          短影音內容工廠 — 第零號
         </div>
       </header>
 
       <section className="block" style={{ animationDelay: "120ms" }}>
-        <div className="eyebrow">Status</div>
+        <div className="eyebrow">系統狀態</div>
         <div className="row">
-          <span className="row-key">system</span>
+          <span className="row-key">系統</span>
           <span className="leader" aria-hidden />
           <span
             className={`row-val row-val--accent status status--${statusKey ?? "unknown"}`}
           >
             {error
-              ? "unreachable"
+              ? "無法連線"
               : statusKey
                 ? STATUS_LABEL[statusKey as HealthResponse["status"]]
-                : "checking…"}
+                : "檢查中…"}
           </span>
         </div>
         <div className="row">
-          <span className="row-key">version</span>
+          <span className="row-key">版本</span>
           <span className="leader" aria-hidden />
           <span className="row-val mono">{health?.version ?? "—"}</span>
         </div>
       </section>
 
       <section className="block" style={{ animationDelay: "260ms" }}>
-        <div className="eyebrow">Services</div>
+        <div className="eyebrow">相依服務</div>
         <div className="row">
           <span className="row-key mono">postgres</span>
           <span className="leader" aria-hidden />
           <span
             className={`row-val mono status status--${health?.dependencies.postgres ?? "unknown"}`}
           >
-            {health?.dependencies.postgres ?? "—"}
+            {health ? DEPENDENCY_LABEL[health.dependencies.postgres] : "—"}
           </span>
         </div>
         <div className="row">
@@ -112,7 +117,7 @@ export default function Health() {
           <span
             className={`row-val mono status status--${health?.dependencies.redis ?? "unknown"}`}
           >
-            {health?.dependencies.redis ?? "—"}
+            {health ? DEPENDENCY_LABEL[health.dependencies.redis] : "—"}
           </span>
         </div>
       </section>
@@ -121,11 +126,11 @@ export default function Health() {
         <div className="hairline" aria-hidden />
         <div className="meta">
           {error ? (
-            <span className="meta-error">api error · {error}</span>
+            <span className="meta-error">API 錯誤 · {error}</span>
           ) : fetchedAgo === null ? (
-            <span>fetching…</span>
+            <span>查詢中…</span>
           ) : (
-            <span>fetched {formatRelative(fetchedAgo)}</span>
+            <span>{formatRelative(fetchedAgo)}更新</span>
           )}
         </div>
         <div className="meta meta-right">

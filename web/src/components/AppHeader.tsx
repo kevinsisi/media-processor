@@ -14,10 +14,10 @@ export default function AppHeader() {
 
         <nav className="app-header__nav">
           <NavLink to="/" end className="nav-link">
-            Issues
+            草稿清單
           </NavLink>
           <NavLink to="/health" className="nav-link nav-link--quiet">
-            Health
+            系統狀態
           </NavLink>
         </nav>
       </div>
