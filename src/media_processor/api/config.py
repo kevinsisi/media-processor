@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     # so callers can rotate across multiple Gemini API keys on quota errors.
     # Empty pool disables the /drafts/{id}/patch endpoint at request time.
     llm_api_keys: str = Field(default="")
-    llm_model: str = Field(default="gemini-2.0-flash")
+    llm_model: str = Field(default="gemini-2.5-flash")
     llm_timeout_s: float = Field(default=30.0)
 
     profiles_dir: str = Field(default="profiles")

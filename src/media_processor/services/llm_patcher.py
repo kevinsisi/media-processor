@@ -74,7 +74,7 @@ class GeminiKeyPoolConfig:
     """
 
     api_keys: tuple[str, ...]
-    model: str = "gemini-2.0-flash"
+    model: str = "gemini-2.5-flash"
     timeout_s: float = 30.0
     base_url: str = "https://generativelanguage.googleapis.com/v1beta"
 
