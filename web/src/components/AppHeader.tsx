@@ -1,4 +1,5 @@
 import { Link, NavLink } from "react-router-dom";
+import { APP_VERSION } from "../version";
 import "./AppHeader.css";
 
 export default function AppHeader() {
@@ -19,6 +20,9 @@ export default function AppHeader() {
           <NavLink to="/health" className="nav-link nav-link--quiet">
             系統狀態
           </NavLink>
+          <span className="app-header__version" title={`build version v${APP_VERSION}`}>
+            v{APP_VERSION}
+          </span>
         </nav>
       </div>
       <div className="app-header__rule" aria-hidden />

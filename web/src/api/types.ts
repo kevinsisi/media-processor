@@ -119,6 +119,117 @@ export interface AssetDetail {
   thumbnail_path: string | null;
   status: string;
   tags: AssetTagOut[];
+  analysis_steps?: Record<string, string> | null;
+}
+
+// ----- M4 — transcript / coverage / analyze types -----
+
+export interface TranscriptSegmentOut {
+  idx: number;
+  start_ms: number;
+  end_ms: number;
+  text: string;
+}
+
+export interface TranscriptSegmentIn {
+  start_ms: number;
+  end_ms: number;
+  text: string;
+}
+
+export interface TranscriptOut {
+  asset_id: number;
+  language: string;
+  model: string;
+  transcript_text: string;
+  segments: TranscriptSegmentOut[];
+  edited: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TranscriptUpsert {
+  segments: TranscriptSegmentIn[];
+}
+
+export type CoverageClassification = "scripted" | "improvised";
+
+export interface CoverageMatchOut {
+  transcript_idx: number;
+  classification: CoverageClassification;
+  confidence: number;
+  matched_script_excerpt: string;
+}
+
+export interface ScriptCoverageOut {
+  asset_id: number;
+  script_id: number;
+  model: string;
+  scripted_segment_count: number;
+  total_segment_count: number;
+  coverage_ratio_by_count: number;
+  coverage_ratio_by_duration_ms: number;
+  matches: CoverageMatchOut[];
+  computed_at: string;
+}
+
+export type AnalysisStep = "stt" | "scene" | "motion" | "coverage";
+
+export interface AnalyzeRequest {
+  steps?: AnalysisStep[] | null;
+  force?: boolean;
+}
+
+export interface AnalyzeResponse {
+  asset_id: number;
+  job_id: string;
+  status: string;
+  analysis_steps: Record<string, string>;
+}
+
+export type MotionType = "pan" | "tilt" | "zoom" | "static" | "handheld";
+
+export interface MotionSegmentOut {
+  motion_type: MotionType;
+  start_ms: number;
+  end_ms: number;
+}
+
+export interface SceneTagOut {
+  name: string;
+  confidence: number;
+}
+
+export interface TranscriptSummaryOut {
+  segment_count: number;
+  edited: boolean;
+  updated_at: string;
+}
+
+export interface CoverageSummaryOut {
+  coverage_ratio_by_count: number;
+  coverage_ratio_by_duration_ms: number;
+  scripted_segment_count: number;
+  total_segment_count: number;
+}
+
+export interface AssetAnalysisItem {
+  id: number;
+  file_path: string;
+  filename: string;
+  duration_ms: number;
+  status: string;
+  analysis_steps: Record<string, string> | null;
+  transcript_summary: TranscriptSummaryOut | null;
+  coverage_summary: CoverageSummaryOut | null;
+  scene_tags: SceneTagOut[];
+  motion_segments: MotionSegmentOut[];
+}
+
+export interface ProjectAnalysisOut {
+  project: ProjectDetail;
+  has_script: boolean;
+  assets: AssetAnalysisItem[];
 }
 
 export interface ReviewCreate {

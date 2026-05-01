@@ -7,16 +7,22 @@
 //      the backend under the same /api path via reverse proxy.
 
 import type {
+  AnalyzeRequest,
+  AnalyzeResponse,
   AssetDetail,
   DraftDetail,
   DraftSummary,
+  ProjectAnalysisOut,
   ProjectCreate,
   ProjectDetail,
   ProjectSummary,
   ReviewCreate,
   ReviewOut,
+  ScriptCoverageOut,
   ScriptOut,
   ScriptUpsert,
+  TranscriptOut,
+  TranscriptUpsert,
   UploadCompleteOut,
   UploadSessionCreate,
   UploadSessionOut,
@@ -125,6 +131,52 @@ export class ApiClient {
 
   uploadChunkUrl(sessionId: string, index: number): string {
     return `${this.baseUrl}/uploads/${sessionId}/chunks/${index}`;
+  }
+
+  // ----- M4 — analysis endpoints -----
+
+  fetchProjectAnalysis(projectId: number): Promise<ProjectAnalysisOut> {
+    return this.get<ProjectAnalysisOut>(`/projects/${projectId}/assets`);
+  }
+
+  async fetchTranscript(assetId: number): Promise<TranscriptOut | null> {
+    try {
+      return await this.get<TranscriptOut>(`/assets/${assetId}/transcript`);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) return null;
+      throw err;
+    }
+  }
+
+  putTranscript(
+    assetId: number,
+    payload: TranscriptUpsert,
+  ): Promise<TranscriptOut> {
+    return this.request<TranscriptOut>(`/assets/${assetId}/transcript`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async fetchCoverage(assetId: number): Promise<ScriptCoverageOut | null> {
+    try {
+      return await this.get<ScriptCoverageOut>(`/assets/${assetId}/coverage`);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) return null;
+      throw err;
+    }
+  }
+
+  triggerAnalyze(
+    assetId: number,
+    payload: AnalyzeRequest = {},
+  ): Promise<AnalyzeResponse> {
+    return this.request<AnalyzeResponse>(`/assets/${assetId}/analyze`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
   }
 
   private get<T>(path: string): Promise<T> {
