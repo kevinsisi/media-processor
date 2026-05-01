@@ -32,6 +32,7 @@ from media_processor.api.schemas import (
     TranscriptSummaryOut,
 )
 from media_processor.models import (
+    EDIT_STEP_VALUES,
     Asset,
     AssetTranscript,
     Draft,
@@ -200,10 +201,11 @@ async def trigger_project_edit(
     """M5 — kick off the auto-edit pipeline for ``project_id``.
 
     Synchronously creates the Draft row in ``pending`` state and enqueues
-    the render job; the worker flips it to ``processing`` when it picks
-    the row up. Returns 202 with the new draft id so the UI can start
-    polling ``GET /drafts/{id}`` immediately. While a draft is already
-    pending or processing, returns 409 unless ``force=true``.
+    the render job; the worker adopts that row by id and flips it to
+    ``processing`` when it picks it up. Returns 202 with the new draft id
+    so the UI can start polling ``GET /drafts/{id}`` immediately without
+    racing the worker. While a draft is already pending or processing,
+    returns 409 unless ``force=true``.
     """
     project = await session.get(Project, project_id)
     if project is None:
@@ -236,17 +238,15 @@ async def trigger_project_edit(
         )
         + 1
     )
+    # Mirror the worker's initial-progress shape (services.edit_orchestrator
+    # uses the same map). Inlined here so the api container doesn't have to
+    # import the orchestrator module.
     new_draft = Draft(
         project_id=project_id,
         profile_name=project.profile_name,
         version=next_version,
         status=DraftStatus.PENDING.value,
-        progress_steps_json={
-            "plan": "pending",
-            "cut": "pending",
-            "concat": "pending",
-            "subtitles": "pending",
-        },
+        progress_steps_json=dict.fromkeys(EDIT_STEP_VALUES, "pending"),
     )
     session.add(new_draft)
     await session.commit()
@@ -258,7 +258,10 @@ async def trigger_project_edit(
         else None
     )
     job_id = enqueue_project_edit(
-        project_id, force=payload.force, target_duration_ms=target_duration_ms
+        project_id,
+        draft_id=new_draft.id,
+        force=payload.force,
+        target_duration_ms=target_duration_ms,
     )
     return EditTriggerResponse(
         project_id=project_id,

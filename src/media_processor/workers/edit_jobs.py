@@ -23,10 +23,16 @@ logger = logging.getLogger(__name__)
 def render_draft(
     project_id: int,
     *,
+    draft_id: int | None = None,
     force: bool = False,
     target_duration_ms: int | None = None,
 ) -> dict[str, Any]:
     """RQ job — produce the next-version draft mp4 for ``project_id``.
+
+    The API pre-creates the Draft row and passes ``draft_id`` so the UI can
+    poll progress without racing the worker. ``draft_id=None`` is kept as a
+    fallback for older enqueues / tooling that still drives the orchestrator
+    directly; in that case the orchestrator creates the row itself.
 
     The return value is a small summary dict so RQ persists something
     debuggable. All status persistence lives in Postgres on the Draft
@@ -35,15 +41,23 @@ def render_draft(
     orchestrator picks one from the source material.
     """
     logger.info(
-        "render_draft: project_id=%d force=%s target_duration_ms=%s",
+        "render_draft: project_id=%d draft_id=%s force=%s target_duration_ms=%s",
         project_id,
+        draft_id,
         force,
         target_duration_ms,
     )
     # Local import keeps the api container free of ffmpeg / heavy deps.
     from media_processor.services.edit_orchestrator import run_render
 
-    return asyncio.run(run_render(project_id, force=force, target_duration_ms=target_duration_ms))
+    return asyncio.run(
+        run_render(
+            project_id,
+            draft_id=draft_id,
+            force=force,
+            target_duration_ms=target_duration_ms,
+        )
+    )
 
 
 def _scratch_dir() -> Path:

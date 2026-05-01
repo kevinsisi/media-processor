@@ -58,10 +58,15 @@ def enqueue_asset_analysis(
 def enqueue_project_edit(
     project_id: int,
     *,
+    draft_id: int,
     force: bool = False,
     target_duration_ms: int | None = None,
 ) -> str:
-    """Schedule ``render_draft(project_id, force=..., target_duration_ms=...)``.
+    """Schedule ``render_draft(project_id, draft_id=…, force=…, target_duration_ms=…)``.
+
+    The API endpoint creates the Draft row up-front (so the response can carry
+    a real draft id and the UI can start polling immediately) and hands the id
+    to the worker — the worker no longer creates its own row.
 
     Returns the RQ job id. Like :func:`enqueue_asset_analysis`, the job target
     is referenced by string so the api container never imports the worker
@@ -70,7 +75,7 @@ def enqueue_project_edit(
     the orchestrator pick a length from the source material.
     """
     queue = Queue(EDITING_QUEUE, connection=_redis(), default_timeout=EDIT_JOB_TIMEOUT_SECONDS)
-    job_kwargs: dict[str, Any] = {"force": force}
+    job_kwargs: dict[str, Any] = {"draft_id": draft_id, "force": force}
     if target_duration_ms is not None:
         job_kwargs["target_duration_ms"] = target_duration_ms
     job = queue.enqueue(
@@ -79,8 +84,9 @@ def enqueue_project_edit(
         kwargs=job_kwargs,
     )
     logger.info(
-        "enqueued render_draft(project_id=%d, force=%s, target_duration_ms=%s) as job %s",
+        "enqueued render_draft(project_id=%d, draft_id=%d, force=%s, target_duration_ms=%s) as job %s",
         project_id,
+        draft_id,
         force,
         target_duration_ms,
         job.id,

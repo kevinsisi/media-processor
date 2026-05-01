@@ -23,6 +23,10 @@ from media_processor.api.routers import projects as projects_router
 from media_processor.models import Asset, Base, Draft, Project
 
 
+# (project_id, draft_id, force, target_duration_ms)
+EnqueueCall = tuple[int, int, bool, int | None]
+
+
 def _make_engine_and_session() -> tuple[Any, async_sessionmaker[AsyncSession]]:
     engine = create_async_engine(
         "sqlite+aiosqlite:///:memory:",
@@ -77,16 +81,17 @@ async def _seed_with_processing_draft(
 @pytest.fixture()
 def fake_enqueue(
     monkeypatch: pytest.MonkeyPatch,
-) -> list[tuple[int, bool, int | None]]:
-    calls: list[tuple[int, bool, int | None]] = []
+) -> list[EnqueueCall]:
+    calls: list[EnqueueCall] = []
 
     def _record(
         project_id: int,
         *,
+        draft_id: int,
         force: bool = False,
         target_duration_ms: int | None = None,
     ) -> str:
-        calls.append((project_id, force, target_duration_ms))
+        calls.append((project_id, draft_id, force, target_duration_ms))
         return f"job-{project_id}"
 
     monkeypatch.setattr(projects_router, "enqueue_project_edit", _record)
@@ -94,7 +99,7 @@ def fake_enqueue(
 
 
 @pytest.fixture()
-def app(fake_enqueue: list[tuple[int, bool, int | None]]) -> Iterator[FastAPI]:
+def app(fake_enqueue: list[EnqueueCall]) -> Iterator[FastAPI]:
     engine, session_maker = _make_engine_and_session()
 
     async def init() -> None:
@@ -117,7 +122,7 @@ def app(fake_enqueue: list[tuple[int, bool, int | None]]) -> Iterator[FastAPI]:
 
 
 def test_edit_trigger_enqueues_and_returns_job_id(
-    app: FastAPI, fake_enqueue: list[tuple[int, bool, int | None]]
+    app: FastAPI, fake_enqueue: list[EnqueueCall]
 ) -> None:
     client = TestClient(app)
     resp = client.post("/projects/1/edit", json={})
@@ -131,21 +136,22 @@ def test_edit_trigger_enqueues_and_returns_job_id(
     # we returned before this fix), and the row should be in `pending`
     # with all four progress steps initialised.
     assert isinstance(body["draft_id"], int) and body["draft_id"] > 0
-    assert fake_enqueue == [(1, False, None)]
+    assert fake_enqueue == [(1, body["draft_id"], False, None)]
 
 
 def test_edit_trigger_passes_target_duration_seconds(
-    app: FastAPI, fake_enqueue: list[tuple[int, bool, int | None]]
+    app: FastAPI, fake_enqueue: list[EnqueueCall]
 ) -> None:
     """User-supplied target_duration_seconds is converted to ms and enqueued."""
     client = TestClient(app)
     resp = client.post("/projects/1/edit", json={"target_duration_seconds": 90})
     assert resp.status_code == 202, resp.text
-    assert fake_enqueue == [(1, False, 90_000)]
+    body = resp.json()
+    assert fake_enqueue == [(1, body["draft_id"], False, 90_000)]
 
 
 def test_edit_trigger_rejects_out_of_range_duration(
-    app: FastAPI, fake_enqueue: list[tuple[int, bool, int | None]]
+    app: FastAPI, fake_enqueue: list[EnqueueCall]
 ) -> None:
     """Pydantic clamps the field — values outside [10, 300] should 422."""
     client = TestClient(app)
@@ -157,7 +163,7 @@ def test_edit_trigger_rejects_out_of_range_duration(
 
 
 def test_edit_trigger_persists_pending_draft(
-    app: FastAPI, fake_enqueue: list[tuple[int, bool, int | None]]
+    app: FastAPI, fake_enqueue: list[EnqueueCall]
 ) -> None:
     """The POST creates a pending Draft row before returning 202 so the
     UI's immediate ``GET /projects/{id}/drafts`` finds it (no race with
@@ -183,7 +189,7 @@ def test_edit_trigger_persists_pending_draft(
 
 
 def test_edit_trigger_409_when_pending_draft_exists(
-    fake_enqueue: list[tuple[int, bool, int | None]],
+    fake_enqueue: list[EnqueueCall],
 ) -> None:
     """A second POST while the first is still ``pending`` (worker hasn't
     started yet) must also return 409 — this is the user-visible bug we
@@ -237,7 +243,7 @@ def test_edit_trigger_409_when_pending_draft_exists(
 
 
 def test_edit_trigger_404_on_missing_project(
-    app: FastAPI, fake_enqueue: list[tuple[int, bool, int | None]]
+    app: FastAPI, fake_enqueue: list[EnqueueCall]
 ) -> None:
     client = TestClient(app)
     resp = client.post("/projects/999/edit", json={})
@@ -246,7 +252,7 @@ def test_edit_trigger_404_on_missing_project(
 
 
 def test_edit_trigger_409_when_draft_processing(
-    fake_enqueue: list[tuple[int, bool, int | None]],
+    fake_enqueue: list[EnqueueCall],
 ) -> None:
     """A second POST while a draft is `processing` returns 409 unless force=true."""
     engine, session_maker = _make_engine_and_session()
@@ -267,10 +273,12 @@ def test_edit_trigger_409_when_draft_processing(
         client = TestClient(production_app)
         resp = client.post("/projects/1/edit", json={})
         assert resp.status_code == 409
-        # force=true bypasses the conflict.
+        # force=true bypasses the conflict and creates a fresh draft row.
         resp_force = client.post("/projects/1/edit", json={"force": True})
         assert resp_force.status_code == 202
-        assert fake_enqueue == [(1, True, None)]
+        body = resp_force.json()
+        assert body["draft_id"] > 1  # version 1 already exists from the seed
+        assert fake_enqueue == [(1, body["draft_id"], True, None)]
     finally:
         production_app.dependency_overrides.clear()
         asyncio.run(engine.dispose())

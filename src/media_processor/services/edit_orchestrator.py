@@ -161,6 +161,33 @@ async def _claim_pending_draft(
         )
 
 
+async def _adopt_draft_row(project: Project, draft_id: int) -> _DraftHandle:
+    """Look up a draft created by the API endpoint and re-flag it as in
+    progress. The worker takes over from here, so anything stale (a leftover
+    progress map from a force-retry) gets reset."""
+    async with async_session_maker() as session:
+        draft = await session.get(Draft, draft_id)
+        if draft is None:
+            raise RuntimeError(
+                f"draft {draft_id} not found (was it deleted between enqueue and dequeue?)"
+            )
+        if draft.project_id != project.id:
+            raise RuntimeError(
+                f"draft {draft_id} belongs to project {draft.project_id}, not {project.id}"
+            )
+        draft.status = DraftStatus.PROCESSING.value
+        draft.progress_steps_json = _initial_progress()
+        draft.prompt_feedback = None
+        await session.commit()
+        await session.refresh(draft)
+        return _DraftHandle(
+            draft_id=draft.id,
+            profile_name=project.profile_name,
+            target_aspect=project.target_aspect_ratio,
+            version=draft.version,
+        )
+
+
 async def _set_stage_state(draft_id: int, stage: str, value: str) -> None:
     async with async_session_maker() as session:
         draft = await session.get(Draft, draft_id)
@@ -320,10 +347,16 @@ def _output_paths(project_id: int, version: int) -> tuple[Path, Path]:
 async def run_render(
     project_id: int,
     *,
+    draft_id: int | None = None,
     force: bool = False,
     target_duration_ms: int | None = None,
 ) -> dict[str, Any]:
     """Run the full M5 pipeline for ``project_id`` and return a summary.
+
+    When ``draft_id`` is given the API endpoint already created the row and
+    the worker just adopts it (the common path now). When ``draft_id`` is
+    ``None`` (legacy / direct invocation) the orchestrator reserves a fresh
+    row so existing tooling keeps working.
 
     The return value is for RQ's job-result store; the UI polls
     ``GET /drafts/{id}`` and the orchestrator keeps that row in sync.
@@ -348,7 +381,12 @@ async def run_render(
             )
         ).one()
 
-    handle = await _claim_pending_draft(project)
+    if draft_id is None:
+        # Legacy / direct invocation: no API-side row exists, so claim
+        # the latest pending row or create one defensively.
+        handle = await _claim_pending_draft(project)
+    else:
+        handle = await _adopt_draft_row(project, draft_id)
     summary: dict[str, Any] = {
         "draft_id": handle.draft_id,
         "version": handle.version,

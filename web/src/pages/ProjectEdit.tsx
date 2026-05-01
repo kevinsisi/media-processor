@@ -487,16 +487,19 @@ export default function ProjectEdit() {
         Math.min(DURATION_MAX_S, Math.round(durationSec || DEFAULT_DURATION_S)),
       );
       try {
-        await apiClient.triggerProjectEdit(validProjectId, {
+        const resp = await apiClient.triggerProjectEdit(validProjectId, {
           force,
           target_duration_seconds: target,
         });
-        // Refresh the list and jump to the freshly-created version so the
-        // user sees the new render's progress, not the one they just left.
-        // Old versions stay in the list — clicking a chip switches back.
-        const list = await refreshDrafts();
-        setSelectedDraftId(list[0]?.id ?? null);
-        polling.refresh();
+        // The API now creates the Draft row synchronously, so resp.draft_id
+        // is always a real id. Switch the selected version to it immediately
+        // — this kicks useDraftPolling into fetching the new row before the
+        // list refresh comes back, so the UI never falls back to 開始剪輯.
+        setSelectedDraftId(resp.draft_id);
+        // Refresh the chips list in the background so the new version
+        // shows up. Old versions stay in the list — clicking a chip
+        // switches back.
+        void refreshDrafts().catch(() => {});
       } catch (err) {
         if (err instanceof ApiError && err.status === 409) {
           setTriggerError(
@@ -511,19 +514,23 @@ export default function ProjectEdit() {
         setTriggering(false);
       }
     },
-    [validProjectId, polling, durationSec, refreshDrafts],
+    [validProjectId, durationSec, refreshDrafts],
   );
 
   const status = draft?.status ?? null;
-  const showProcessing = status === "pending" || status === "processing";
-  const showReady = status === "ready_for_review";
-  const showFailed = status === "failed";
-  // Queued: POST has returned 202 (or is in flight) but the first draft poll
-  // hasn't resolved yet — without this gap state the page snaps back to the
-  // "開始剪輯" CTA for a few seconds and looks like the click did nothing.
-  const showQueued =
-    !draft && !seedLoading && (triggering || selectedDraftId !== null);
-  const showInitial = !seedLoading && !triggering && drafts.length === 0;
+  // True both for the first-ever trigger (draft is null) and for a force-retry
+  // (draft still holds the previous version's data until the next poll lands).
+  // Used to suppress stale Failed/Ready cards and to keep 開始剪輯 from
+  // reappearing in the brief gap between POST and the first /drafts/{id} fetch.
+  const awaitingFirstFetch =
+    selectedDraftId !== null && draft?.id !== selectedDraftId;
+  const showProcessing =
+    (status === "pending" || status === "processing") && !awaitingFirstFetch;
+  const showReady = status === "ready_for_review" && !awaitingFirstFetch;
+  const showFailed = status === "failed" && !awaitingFirstFetch;
+  const showQueued = !draft && !seedLoading && (triggering || awaitingFirstFetch);
+  const showInitial =
+    !seedLoading && !triggering && !awaitingFirstFetch && drafts.length === 0;
 
   return (
     <main className="page project-edit">
@@ -538,7 +545,9 @@ export default function ProjectEdit() {
             ? labelForDraftStatus(draft.status)
             : seedLoading
               ? "載入中…"
-              : "尚未產生剪輯"}
+              : triggering || awaitingFirstFetch
+                ? "排隊中…"
+                : "尚未產生剪輯"}
           {polling.isPolling && draft && (
             <span className="polling-indicator" aria-live="polite">
               {" · 更新中"}
