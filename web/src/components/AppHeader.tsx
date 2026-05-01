@@ -14,7 +14,7 @@ export default function AppHeader() {
 
         <nav className="app-header__nav">
           <NavLink to="/" end className="nav-link">
-            草稿清單
+            專案
           </NavLink>
           <NavLink to="/health" className="nav-link nav-link--quiet">
             系統狀態

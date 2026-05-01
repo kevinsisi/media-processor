@@ -15,9 +15,9 @@ function formatCreatedAt(iso: string): string {
 }
 
 const STATUS_LABEL: Record<string, string> = {
-  drafted: "草稿就緒",
+  drafted: "剪輯就緒",
   analyzing: "分析中",
-  approved: "已核准",
+  approved: "成品就緒",
   rejected: "已退回",
   pending: "待處理",
 };
@@ -29,11 +29,11 @@ function StatusCell({ project }: { project: ProjectSummary }) {
         <div className="status-line">
           <span className="dot dot--gold" />
           <span className="status-text">
-            草稿 v{project.latest_draft_version} 已就緒
+            剪輯 v{project.latest_draft_version} 已就緒
           </span>
         </div>
         <Link to={`/projects/${project.id}/review`} className="cta cta--primary">
-          審核 →
+          檢視 →
         </Link>
       </div>
     );
@@ -58,7 +58,7 @@ function StatusCell({ project }: { project: ProjectSummary }) {
       <div className="status-cell status-cell--approved">
         <div className="status-line">
           <span className="dot dot--up" />
-          <span className="status-text">已核准</span>
+          <span className="status-text">成品就緒</span>
         </div>
         <Link to={`/projects/${project.id}/review`} className="cta cta--quiet">
           開啟 →
@@ -90,11 +90,11 @@ export default function ProjectList() {
           工作清單 &nbsp;·&nbsp; {loading ? "…" : `${list.length} 件`}
         </div>
         <h1 className="hero__title">
-          待<em>審核</em>的草稿。
+          待<em>檢視</em>的剪輯。
         </h1>
         <p className="hero__lede">
           每一件代表一個專案 ── AI 已將原始素材剪成短片。
-          核准任一草稿，即會送入你的剪輯軟體。
+          定剪任一剪輯，即會送入你的剪輯軟體。
         </p>
         <div className="hero__actions">
           <Link to="/projects/new" className="cta cta--primary cta--new">

@@ -130,7 +130,7 @@ function ReviewBody({ project, draft }: ReviewBodyProps) {
     <>
       <div className="bread">
         <Link to="/" className="bread__back">
-          ← 草稿清單
+          ← 專案
         </Link>
         <div className="bread__title">
           <span className="bread__num">編號 {String(project.id).padStart(3, "0")}</span>
@@ -139,7 +139,7 @@ function ReviewBody({ project, draft }: ReviewBodyProps) {
           <span className="bread__sep">·</span>
           <span className="bread__name">{project.name}</span>
           <span className="bread__sep">·</span>
-          <span className="bread__draft">草稿 v{draft.version}</span>
+          <span className="bread__draft">剪輯 v{draft.version}</span>
         </div>
         <div className="bread__score">
           <span className="mono">AI 信心分數</span>
@@ -173,7 +173,7 @@ function ReviewBody({ project, draft }: ReviewBodyProps) {
         </figure>
 
         <aside className="intel">
-          <div className="intel__eyebrow">草稿</div>
+          <div className="intel__eyebrow">剪輯</div>
 
           <div className="intel__score">
             <div className="intel__score-fig">{aiScore.toFixed(1)}</div>
@@ -184,7 +184,7 @@ function ReviewBody({ project, draft }: ReviewBodyProps) {
           <ul className="intel__list">
             <li className="intel__row">
               <span className="pill pill--quiet">v</span>
-              <span className="intel__row-label">草稿版本</span>
+              <span className="intel__row-label">剪輯版本</span>
               <span className="intel__row-count mono">{draft.version}</span>
             </li>
             <li className="intel__row">
@@ -277,7 +277,7 @@ function ReviewBody({ project, draft }: ReviewBodyProps) {
         >
           <span className="action__glyph">✓</span>
           <span className="action__label">
-            {pendingAction === "approve" ? "核准中…" : "核准"}
+            {pendingAction === "approve" ? "定剪中…" : "定剪"}
           </span>
           <span className="action__hint mono">→ 自動同步到 CapCut</span>
         </button>
@@ -289,8 +289,8 @@ function ReviewBody({ project, draft }: ReviewBodyProps) {
           <span className="action__glyph">↺</span>
           <span className="action__label">
             {pendingAction === "repatch" && !promptOpen
-              ? "重新生成中…"
-              : "重新生成"}
+              ? "重新剪輯中…"
+              : "重新剪輯"}
           </span>
           <span className="action__hint mono">同一風格檔，重新挑選片段</span>
         </button>
@@ -323,7 +323,7 @@ function ReviewBody({ project, draft }: ReviewBodyProps) {
           <span className="action__label">
             {pendingAction === "reject" ? "退回中…" : "退回"}
           </span>
-          <span className="action__hint mono">捨棄草稿 v{draft.version}</span>
+          <span className="action__hint mono">退回 v{draft.version}</span>
         </button>
       </div>
 
@@ -333,11 +333,11 @@ function ReviewBody({ project, draft }: ReviewBodyProps) {
             {review.error
               ? `× API 錯誤 · ${review.error.message}`
               : review.result?.action === "approve"
-                ? "✓ 已核准 · 同步到 CapCut 草稿資料夾"
+                ? "✓ 已定剪 · 同步到 CapCut 資料夾"
                 : review.result?.action === "repatch"
-                  ? "↺ 已排入重新生成佇列"
+                  ? "↺ 已排入重新剪輯佇列"
                   : review.result?.action === "reject"
-                    ? "× 草稿已退回"
+                    ? "× 已退回"
                     : "↓ 已記錄下載 · 請手動將 zip 移到 CapCut 資料夾"}
           </span>
           <button className="toast__close" onClick={review.reset}>
@@ -384,7 +384,7 @@ export default function Review() {
       <main className="page review">
         <div className="bread">
           <Link to="/" className="bread__back">
-            ← 草稿清單
+            ← 專案
           </Link>
         </div>
         <p className="mono" role="alert">
@@ -399,7 +399,7 @@ export default function Review() {
       <main className="page review">
         <div className="bread">
           <Link to="/" className="bread__back">
-            ← 草稿清單
+            ← 專案
           </Link>
         </div>
         <p className="mono">載入中…</p>
@@ -421,13 +421,13 @@ export default function Review() {
       <main className="page review">
         <div className="bread">
           <Link to="/" className="bread__back">
-            ← 草稿清單
+            ← 專案
           </Link>
           <div className="bread__title">
             <span className="bread__name">{projectQ.data.name}</span>
           </div>
         </div>
-        <p className="mono">此專案尚無草稿。</p>
+        <p className="mono">此專案尚未產出剪輯。</p>
       </main>
     );
   }
