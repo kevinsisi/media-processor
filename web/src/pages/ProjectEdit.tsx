@@ -211,7 +211,12 @@ export default function ProjectEdit() {
   const showProcessing = status === "pending" || status === "processing";
   const showReady = status === "ready_for_review";
   const showFailed = status === "failed";
-  const showInitial = !draft && !seedLoading;
+  // Queued: POST has returned 202 (or is in flight) but the first draft poll
+  // hasn't resolved yet — without this gap state the page snaps back to the
+  // "開始剪輯" CTA for a few seconds and looks like the click did nothing.
+  const showQueued =
+    !draft && !seedLoading && (triggering || latestDraft !== null);
+  const showInitial = !seedLoading && !triggering && latestDraft === null;
 
   return (
     <main className="page project-edit">
@@ -268,6 +273,16 @@ export default function ProjectEdit() {
               {triggering ? "排隊中…" : "開始剪輯"}
             </button>
           </div>
+        </section>
+      )}
+
+      {showQueued && (
+        <section className="edit-card" aria-live="polite">
+          <h2 className="edit-card__title">排隊中…</h2>
+          <p className="edit-card__body">
+            已建立剪輯任務，正在等候 worker 取件。畫面會在 worker 開始處理後自動更新。
+          </p>
+          <ProgressTracker steps={null} />
         </section>
       )}
 
