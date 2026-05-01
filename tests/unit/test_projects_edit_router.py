@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -118,7 +119,92 @@ def test_edit_trigger_enqueues_and_returns_job_id(
     assert body["project_id"] == 1
     assert body["job_id"] == "job-1"
     assert body["status"] == "enqueued"
+    # The API now creates the Draft row synchronously so the UI can pick
+    # it up immediately. draft_id must be a real id (not the 0 placeholder
+    # we returned before this fix), and the row should be in `pending`
+    # with all four progress steps initialised.
+    assert isinstance(body["draft_id"], int) and body["draft_id"] > 0
     assert fake_enqueue == [(1, False)]
+
+
+def test_edit_trigger_persists_pending_draft(
+    app: FastAPI, fake_enqueue: list[tuple[int, bool]]
+) -> None:
+    """The POST creates a pending Draft row before returning 202 so the
+    UI's immediate ``GET /projects/{id}/drafts`` finds it (no race with
+    the worker creating the row asynchronously)."""
+    client = TestClient(app)
+    resp = client.post("/projects/1/edit", json={})
+    assert resp.status_code == 202, resp.text
+    new_draft_id = resp.json()["draft_id"]
+
+    drafts_resp = client.get("/projects/1/drafts")
+    assert drafts_resp.status_code == 200
+    drafts = drafts_resp.json()
+    assert len(drafts) == 1
+    assert drafts[0]["id"] == new_draft_id
+    assert drafts[0]["status"] == "pending"
+    assert drafts[0]["version"] == 1
+    assert drafts[0]["progress_steps"] == {
+        "plan": "pending",
+        "cut": "pending",
+        "concat": "pending",
+        "subtitles": "pending",
+    }
+
+
+def test_edit_trigger_409_when_pending_draft_exists(
+    fake_enqueue: list[tuple[int, bool]],
+) -> None:
+    """A second POST while the first is still ``pending`` (worker hasn't
+    started yet) must also return 409 — this is the user-visible bug we
+    just fixed: without this, the user clicks twice in the gap between
+    enqueue and worker pickup."""
+    engine, session_maker = _make_engine_and_session()
+
+    async def init() -> None:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        await _seed(session_maker)
+        async with session_maker() as s:
+            s.add(
+                Draft(
+                    project_id=1,
+                    profile_name="universal",
+                    version=1,
+                    status="pending",
+                    progress_steps_json={
+                        "plan": "pending",
+                        "cut": "pending",
+                        "concat": "pending",
+                        "subtitles": "pending",
+                    },
+                )
+            )
+            await s.commit()
+
+    asyncio.run(init())
+
+    async def override_session() -> AsyncIterator[AsyncSession]:
+        async with session_maker() as s:
+            yield s
+
+    production_app.dependency_overrides[get_session] = override_session
+    try:
+        client = TestClient(production_app)
+        resp = client.post("/projects/1/edit", json={})
+        assert resp.status_code == 409
+        assert fake_enqueue == []
+
+        async def _count_drafts() -> int:
+            async with session_maker() as s:
+                rows = (await s.execute(select(Draft))).scalars().all()
+                return len(rows)
+
+        assert asyncio.run(_count_drafts()) == 1
+    finally:
+        production_app.dependency_overrides.clear()
+        asyncio.run(engine.dispose())
 
 
 def test_edit_trigger_404_on_missing_project(
