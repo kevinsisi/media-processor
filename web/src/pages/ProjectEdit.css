@@ -1,0 +1,322 @@
+/* M5 — Project edit page. Mobile-first, 繁體中文 UI. */
+
+.project-edit {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: var(--space-7) var(--space-7) var(--space-9);
+}
+
+.edit-hero {
+  padding: var(--space-7) 0 var(--space-6);
+  max-width: 720px;
+}
+
+.edit-hero__kicker {
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
+  letter-spacing: 0.22em;
+  color: var(--gold);
+  margin-bottom: var(--space-4);
+  opacity: 0.86;
+}
+
+.edit-hero__title {
+  font-family: var(--font-display);
+  font-weight: 320;
+  font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+}
+
+.edit-hero__version {
+  color: var(--text-secondary);
+  font-size: 0.6em;
+  letter-spacing: 0.1em;
+  margin-left: var(--space-3);
+}
+
+.edit-hero__lede {
+  margin-top: var(--space-3);
+  font-size: var(--t-sm);
+  color: var(--text-secondary);
+  letter-spacing: 0.08em;
+}
+
+.edit-hero__actions {
+  margin-top: var(--space-4);
+  display: flex;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.edit-error {
+  margin-top: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-left: 3px solid var(--status-down, #b34b3a);
+  color: var(--status-down, #b34b3a);
+  font-size: var(--t-sm);
+}
+
+.edit-hint {
+  margin-top: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-left: 3px solid var(--gold);
+  background: var(--ink-elevated);
+  color: var(--text-secondary);
+  font-size: var(--t-sm);
+}
+
+/* ---- Card shell shared by initial / processing / failed states ---- */
+
+.edit-card {
+  margin-top: var(--space-5);
+  padding: var(--space-5) var(--space-5);
+  background: var(--ink-elevated);
+  border: 1px solid var(--ink-border, rgba(255, 255, 255, 0.08));
+  border-radius: 12px;
+}
+
+.edit-card__title {
+  font-family: var(--font-display);
+  font-weight: 320;
+  font-size: var(--t-lg);
+  margin: 0 0 var(--space-3);
+  color: var(--text-primary);
+}
+
+.edit-card__body {
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin: 0 0 var(--space-4);
+}
+
+.edit-card__hint {
+  margin-top: var(--space-3);
+  color: var(--text-secondary);
+  font-size: var(--t-xs);
+  letter-spacing: 0.08em;
+}
+
+.edit-card__actions {
+  display: flex;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.edit-card__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-4);
+}
+
+.edit-card--failed {
+  border-color: var(--status-down, #b34b3a);
+}
+
+.edit-card__error {
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  font-size: var(--t-xs);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-x: auto;
+}
+
+/* ---- Stage progress chips ---- */
+
+.edit-progress {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: var(--space-3);
+}
+
+.edit-progress__step {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: var(--space-3);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+}
+
+.edit-progress__step-name {
+  font-family: var(--font-display);
+  font-size: var(--t-md);
+  color: var(--text-primary);
+}
+
+.edit-progress__step-state {
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
+  letter-spacing: 0.1em;
+  color: var(--text-secondary);
+}
+
+.edit-progress__step--running {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 1px var(--gold) inset;
+}
+
+.edit-progress__step--running .edit-progress__step-state {
+  color: var(--gold);
+}
+
+.edit-progress__step--done {
+  border-color: rgba(98, 184, 122, 0.6);
+}
+
+.edit-progress__step--done .edit-progress__step-state {
+  color: rgb(98, 184, 122);
+}
+
+.edit-progress__step--failed {
+  border-color: var(--status-down, #b34b3a);
+}
+
+.edit-progress__step--failed .edit-progress__step-state {
+  color: var(--status-down, #b34b3a);
+}
+
+/* ---- Video preview ---- */
+
+.edit-preview {
+  margin-top: var(--space-5);
+  display: flex;
+  justify-content: center;
+}
+
+.edit-preview__video {
+  width: 100%;
+  max-width: 540px;
+  background: #000;
+  border-radius: 12px;
+  outline: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.edit-preview__placeholder {
+  width: 100%;
+  max-width: 540px;
+  aspect-ratio: 9 / 16;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--ink-elevated);
+  color: var(--text-secondary);
+  border-radius: 12px;
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+}
+
+/* ---- Timeline strip ---- */
+
+.timeline-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--space-3);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.timeline-strip--empty {
+  text-align: center;
+  color: var(--text-secondary);
+  padding: var(--space-5) 0;
+}
+
+.timeline-cell {
+  list-style: none;
+}
+
+.timeline-cell__btn {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: var(--space-3);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.timeline-cell__btn:hover,
+.timeline-cell__btn:focus-visible {
+  border-color: var(--gold);
+  background: rgba(255, 215, 130, 0.04);
+  outline: none;
+}
+
+.timeline-cell__order {
+  font-size: var(--t-xs);
+  letter-spacing: 0.18em;
+  color: var(--text-secondary);
+}
+
+.timeline-cell__range {
+  font-size: var(--t-sm);
+  color: var(--text-primary);
+}
+
+.timeline-cell__chip {
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
+  letter-spacing: 0.16em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.timeline-cell--scripted .timeline-cell__chip {
+  border-color: var(--gold);
+  color: var(--gold);
+}
+
+.timeline-cell--improv .timeline-cell__chip {
+  border-color: rgba(255, 255, 255, 0.18);
+  color: var(--text-secondary);
+}
+
+.timeline-cell__reason {
+  font-size: var(--t-xs);
+  color: var(--text-secondary);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.timeline-cell__total {
+  font-size: var(--t-xs);
+  color: var(--text-secondary);
+  letter-spacing: 0.12em;
+}
+
+@media (max-width: 540px) {
+  .project-edit {
+    padding: var(--space-5) var(--space-4) var(--space-7);
+  }
+  .edit-card {
+    padding: var(--space-4);
+  }
+  .edit-progress {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .timeline-strip {
+    grid-template-columns: 1fr;
+  }
+}

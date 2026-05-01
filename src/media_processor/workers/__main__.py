@@ -14,7 +14,7 @@ from redis import Redis
 from rq import Queue, Worker
 
 from media_processor.api.config import settings
-from media_processor.workers import ANALYSIS_QUEUE
+from media_processor.workers import ANALYSIS_QUEUE, EDITING_QUEUE
 
 logging.basicConfig(
     level=logging.INFO,
@@ -25,9 +25,20 @@ logger = logging.getLogger("media_processor.workers")
 
 def main() -> int:
     redis_conn = Redis.from_url(settings.redis_url)
-    queue = Queue(ANALYSIS_QUEUE, connection=redis_conn)
-    worker = Worker([queue], connection=redis_conn, name=f"analysis-worker-{settings.api_host}")
-    logger.info("starting RQ worker on queue %r (redis=%s)", ANALYSIS_QUEUE, settings.redis_url)
+    queues = [
+        Queue(ANALYSIS_QUEUE, connection=redis_conn),
+        Queue(EDITING_QUEUE, connection=redis_conn),
+    ]
+    worker = Worker(
+        queues,
+        connection=redis_conn,
+        name=f"media-worker-{settings.api_host}",
+    )
+    logger.info(
+        "starting RQ worker on queues %s (redis=%s)",
+        [q.name for q in queues],
+        settings.redis_url,
+    )
     worker.work(with_scheduler=False, logging_level="INFO")
     return 0
 

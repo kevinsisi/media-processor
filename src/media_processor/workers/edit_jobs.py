@@ -1,0 +1,44 @@
+"""RQ job entry point for M5 auto-edit (`render_draft`).
+
+The job orchestrates: Gemini cut planning → Draft + DraftSegment writes →
+ffmpeg cut/concat → SRT build + subtitle burn-in. Each stage updates
+``Draft.progress_steps_json`` so the polling UI can show progress in
+real time.
+
+Mirrors the M4 ``analysis_jobs`` pattern: RQ runs sync, the orchestrator
+is async, so this module owns the asyncio.run() boundary and keeps RQ
+unaware of the SQLAlchemy session.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from pathlib import Path
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+
+def render_draft(project_id: int, *, force: bool = False) -> dict[str, Any]:
+    """RQ job — produce the next-version draft mp4 for ``project_id``.
+
+    The return value is a small summary dict so RQ persists something
+    debuggable. All status persistence lives in Postgres on the Draft
+    row; this dict is for ops, not the UI.
+    """
+    logger.info("render_draft: project_id=%d force=%s", project_id, force)
+    # Local import keeps the api container free of ffmpeg / heavy deps.
+    from media_processor.services.edit_orchestrator import run_render
+
+    return asyncio.run(run_render(project_id, force=force))
+
+
+def _scratch_dir() -> Path:
+    """Test seam — overridden in unit tests to point at a temp dir."""
+    from media_processor.api.config import settings
+
+    return Path(settings.analysis_dir) / "edits"
+
+
+__all__ = ["render_draft"]

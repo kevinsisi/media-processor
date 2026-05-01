@@ -91,6 +91,30 @@ class UploadCompleteOut(BaseModel):
     script: ScriptOut | None = None
 
 
+class CutPlanSegmentOut(BaseModel):
+    """One segment from the stored Gemini cut plan."""
+
+    order: int
+    asset_id: int
+    asset_start_ms: int
+    asset_end_ms: int
+    source_kind: Literal["scripted", "improv"]
+    reason: str
+
+
+class CutPlanOut(BaseModel):
+    """Mirror of edit_planner.serialise_plan output."""
+
+    schema_version: str
+    target_duration_ms: int
+    target_aspect_ratio: str
+    profile_name: str
+    notes: str
+    used_fallback: bool
+    fallback_reason: str | None
+    segments: list[CutPlanSegmentOut]
+
+
 class DraftSummary(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -103,20 +127,45 @@ class DraftSummary(BaseModel):
     mp4_preview_path: str | None
     ai_score: float | None
     created_at: datetime
+    progress_steps: dict[str, str] | None = None
+    mp4_url: str | None = None
+    subtitle_url: str | None = None
 
 
 class DraftSegmentOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     order: int
-    asset_segment_id: int
+    asset_segment_id: int | None = None
+    asset_id: int | None = None
+    asset_start_ms: int | None = None
+    asset_end_ms: int | None = None
     on_timeline_start_ms: int
     on_timeline_end_ms: int
     transition: str | None
+    source_kind: str | None = None
+    plan_reason: str | None = None
 
 
 class DraftDetail(DraftSummary):
     segments: list[DraftSegmentOut]
+    cut_plan: CutPlanOut | None = None
+    prompt_feedback: str | None = None
+
+
+class EditTriggerRequest(BaseModel):
+    """Body for POST /projects/{id}/edit — both fields optional."""
+
+    force: bool = False
+
+
+class EditTriggerResponse(BaseModel):
+    """Returned by POST /projects/{id}/edit (202 Accepted)."""
+
+    project_id: int
+    draft_id: int
+    job_id: str
+    status: str
 
 
 class AssetTagOut(BaseModel):
@@ -273,6 +322,9 @@ class ProjectAnalysisOut(BaseModel):
     project: ProjectDetail
     has_script: bool
     assets: list[AssetAnalysisItem]
+    # M5 — surface the latest draft's render state so the analysis page
+    # can show 開始剪輯 / 預覽剪輯 without an extra round-trip.
+    latest_draft: DraftSummary | None = None
 
 
 class ReviewCreate(BaseModel):

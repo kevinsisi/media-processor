@@ -14,10 +14,13 @@ from sqlalchemy.orm import selectinload
 from media_processor.api.config import settings
 from media_processor.api.deps import get_session
 from media_processor.api.routers.assets import thumbnail_urls_for_asset
+from media_processor.api.routers.drafts import _draft_url, _expected_draft_path
 from media_processor.api.schemas import (
     AssetAnalysisItem,
     CoverageSummaryOut,
     DraftSummary,
+    EditTriggerRequest,
+    EditTriggerResponse,
     MotionSegmentOut,
     ProjectAnalysisOut,
     ProjectCreate,
@@ -32,12 +35,42 @@ from media_processor.models import (
     Asset,
     AssetTranscript,
     Draft,
+    DraftStatus,
     Project,
     Script,
     ScriptCoverage,
 )
+from media_processor.services.queue import enqueue_project_edit
 
 router = APIRouter(prefix="/projects", tags=["projects"])
+
+
+def _draft_summary_with_urls(draft: Draft) -> DraftSummary:
+    """Build a DraftSummary from a Draft row, populating mp4_url / subtitle_url
+    when the renderer's expected files exist on disk (or the row already
+    points at one)."""
+
+    def _url_for(suffix: str, stored: str | None) -> str | None:
+        if stored:
+            return _draft_url(draft.project_id, draft.version, suffix)
+        if _expected_draft_path(draft.project_id, draft.version, suffix).is_file():
+            return _draft_url(draft.project_id, draft.version, suffix)
+        return None
+
+    return DraftSummary(
+        id=draft.id,
+        project_id=draft.project_id,
+        profile_name=draft.profile_name,
+        version=draft.version,
+        status=draft.status,
+        output_zip_path=draft.output_zip_path,
+        mp4_preview_path=draft.mp4_preview_path,
+        ai_score=draft.ai_score,
+        created_at=draft.created_at,
+        progress_steps=dict(draft.progress_steps_json or {}) or None,
+        mp4_url=_url_for("mp4", draft.mp4_preview_path),
+        subtitle_url=_url_for("srt", draft.subtitle_path),
+    )
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
@@ -150,7 +183,55 @@ async def list_project_drafts(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
     stmt = select(Draft).where(Draft.project_id == project_id).order_by(Draft.version.asc())
     rows = (await session.execute(stmt)).scalars().all()
-    return [DraftSummary.model_validate(d) for d in rows]
+    return [_draft_summary_with_urls(d) for d in rows]
+
+
+@router.post(
+    "/{project_id}/edit",
+    response_model=EditTriggerResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def trigger_project_edit(
+    project_id: int,
+    payload: EditTriggerRequest,
+    session: SessionDep,
+) -> EditTriggerResponse:
+    """M5 — kick off the auto-edit pipeline for ``project_id``.
+
+    Returns 202 with a placeholder draft id (set by the worker once it
+    creates the row); the client polls ``GET /projects/{id}/assets`` or
+    ``GET /drafts/{id}`` to watch progress. While a draft is already
+    `processing`, returns 409 unless ``force=true``.
+    """
+    project = await session.get(Project, project_id)
+    if project is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="project not found"
+        )
+
+    in_flight = (
+        await session.execute(
+            select(Draft)
+            .where(Draft.project_id == project_id)
+            .where(Draft.status == DraftStatus.PROCESSING.value)
+            .order_by(Draft.version.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if in_flight is not None and not payload.force:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="another draft is already rendering for this project; "
+            "pass force=true to start a new version anyway",
+        )
+
+    job_id = enqueue_project_edit(project_id, force=payload.force)
+    return EditTriggerResponse(
+        project_id=project_id,
+        draft_id=in_flight.id if in_flight is not None else 0,
+        job_id=job_id,
+        status="enqueued",
+    )
 
 
 @router.get("/{project_id}/script", response_model=ScriptOut)
@@ -370,8 +451,21 @@ async def list_project_assets_with_analysis(
             )
         )
 
+    latest_draft_row = (
+        await session.execute(
+            select(Draft)
+            .where(Draft.project_id == project_id)
+            .order_by(Draft.version.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    latest_draft = (
+        _draft_summary_with_urls(latest_draft_row) if latest_draft_row is not None else None
+    )
+
     return ProjectAnalysisOut(
         project=project_detail,
         has_script=has_script,
         assets=items,
+        latest_draft=latest_draft,
     )

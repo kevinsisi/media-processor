@@ -1,17 +1,21 @@
-"""Draft endpoints — read + Stage 4.5 LLM patch."""
+"""Draft endpoints — read, Stage 4.5 LLM patch, M5 render trigger."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Annotated
+from pathlib import Path
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from media_processor.api.config import settings
 from media_processor.api.deps import get_llm_patcher, get_profile_loader, get_session
 from media_processor.api.schemas import (
+    CutPlanOut,
+    CutPlanSegmentOut,
     DraftDetail,
     DraftPatchRequest,
     DraftPatchResponse,
@@ -33,15 +37,86 @@ LLMPatcherDep = Annotated[LLMPatcher, Depends(get_llm_patcher)]
 ProfileLoaderDep = Annotated[Callable[[str], ProfileSpec], Depends(get_profile_loader)]
 
 
-@router.get("/{draft_id}", response_model=DraftDetail)
-async def get_draft(
-    draft_id: int,
-    session: SessionDep,
-) -> DraftDetail:
-    stmt = select(Draft).where(Draft.id == draft_id).options(selectinload(Draft.segments))
-    draft = (await session.execute(stmt)).scalar_one_or_none()
-    if draft is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="draft not found")
+# Public URL prefixes the browser uses to fetch generated mp4 / SRT files.
+# StaticFiles is mounted at "/media/drafts" in api.main, and nginx proxies
+# "/api/" → api:8000, so the full URL the browser sees is
+# "/api/media/drafts/{project_id}/v{N}.mp4".
+DRAFT_URL_PREFIX = "/api/media/drafts"
+
+
+def _draft_filename(version: int, suffix: str) -> str:
+    return f"v{version}.{suffix}"
+
+
+def _draft_url(project_id: int, version: int, suffix: str) -> str:
+    return f"{DRAFT_URL_PREFIX}/{project_id}/{_draft_filename(version, suffix)}"
+
+
+def _expected_draft_path(project_id: int, version: int, suffix: str) -> Path:
+    return Path(settings.drafts_dir) / str(project_id) / _draft_filename(version, suffix)
+
+
+def _resolve_draft_url(draft: Draft, *, suffix: str, stored_path: str | None) -> str | None:
+    """Pick a public URL for the mp4 or srt sidecar.
+
+    Honour the path stored on the row (the renderer always writes
+    ``${DRAFTS_DIR}/{project_id}/v{N}.{suffix}``); fall back to the
+    convention if the row has no path yet but the file is on disk.
+    """
+    if stored_path:
+        return _draft_url(draft.project_id, draft.version, suffix)
+    if _expected_draft_path(draft.project_id, draft.version, suffix).is_file():
+        return _draft_url(draft.project_id, draft.version, suffix)
+    return None
+
+
+def _cut_plan_out(blob: Any | None) -> CutPlanOut | None:
+    """Validate the JSON blob we stored in Draft.cut_plan_json and return a model.
+
+    The blob comes from edit_planner.serialise_plan, but we tolerate older
+    drafts that don't have one yet and pre-M5 rows where the column is null.
+    """
+    if not isinstance(blob, dict):
+        return None
+    raw_segments = blob.get("segments") or []
+    segments: list[CutPlanSegmentOut] = []
+    for seg in raw_segments:
+        if not isinstance(seg, dict):
+            continue
+        try:
+            segments.append(
+                CutPlanSegmentOut(
+                    order=int(seg["order"]),
+                    asset_id=int(seg["asset_id"]),
+                    asset_start_ms=int(seg["asset_start_ms"]),
+                    asset_end_ms=int(seg["asset_end_ms"]),
+                    source_kind=str(seg["source_kind"]),  # type: ignore[arg-type]
+                    reason=str(seg.get("reason", "")),
+                )
+            )
+        except (KeyError, ValueError, TypeError):
+            continue
+    try:
+        return CutPlanOut(
+            schema_version=str(blob.get("schema_version", "")),
+            target_duration_ms=int(blob.get("target_duration_ms", 0)),
+            target_aspect_ratio=str(blob.get("target_aspect_ratio", "")),
+            profile_name=str(blob.get("profile_name", "")),
+            notes=str(blob.get("notes", "")),
+            used_fallback=bool(blob.get("used_fallback", False)),
+            fallback_reason=blob.get("fallback_reason"),
+            segments=segments,
+        )
+    except (ValueError, TypeError):
+        return None
+
+
+def serialise_draft_detail(draft: Draft) -> DraftDetail:
+    """Map a Draft row + its loaded segments into the response model.
+
+    Centralised here so both ``GET /drafts/{id}`` and the M5 trigger
+    endpoint emit the same shape.
+    """
     return DraftDetail(
         id=draft.id,
         project_id=draft.project_id,
@@ -52,8 +127,41 @@ async def get_draft(
         mp4_preview_path=draft.mp4_preview_path,
         ai_score=draft.ai_score,
         created_at=draft.created_at,
-        segments=[DraftSegmentOut.model_validate(s) for s in draft.segments],
+        progress_steps=dict(draft.progress_steps_json or {}) or None,
+        mp4_url=_resolve_draft_url(draft, suffix="mp4", stored_path=draft.mp4_preview_path),
+        subtitle_url=_resolve_draft_url(
+            draft, suffix="srt", stored_path=draft.subtitle_path
+        ),
+        cut_plan=_cut_plan_out(draft.cut_plan_json),
+        prompt_feedback=draft.prompt_feedback,
+        segments=[
+            DraftSegmentOut(
+                order=s.order,
+                asset_segment_id=s.asset_segment_id,
+                asset_id=s.asset_id,
+                asset_start_ms=s.asset_start_ms,
+                asset_end_ms=s.asset_end_ms,
+                on_timeline_start_ms=s.on_timeline_start_ms,
+                on_timeline_end_ms=s.on_timeline_end_ms,
+                transition=s.transition,
+                source_kind=s.source_kind,
+                plan_reason=s.plan_reason,
+            )
+            for s in sorted(draft.segments, key=lambda x: x.order)
+        ],
     )
+
+
+@router.get("/{draft_id}", response_model=DraftDetail)
+async def get_draft(
+    draft_id: int,
+    session: SessionDep,
+) -> DraftDetail:
+    stmt = select(Draft).where(Draft.id == draft_id).options(selectinload(Draft.segments))
+    draft = (await session.execute(stmt)).scalar_one_or_none()
+    if draft is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="draft not found")
+    return serialise_draft_detail(draft)
 
 
 @router.post("/{draft_id}/patch", response_model=DraftPatchResponse)
@@ -151,3 +259,10 @@ async def _build_segment_summaries(
             )
         )
     return summaries
+
+
+__all__ = [
+    "DRAFT_URL_PREFIX",
+    "router",
+    "serialise_draft_detail",
+]

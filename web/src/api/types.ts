@@ -75,6 +75,30 @@ export interface UploadCompleteOut {
   script: ScriptOut | null;
 }
 
+export type CutSourceKind = "scripted" | "improv";
+
+export interface CutPlanSegmentOut {
+  order: number;
+  asset_id: number;
+  asset_start_ms: number;
+  asset_end_ms: number;
+  source_kind: CutSourceKind;
+  reason: string;
+}
+
+export interface CutPlanOut {
+  schema_version: string;
+  target_duration_ms: number;
+  target_aspect_ratio: string;
+  profile_name: string;
+  notes: string;
+  used_fallback: boolean;
+  fallback_reason: string | null;
+  segments: CutPlanSegmentOut[];
+}
+
+export type EditStep = "plan" | "cut" | "concat" | "subtitles";
+
 export interface DraftSummary {
   id: number;
   project_id: number;
@@ -85,18 +109,40 @@ export interface DraftSummary {
   mp4_preview_path: string | null;
   ai_score: number | null;
   created_at: string;
+  // M5 — render progress + URLs (filled by the worker as it makes progress).
+  progress_steps?: Partial<Record<EditStep, string>> | null;
+  mp4_url?: string | null;
+  subtitle_url?: string | null;
 }
 
 export interface DraftSegmentOut {
   order: number;
-  asset_segment_id: number;
+  asset_segment_id: number | null;
+  asset_id: number | null;
+  asset_start_ms: number | null;
+  asset_end_ms: number | null;
   on_timeline_start_ms: number;
   on_timeline_end_ms: number;
   transition: string | null;
+  source_kind: CutSourceKind | null;
+  plan_reason: string | null;
 }
 
 export interface DraftDetail extends DraftSummary {
   segments: DraftSegmentOut[];
+  cut_plan?: CutPlanOut | null;
+  prompt_feedback?: string | null;
+}
+
+export interface EditTriggerRequest {
+  force?: boolean;
+}
+
+export interface EditTriggerResponse {
+  project_id: number;
+  draft_id: number;
+  job_id: string;
+  status: string;
 }
 
 export interface AssetTagOut {
@@ -244,6 +290,9 @@ export interface ProjectAnalysisOut {
   project: ProjectDetail;
   has_script: boolean;
   assets: AssetAnalysisItem[];
+  // M5 — surface the latest render so the analysis page can show
+  // "開始剪輯" / "預覽剪輯" without an extra round-trip.
+  latest_draft?: DraftSummary | null;
 }
 
 export interface ReviewCreate {

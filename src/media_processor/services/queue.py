@@ -15,12 +15,14 @@ from redis import Redis
 from rq import Queue
 
 from media_processor.api.config import settings
-from media_processor.workers import ANALYSIS_QUEUE
+from media_processor.workers import ANALYSIS_QUEUE, EDITING_QUEUE
 
 logger = logging.getLogger(__name__)
 
 JOB_TIMEOUT_SECONDS = 60 * 60 * 2  # 2 h ceiling for the whole pipeline.
+EDIT_JOB_TIMEOUT_SECONDS = 60 * 60  # 1 h ceiling for the M5 render pipeline.
 ANALYZE_ASSET_FN = "media_processor.workers.analysis_jobs.analyze_asset"
+RENDER_DRAFT_FN = "media_processor.workers.edit_jobs.render_draft"
 
 
 def _redis() -> Redis:
@@ -47,6 +49,28 @@ def enqueue_asset_analysis(
         "enqueued analyze_asset(asset_id=%d, steps=%s, force=%s) as job %s",
         asset_id,
         steps if steps is not None else "all",
+        force,
+        job.id,
+    )
+    return job.id
+
+
+def enqueue_project_edit(project_id: int, *, force: bool = False) -> str:
+    """Schedule ``render_draft(project_id, force=...)`` on the editing queue.
+
+    Returns the RQ job id. Like :func:`enqueue_asset_analysis`, the job target
+    is referenced by string so the api container never imports the worker
+    code path that pulls in ffmpeg-heavy modules.
+    """
+    queue = Queue(EDITING_QUEUE, connection=_redis(), default_timeout=EDIT_JOB_TIMEOUT_SECONDS)
+    job = queue.enqueue(
+        RENDER_DRAFT_FN,
+        args=(project_id,),
+        kwargs={"force": force},
+    )
+    logger.info(
+        "enqueued render_draft(project_id=%d, force=%s) as job %s",
+        project_id,
         force,
         job.id,
     )

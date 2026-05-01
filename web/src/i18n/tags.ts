@@ -31,6 +31,41 @@ export const ANALYSIS_STEP_LABELS: Record<string, string> = {
   coverage: "對稿",
 };
 
+// M5 — auto-edit pipeline stage labels. Used by ProjectEdit.tsx.
+export const EDIT_STEP_LABELS: Record<string, string> = {
+  plan: "規劃",
+  cut: "切片",
+  concat: "拼接",
+  subtitles: "字幕",
+};
+
+export const DRAFT_STATUS_LABELS: Record<string, string> = {
+  pending: "排隊中",
+  processing: "剪輯中",
+  ready_for_review: "完成",
+  approved: "已採用",
+  rejected: "已退回",
+  failed: "失敗",
+};
+
+export const CUT_SOURCE_LABELS: Record<string, string> = {
+  scripted: "照稿",
+  improv: "即興",
+};
+
+export function labelForEditStep(name: string): string {
+  return EDIT_STEP_LABELS[name] ?? name;
+}
+
+export function labelForDraftStatus(value: string): string {
+  return DRAFT_STATUS_LABELS[value] ?? value;
+}
+
+export function labelForCutSource(value: string | null | undefined): string {
+  if (!value) return "—";
+  return CUT_SOURCE_LABELS[value] ?? value;
+}
+
 // Top-level asset status pills.
 export const ASSET_STATUS_LABELS: Record<string, string> = {
   pending: "待分析",

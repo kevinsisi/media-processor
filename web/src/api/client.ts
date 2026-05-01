@@ -13,6 +13,8 @@ import type {
   AssetThumbnailsOut,
   DraftDetail,
   DraftSummary,
+  EditTriggerRequest,
+  EditTriggerResponse,
   LLMKeysUpdateIn,
   LLMKeysUpdateOut,
   ProjectAnalysisOut,
@@ -183,6 +185,19 @@ export class ApiClient {
     payload: AnalyzeRequest = {},
   ): Promise<AnalyzeResponse> {
     return this.request<AnalyzeResponse>(`/assets/${assetId}/analyze`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  }
+
+  // ----- M5 — auto-edit trigger -----
+
+  triggerProjectEdit(
+    projectId: number,
+    payload: EditTriggerRequest = {},
+  ): Promise<EditTriggerResponse> {
+    return this.request<EditTriggerResponse>(`/projects/${projectId}/edit`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),

@@ -78,6 +78,22 @@ class AnalysisStepState(StrEnum):
     DONE = "done"
 
 
+class EditStep(StrEnum):
+    """Per-stage keys inside Draft.progress_steps_json (M5 auto-edit)."""
+
+    PLAN = "plan"
+    CUT = "cut"
+    CONCAT = "concat"
+    SUBTITLES = "subtitles"
+
+
+class CutSourceKind(StrEnum):
+    """`source_kind` values for DraftSegment / CutPlanSegment."""
+
+    SCRIPTED = "scripted"
+    IMPROV = "improv"
+
+
 PROJECT_STATUS_VALUES: tuple[str, ...] = tuple(s.value for s in ProjectStatus)
 DRAFT_STATUS_VALUES: tuple[str, ...] = tuple(s.value for s in DraftStatus)
 REVIEW_ACTION_VALUES: tuple[str, ...] = tuple(a.value for a in ReviewAction)
@@ -86,3 +102,5 @@ UPLOAD_KIND_VALUES: tuple[str, ...] = tuple(k.value for k in UploadKind)
 UPLOAD_STATUS_VALUES: tuple[str, ...] = tuple(s.value for s in UploadStatus)
 ASSET_STATUS_VALUES: tuple[str, ...] = tuple(s.value for s in AssetStatus)
 ANALYSIS_STEP_VALUES: tuple[str, ...] = tuple(s.value for s in AnalysisStep)
+EDIT_STEP_VALUES: tuple[str, ...] = tuple(s.value for s in EditStep)
+CUT_SOURCE_KIND_VALUES: tuple[str, ...] = tuple(s.value for s in CutSourceKind)

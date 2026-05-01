@@ -50,8 +50,11 @@ class Draft(Base):
     )
     output_zip_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     mp4_preview_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    subtitle_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     ai_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     prompt_feedback: Mapped[str | None] = mapped_column(Text, nullable=True)
+    progress_steps_json: Mapped[Any] = mapped_column(JSON, nullable=True)
+    cut_plan_json: Mapped[Any] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -94,24 +97,44 @@ class DraftSegment(Base):
         index=True,
     )
     order: Mapped[int] = mapped_column(Integer, nullable=False)
-    asset_segment_id: Mapped[int] = mapped_column(
+    # Pre-M5 callers (the legacy heuristic planner) populated `asset_segment_id`
+    # against an existing AssetSegment row. M5's Gemini planner picks segments
+    # straight from transcripts and stores `asset_id` + `asset_start_ms` /
+    # `asset_end_ms` directly. New rows MUST set asset_id; either path can
+    # populate the on-timeline range.
+    asset_segment_id: Mapped[int | None] = mapped_column(
         Integer,
         ForeignKey("asset_segments.id", ondelete="RESTRICT"),
-        nullable=False,
+        nullable=True,
     )
+    asset_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("assets.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    asset_start_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    asset_end_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     on_timeline_start_ms: Mapped[int] = mapped_column(Integer, nullable=False)
     on_timeline_end_ms: Mapped[int] = mapped_column(Integer, nullable=False)
     reframe_keyframes: Mapped[Any] = mapped_column(JSON, nullable=True)
     transition: Mapped[str | None] = mapped_column(String(64), nullable=True)
     blurred_source_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    source_kind: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    plan_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     draft: Mapped[Draft] = relationship("Draft", back_populates="segments")
-    asset_segment: Mapped[AssetSegment] = relationship("AssetSegment")
+    asset_segment: Mapped[AssetSegment | None] = relationship("AssetSegment")
 
     __table_args__ = (
         UniqueConstraint("draft_id", "order", name="uq_draft_segments_order"),
         CheckConstraint(
             "on_timeline_start_ms < on_timeline_end_ms",
             name="ck_draft_segments_range",
+        ),
+        CheckConstraint(
+            "asset_start_ms IS NULL OR asset_end_ms IS NULL "
+            "OR asset_start_ms < asset_end_ms",
+            name="ck_draft_segments_asset_range",
         ),
     )

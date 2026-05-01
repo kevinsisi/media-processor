@@ -17,25 +17,29 @@ from media_processor.api.routers import settings as settings_router
 # Cache thumbnail files for 1 day; paths are stable per (asset_id, frame_index)
 # so the browser can hold onto them aggressively.
 THUMBNAIL_CACHE_CONTROL = "public, max-age=86400, immutable"
+# Drafts can re-render at the same path (force re-roll), so cache for 5 min
+# only — long enough to survive a quick reload, short enough to refresh.
+DRAFT_CACHE_CONTROL = "public, max-age=300"
 
 
-class ThumbnailCacheMiddleware(BaseHTTPMiddleware):
-    """Apply long-lived Cache-Control to thumbnail static responses only."""
+class StaticCacheMiddleware(BaseHTTPMiddleware):
+    """Apply a fixed Cache-Control to responses under one URL prefix."""
 
-    def __init__(self, app: ASGIApp, *, prefix: str) -> None:
+    def __init__(self, app: ASGIApp, *, prefix: str, cache_control: str) -> None:
         super().__init__(app)
         self._prefix = prefix
+        self._cache_control = cache_control
 
     async def dispatch(self, request: Request, call_next):  # type: ignore[no-untyped-def]
         response = await call_next(request)
         if request.url.path.startswith(self._prefix) and response.status_code == 200:
-            response.headers["Cache-Control"] = THUMBNAIL_CACHE_CONTROL
+            response.headers["Cache-Control"] = self._cache_control
         return response
 
 
 app = FastAPI(
     title="media-processor API",
-    version="0.9.1",
+    version="0.10.0",
 )
 
 app.include_router(health.router)
@@ -50,9 +54,24 @@ app.include_router(uploads.router)
 # path; on the dispatch host this resolves under MEDIA_STORAGE_DIR. mkdir on
 # startup so the mount doesn't fail on a fresh deploy.
 Path(settings.thumbnails_dir).mkdir(parents=True, exist_ok=True)
-app.add_middleware(ThumbnailCacheMiddleware, prefix="/media/thumbnails")
+Path(settings.drafts_dir).mkdir(parents=True, exist_ok=True)
+app.add_middleware(
+    StaticCacheMiddleware,
+    prefix="/media/thumbnails",
+    cache_control=THUMBNAIL_CACHE_CONTROL,
+)
+app.add_middleware(
+    StaticCacheMiddleware,
+    prefix="/media/drafts",
+    cache_control=DRAFT_CACHE_CONTROL,
+)
 app.mount(
     "/media/thumbnails",
     StaticFiles(directory=settings.thumbnails_dir, check_dir=False),
     name="thumbnails",
+)
+app.mount(
+    "/media/drafts",
+    StaticFiles(directory=settings.drafts_dir, check_dir=False),
+    name="drafts",
 )

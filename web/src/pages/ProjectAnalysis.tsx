@@ -568,6 +568,24 @@ export default function ProjectAnalysis() {
     return parts.join(" · ");
   }, [assets]);
 
+  // M5 — 開始剪輯 / 預覽剪輯 CTA state.
+  const latestDraft = polling.data?.latest_draft ?? null;
+  const allAssetsTerminal = useMemo(() => {
+    if (assets.length === 0) return false;
+    return assets.every(
+      (a) => a.status === "analyzed" || a.status === "analysis_failed",
+    );
+  }, [assets]);
+  const editLabel = useMemo(() => {
+    if (!latestDraft) return "開始剪輯";
+    if (latestDraft.status === "processing" || latestDraft.status === "pending") {
+      return "查看剪輯進度";
+    }
+    if (latestDraft.status === "ready_for_review") return "預覽剪輯";
+    if (latestDraft.status === "failed") return "重新剪輯";
+    return "開始剪輯";
+  }, [latestDraft]);
+
   return (
     <main className="page project-analysis">
       <header className="analysis-hero">
@@ -590,6 +608,14 @@ export default function ProjectAnalysis() {
           <Link to="/" className="cta cta--quiet">
             專案清單
           </Link>
+          {(allAssetsTerminal || latestDraft) && (
+            <Link
+              to={`/projects/${validProjectId}/edit`}
+              className="cta cta--primary"
+            >
+              {editLabel}
+            </Link>
+          )}
         </div>
         {!polling.data?.has_script && project && (
           <p className="analysis-hint">
