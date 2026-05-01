@@ -1,5 +1,6 @@
 """Health endpoint."""
 
+from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
 from fastapi import APIRouter
@@ -8,7 +9,21 @@ from media_processor.core.db import ping_postgres, ping_redis
 
 router = APIRouter()
 
-VERSION = "0.7.0"
+
+def _package_version() -> str:
+    """Read media-processor version from the installed package metadata.
+
+    Single source of truth: pyproject.toml. Avoids the M3/M4 drift where
+    a hardcoded VERSION string in this module silently lagged the bumps
+    in pyproject.toml + main.py.
+    """
+    try:
+        return version("media-processor")
+    except PackageNotFoundError:
+        return "0.0.0"
+
+
+VERSION = _package_version()
 
 
 @router.get("/health")
