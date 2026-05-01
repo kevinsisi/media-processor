@@ -29,6 +29,7 @@ Thumbs.db
 # Project
 .env
 .env.local
+.local/
 samples/capcut_draft/
 samples/carsmeet_screenshots/
 samples/blurred/

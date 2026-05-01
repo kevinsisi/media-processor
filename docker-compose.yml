@@ -7,7 +7,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - "${PGDATA_DIR:-postgres_data}:/var/lib/postgresql/data"
     ports:
       - "127.0.0.1:5433:5432"
     healthcheck:
@@ -43,6 +43,7 @@ services:
     volumes:
       - ./src:/app/src:ro
       - ./profiles:/app/profiles:ro
+      - "${MEDIA_STORAGE_DIR:-./.local/media}:/app/media"
 
   web:
     build:
