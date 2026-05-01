@@ -45,17 +45,48 @@ AUDIO_CODEC: str = "aac"
 AUDIO_BITRATE: str = "128k"
 
 # Subtitle burn-in style — white text + 2 px black edge + bottom-centre.
-SUBTITLE_FORCE_STYLE: str = (
-    "FontName=Noto Sans CJK TC,"
-    "Fontsize=22,"
-    "PrimaryColour=&H00FFFFFF,"
-    "OutlineColour=&H00000000,"
-    "BorderStyle=1,"
-    "Outline=2,"
-    "Shadow=0,"
-    "Alignment=2,"
-    "MarginV=64"
-)
+# Sizes/margins below are interpreted in canvas pixels because
+# ``burn_subtitles`` sets ``original_size=WxH`` on the ffmpeg
+# ``subtitles=`` filter (otherwise libass would scale from its 384×288
+# default and CJK lines overflow the side of portrait video).
+def subtitle_force_style(target_aspect: str) -> str:
+    """Aspect-aware ASS V4+ Style overrides for the subtitle burn-in.
+
+    Tighter Fontsize and explicit horizontal margins keep CJK text inside
+    the frame on 9:16; the same numbers tracked the visible width on the
+    landscape variants too. Returns a comma-separated string suitable for
+    ffmpeg's ``force_style=`` value.
+    """
+    width, _ = ASPECT_DIMENSIONS[target_aspect]
+    if target_aspect == "9:16":
+        font_size = 56
+        margin_v = 180
+    elif target_aspect == "4:5":
+        font_size = 52
+        margin_v = 120
+    else:  # "1:1"
+        font_size = 48
+        margin_v = 80
+    margin_lr = max(60, width // 14)  # ~7% padding each side, min 60 px
+    return (
+        "FontName=Noto Sans CJK TC,"
+        f"Fontsize={font_size},"
+        "PrimaryColour=&H00FFFFFF,"
+        "OutlineColour=&H00000000,"
+        "BorderStyle=1,"
+        "Outline=2,"
+        "Shadow=0,"
+        "Alignment=2,"
+        f"MarginL={margin_lr},"
+        f"MarginR={margin_lr},"
+        f"MarginV={margin_v}"
+    )
+
+
+# Default 9:16 style — kept for legacy imports. New code should call
+# ``subtitle_force_style(target_aspect)`` and pass the result into the
+# subtitles filter.
+SUBTITLE_FORCE_STYLE: str = subtitle_force_style("9:16")
 
 # Timeouts. Per-call covers a single ffmpeg invocation; the worker job
 # layers its own outer cap on the whole render.
@@ -270,20 +301,31 @@ def burn_subtitles(
     concat_path: Path,
     srt_path: Path,
     output_path: Path,
+    target_aspect: str = "9:16",
 ) -> None:
     """Re-encode ``concat_path`` with the SRT burned in via subtitles= filter.
 
     A separate stage from the concat mux so failures here can be retried
-    without redoing the cut work.
+    without redoing the cut work. ``target_aspect`` selects the per-canvas
+    style (Fontsize / MarginL / MarginR / MarginV) so portrait CJK lines
+    wrap within the frame instead of overflowing the side.
     """
     _require_ffmpeg()
+    if target_aspect not in ASPECT_DIMENSIONS:
+        raise VideoRenderError(f"unsupported target aspect ratio: {target_aspect!r}")
     if not concat_path.is_file() and not _is_fake():
         raise VideoRenderError(f"burn: concat output missing at {concat_path}")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     # ffmpeg subtitle filter on Windows demands escaped colons and forward
     # slashes inside the filter string.
     posix_srt = str(srt_path).replace("\\", "/").replace(":", "\\:")
-    sub_filter = f"subtitles={posix_srt}:force_style='{SUBTITLE_FORCE_STYLE}'"
+    width, height = ASPECT_DIMENSIONS[target_aspect]
+    style = subtitle_force_style(target_aspect)
+    # original_size= forces libass to interpret ASS PlayRes as the actual
+    # output resolution, so Fontsize/Margins above are pixel-accurate.
+    sub_filter = (
+        f"subtitles={posix_srt}:original_size={width}x{height}:force_style='{style}'"
+    )
     cmd = [
         "ffmpeg",
         "-hide_banner",
@@ -360,7 +402,7 @@ def render(
 
     used_subs = False
     if srt_path is not None and srt_path.is_file() and srt_path.stat().st_size > 0:
-        burn_subtitles(concat_path, srt_path, output_path)
+        burn_subtitles(concat_path, srt_path, output_path, target_aspect)
         used_subs = True
     elif srt_path is not None:
         # No subtitle file produced (transcript-less project); fall back
@@ -395,6 +437,7 @@ __all__ = [
     "RenderResult",
     "SUBTITLE_BURN_TIMEOUT_S",
     "SUBTITLE_FORCE_STYLE",
+    "subtitle_force_style",
     "VIDEO_CODEC",
     "VIDEO_CRF",
     "VIDEO_FPS",
