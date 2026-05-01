@@ -10,20 +10,48 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from media_processor.api.config import settings
 from media_processor.api.deps import get_session
 from media_processor.api.schemas import (
     AnalyzeRequest,
     AnalyzeResponse,
     AssetDetail,
     AssetTagOut,
+    AssetThumbnailsOut,
     CoverageMatchOut,
     ScriptCoverageOut,
+    ThumbnailUrl,
     TranscriptOut,
     TranscriptSegmentOut,
     TranscriptUpsert,
 )
 from media_processor.models import Asset, AssetTranscript, ScriptCoverage
+from media_processor.services import thumbnails as thumbnails_svc
 from media_processor.services.queue import enqueue_asset_analysis
+
+# Public URL prefix the browser uses to fetch thumbnail JPEGs.
+# StaticFiles is mounted at "/media/thumbnails" in api.main, and the web
+# nginx proxies "/api/" → api:8000, so the full URL the browser sees is
+# "/api/media/thumbnails/{asset_id}/frame_{n}.jpg".
+THUMBNAIL_URL_PREFIX = "/api/media/thumbnails"
+
+
+def thumbnail_url_for(asset_id: int, index: int) -> str:
+    return f"{THUMBNAIL_URL_PREFIX}/{asset_id}/frame_{index}.jpg"
+
+
+def thumbnail_urls_for_asset(asset_id: int) -> list[str]:
+    """Return public URLs for whichever frames currently exist on disk."""
+    files = thumbnails_svc.list_existing_frames(settings.thumbnails_dir, asset_id)
+    out: list[str] = []
+    for f in files:
+        stem = f.name[len("frame_") : -len(".jpg")]
+        try:
+            idx = int(stem)
+        except ValueError:
+            continue
+        out.append(thumbnail_url_for(asset_id, idx))
+    return out
 
 router = APIRouter(prefix="/assets", tags=["assets"])
 
@@ -58,6 +86,26 @@ async def get_asset(
     if asset is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="asset not found")
     return _serialise_asset(asset)
+
+
+@router.get("/{asset_id}/thumbnails", response_model=AssetThumbnailsOut)
+async def get_asset_thumbnails(
+    asset_id: int,
+    session: SessionDep,
+) -> AssetThumbnailsOut:
+    asset = await session.get(Asset, asset_id)
+    if asset is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="asset not found")
+    files = thumbnails_svc.list_existing_frames(settings.thumbnails_dir, asset_id)
+    items: list[ThumbnailUrl] = []
+    for f in files:
+        stem = f.name[len("frame_") : -len(".jpg")]
+        try:
+            idx = int(stem)
+        except ValueError:
+            continue
+        items.append(ThumbnailUrl(index=idx, url=thumbnail_url_for(asset_id, idx)))
+    return AssetThumbnailsOut(asset_id=asset_id, count=len(items), thumbnails=items)
 
 
 # ----- transcript -----

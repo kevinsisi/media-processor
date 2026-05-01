@@ -13,6 +13,7 @@ from sqlalchemy.orm import selectinload
 
 from media_processor.api.config import settings
 from media_processor.api.deps import get_session
+from media_processor.api.routers.assets import thumbnail_urls_for_asset
 from media_processor.api.schemas import (
     AssetAnalysisItem,
     CoverageSummaryOut,
@@ -365,6 +366,7 @@ async def list_project_assets_with_analysis(
                 ),
                 scene_tags=_scene_tags_for(asset),
                 motion_segments=_motion_segments_for(asset),
+                thumbnail_urls=thumbnail_urls_for_asset(asset.id),
             )
         )
 

@@ -262,6 +262,9 @@ class AssetAnalysisItem(BaseModel):
     coverage_summary: CoverageSummaryOut | None
     scene_tags: list[SceneTagOut]
     motion_segments: list[MotionSegmentOut]
+    # Public URLs for the keyframe gallery; empty list when frames have not
+    # been generated yet (the UI shows a placeholder).
+    thumbnail_urls: list[str]
 
 
 class ProjectAnalysisOut(BaseModel):
@@ -305,6 +308,22 @@ class DraftPatchResponse(BaseModel):
     required_segments_overrides: dict[str, Any]
     patched_tag_weights: dict[str, float]
     patched_required_segments: dict[str, Any]
+
+
+# ----- M4.6 — thumbnail gallery schemas -----
+
+
+class ThumbnailUrl(BaseModel):
+    index: int
+    url: str
+
+
+class AssetThumbnailsOut(BaseModel):
+    """Returned by GET /assets/{id}/thumbnails — list of generated frames."""
+
+    asset_id: int
+    count: int
+    thumbnails: list[ThumbnailUrl]
 
 
 # Resolve forward reference: UploadCompleteOut references AssetDetail defined below.

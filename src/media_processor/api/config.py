@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     drafts_dir: str = Field(default="/app/media/drafts")
     uploads_dir: str = Field(default="/app/media/uploads")
     analysis_dir: str = Field(default="/app/media/analysis")
+    thumbnails_dir: str = Field(default="/app/media/thumbnails")
 
     # M4 — Whisper local STT in the worker container.
     # WHISPER_FAKE=1 swaps the engine for a deterministic canned zh-Hant

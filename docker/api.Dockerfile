@@ -3,8 +3,11 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # System deps
+# ffmpeg is required by services/thumbnails.py (keyframe gallery extraction at
+# upload-complete) and by the existing services/uploads.probe_media() call,
+# which silently degrades without it.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential libpq-dev curl \
+        build-essential libpq-dev curl ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Python deps — keep this list in sync with [project.dependencies] in
@@ -32,6 +35,7 @@ COPY src/ ./src/
 COPY profiles/ ./profiles/
 COPY alembic.ini ./
 COPY alembic/ ./alembic/
+COPY scripts/ ./scripts/
 
 ENV PYTHONPATH=/app/src
 

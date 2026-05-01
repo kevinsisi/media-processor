@@ -224,6 +224,20 @@ export interface AssetAnalysisItem {
   coverage_summary: CoverageSummaryOut | null;
   scene_tags: SceneTagOut[];
   motion_segments: MotionSegmentOut[];
+  // Public URLs (e.g. "/api/media/thumbnails/12/frame_2.jpg") for the
+  // keyframe gallery; empty until ffmpeg has produced the frames.
+  thumbnail_urls: string[];
+}
+
+export interface ThumbnailUrl {
+  index: number;
+  url: string;
+}
+
+export interface AssetThumbnailsOut {
+  asset_id: number;
+  count: number;
+  thumbnails: ThumbnailUrl[];
 }
 
 export interface ProjectAnalysisOut {

@@ -167,6 +167,64 @@
   gap: var(--space-4);
 }
 
+/* ---- Keyframe gallery (M4.6) ---- */
+
+.thumb-gallery {
+  display: flex;
+  gap: var(--space-2);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  padding-bottom: 4px;
+  /* Hide scrollbar visually on touch devices but keep it where mice expect. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--ink-line-strong) transparent;
+}
+
+.thumb-gallery::-webkit-scrollbar {
+  height: 6px;
+}
+
+.thumb-gallery::-webkit-scrollbar-thumb {
+  background: var(--ink-line-strong);
+  border-radius: 3px;
+}
+
+.thumb-gallery__frame {
+  height: 110px;
+  width: auto;
+  flex: 0 0 auto;
+  scroll-snap-align: start;
+  border: 1px solid var(--ink-line);
+  background: var(--ink-elevated);
+  user-select: none;
+  -webkit-user-drag: none;
+  display: block;
+}
+
+.thumb-gallery--empty {
+  height: 110px;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed var(--ink-line);
+  background: var(--ink-elevated);
+}
+
+.thumb-gallery__placeholder {
+  font-size: var(--t-xs);
+  color: var(--text-tertiary);
+  letter-spacing: 0.08em;
+}
+
+@media (max-width: 600px) {
+  .thumb-gallery__frame,
+  .thumb-gallery--empty {
+    height: 90px;
+  }
+}
+
 .asset-card[data-status="analyzing"] {
   border-color: var(--gold);
   box-shadow: 0 0 16px var(--gold-soft, rgba(180, 138, 86, 0.18));

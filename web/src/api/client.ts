@@ -10,6 +10,7 @@ import type {
   AnalyzeRequest,
   AnalyzeResponse,
   AssetDetail,
+  AssetThumbnailsOut,
   DraftDetail,
   DraftSummary,
   LLMKeysUpdateIn,
@@ -78,6 +79,10 @@ export class ApiClient {
 
   fetchAsset(id: number): Promise<AssetDetail> {
     return this.get<AssetDetail>(`/assets/${id}`);
+  }
+
+  fetchAssetThumbnails(assetId: number): Promise<AssetThumbnailsOut> {
+    return this.get<AssetThumbnailsOut>(`/assets/${assetId}/thumbnails`);
   }
 
   postReview(payload: ReviewCreate): Promise<ReviewOut> {

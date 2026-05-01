@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from datetime import UTC, datetime
 from pathlib import Path
@@ -30,6 +31,7 @@ from media_processor.models import (
     UploadSession,
     UploadStatus,
 )
+from media_processor.services import thumbnails as thumbnails_svc
 from media_processor.services import uploads as upload_svc
 from media_processor.services.queue import enqueue_asset_analysis
 
@@ -263,6 +265,27 @@ async def _finalize_video(
             select(Asset).where(Asset.id == asset_id).options(selectinload(Asset.tags))
         )
     ).scalar_one()
+
+    # M4.6 — generate the keyframe thumbnail gallery before returning so the
+    # asset card renders with a preview on first paint. ~3-8s of synchronous
+    # ffmpeg work; runs in a thread so the event loop stays responsive.
+    # Failure is best-effort: backfill script can re-generate later.
+    try:
+        await asyncio.to_thread(
+            thumbnails_svc.generate,
+            asset_id,
+            target_path,
+            asset_loaded.duration_ms,
+            settings.thumbnails_dir,
+        )
+    except Exception as exc:  # noqa: BLE001 — log and continue.
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "thumbnail generation failed for asset %d: %s — operator can backfill",
+            asset_id,
+            exc,
+        )
 
     # M4 — kick off the analysis pipeline as a background RQ job. Failure to
     # enqueue (e.g. Redis down) must NOT fail the upload — the operator can

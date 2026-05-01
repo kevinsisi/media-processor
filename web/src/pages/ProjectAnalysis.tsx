@@ -313,6 +313,44 @@ function isAssetUnanalyzed(asset: AssetAnalysisItem): boolean {
   return ANALYSIS_STEP_ORDER.some((s) => steps[s] !== "done");
 }
 
+interface ThumbnailGalleryProps {
+  assetId: number;
+  filename: string;
+  thumbnails: string[];
+}
+
+function ThumbnailGallery({ assetId, filename, thumbnails }: ThumbnailGalleryProps) {
+  if (thumbnails.length === 0) {
+    return (
+      <div
+        className="thumb-gallery thumb-gallery--empty"
+        aria-label={`${filename} 縮圖尚未產生`}
+      >
+        <span className="thumb-gallery__placeholder mono">尚未產生縮圖</span>
+      </div>
+    );
+  }
+  return (
+    <div
+      className="thumb-gallery"
+      role="group"
+      aria-label={`${filename} 縮圖`}
+    >
+      {thumbnails.map((url, i) => (
+        <img
+          key={`${assetId}-${i}-${url}`}
+          src={url}
+          alt={`${filename} 第 ${i + 1} 幀`}
+          className="thumb-gallery__frame"
+          loading="lazy"
+          decoding="async"
+          draggable={false}
+        />
+      ))}
+    </div>
+  );
+}
+
 interface AssetCardProps {
   asset: AssetAnalysisItem;
   onAnalyze: (assetId: number, force: boolean) => void;
@@ -324,6 +362,11 @@ function AssetCard({ asset, onAnalyze, selected, onToggleSelect }: AssetCardProp
   const [expanded, setExpanded] = useState(false);
   return (
     <article className="asset-card" data-status={asset.status}>
+      <ThumbnailGallery
+        assetId={asset.id}
+        filename={asset.filename}
+        thumbnails={asset.thumbnail_urls}
+      />
       <header className="asset-card__head">
         <label
           className="asset-card__select"

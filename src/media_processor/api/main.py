@@ -1,20 +1,41 @@
 """FastAPI application entry point."""
 
-from fastapi import FastAPI
+from __future__ import annotations
 
-from media_processor.api.routers import (
-    assets,
-    drafts,
-    health,
-    projects,
-    reviews,
-    settings,
-    uploads,
-)
+from pathlib import Path
+
+from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.types import ASGIApp
+
+from media_processor.api.config import settings
+from media_processor.api.routers import assets, drafts, health, projects, reviews, uploads
+from media_processor.api.routers import settings as settings_router
+
+# Cache thumbnail files for 1 day; paths are stable per (asset_id, frame_index)
+# so the browser can hold onto them aggressively.
+THUMBNAIL_CACHE_CONTROL = "public, max-age=86400, immutable"
+
+
+class ThumbnailCacheMiddleware(BaseHTTPMiddleware):
+    """Apply long-lived Cache-Control to thumbnail static responses only."""
+
+    def __init__(self, app: ASGIApp, *, prefix: str) -> None:
+        super().__init__(app)
+        self._prefix = prefix
+
+    async def dispatch(self, request: Request, call_next):  # type: ignore[no-untyped-def]
+        response = await call_next(request)
+        if request.url.path.startswith(self._prefix) and response.status_code == 200:
+            response.headers["Cache-Control"] = THUMBNAIL_CACHE_CONTROL
+        return response
+
 
 app = FastAPI(
     title="media-processor API",
-    version="0.9.0",
+    version="0.9.1",
 )
 
 app.include_router(health.router)
@@ -22,5 +43,16 @@ app.include_router(projects.router)
 app.include_router(drafts.router)
 app.include_router(assets.router)
 app.include_router(reviews.router)
-app.include_router(settings.router)
+app.include_router(settings_router.router)
 app.include_router(uploads.router)
+
+# Static-serve generated thumbnail JPEGs. The directory is the in-container
+# path; on the dispatch host this resolves under MEDIA_STORAGE_DIR. mkdir on
+# startup so the mount doesn't fail on a fresh deploy.
+Path(settings.thumbnails_dir).mkdir(parents=True, exist_ok=True)
+app.add_middleware(ThumbnailCacheMiddleware, prefix="/media/thumbnails")
+app.mount(
+    "/media/thumbnails",
+    StaticFiles(directory=settings.thumbnails_dir, check_dir=False),
+    name="thumbnails",
+)
