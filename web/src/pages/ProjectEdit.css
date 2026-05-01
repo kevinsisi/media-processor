@@ -67,6 +67,153 @@
   font-size: var(--t-sm);
 }
 
+/* ---- Draft comments (M5.2 — per-version discussion thread) ---- */
+
+.draft-comments {
+  margin-top: var(--space-6);
+  padding: var(--space-5);
+  background: var(--ink-elevated);
+  border: 1px solid var(--ink-border, rgba(255, 255, 255, 0.08));
+  border-radius: 12px;
+}
+
+.draft-comments__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: var(--space-4);
+}
+
+.draft-comments__title {
+  font-family: var(--font-display);
+  font-weight: 320;
+  font-size: var(--t-md);
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.draft-comments__count {
+  font-size: var(--t-xs);
+  letter-spacing: 0.16em;
+  color: var(--text-secondary);
+}
+
+.draft-comments__empty {
+  margin: var(--space-3) 0;
+  padding: var(--space-4);
+  color: var(--text-secondary);
+  font-size: var(--t-sm);
+  text-align: center;
+  border: 1px dashed rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+}
+
+.draft-comments__list {
+  list-style: none;
+  margin: 0 0 var(--space-4);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.comment-item {
+  padding: var(--space-3) var(--space-4);
+  background: rgba(255, 255, 255, 0.03);
+  border-left: 2px solid rgba(255, 215, 130, 0.4);
+  border-radius: 4px 8px 8px 4px;
+}
+
+.comment-item__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  margin-bottom: 4px;
+}
+
+.comment-item__author {
+  font-family: var(--font-display);
+  font-size: var(--t-sm);
+  color: var(--text-primary);
+}
+
+.comment-item__time {
+  font-size: var(--t-xs);
+  letter-spacing: 0.12em;
+  color: var(--text-secondary);
+  opacity: 0.65;
+}
+
+.comment-item__body {
+  margin: 0;
+  color: var(--text-primary);
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.draft-comments__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding-top: var(--space-4);
+}
+
+.draft-comments__form-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.draft-comments__author-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.draft-comments__author-input {
+  width: 160px;
+  padding: 6px 10px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--t-sm);
+}
+
+.draft-comments__author-input:focus-visible,
+.draft-comments__body:focus-visible {
+  outline: none;
+  border-color: var(--gold);
+}
+
+.draft-comments__body {
+  width: 100%;
+  padding: var(--space-3);
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--t-sm);
+  resize: vertical;
+}
+
+.draft-comments__form-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.draft-comments__form-err {
+  color: var(--status-down, #b34b3a);
+  font-size: var(--t-xs);
+  letter-spacing: 0.08em;
+}
+
 /* ---- Version switcher (M5.2 — every render is a new immutable version) ---- */
 
 .version-switcher {

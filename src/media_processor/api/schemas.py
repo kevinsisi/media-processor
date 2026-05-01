@@ -175,6 +175,27 @@ class EditTriggerResponse(BaseModel):
     status: str
 
 
+# ---------- M5.2 — per-version comment thread ----------
+
+
+class DraftCommentOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    draft_id: int
+    author: str
+    body: str
+    created_at: datetime
+
+
+class DraftCommentCreate(BaseModel):
+    """Body for POST /drafts/{id}/comments. ``author`` is captured from the
+    UI text field; we don't have auth yet so trust the client."""
+
+    author: str = Field(..., min_length=1, max_length=64)
+    body: str = Field(..., min_length=1, max_length=4000)
+
+
 class AssetTagOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

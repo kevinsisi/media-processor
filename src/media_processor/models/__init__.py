@@ -10,6 +10,7 @@ from media_processor.models.base import Base
 from media_processor.models.bgm import BGM
 from media_processor.models.coverage import ScriptCoverage
 from media_processor.models.draft import Draft, DraftSegment
+from media_processor.models.draft_comment import DraftComment
 from media_processor.models.enums import (
     ANALYSIS_STEP_VALUES,
     ASSET_STATUS_VALUES,
@@ -63,6 +64,7 @@ __all__ = [
     "Base",
     "CutSourceKind",
     "Draft",
+    "DraftComment",
     "DraftSegment",
     "DraftStatus",
     "EditStep",

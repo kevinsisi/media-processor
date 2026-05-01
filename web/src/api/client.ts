@@ -11,6 +11,8 @@ import type {
   AnalyzeResponse,
   AssetDetail,
   AssetThumbnailsOut,
+  DraftComment,
+  DraftCommentCreate,
   DraftDetail,
   DraftSummary,
   EditTriggerRequest,
@@ -185,6 +187,23 @@ export class ApiClient {
     payload: AnalyzeRequest = {},
   ): Promise<AnalyzeResponse> {
     return this.request<AnalyzeResponse>(`/assets/${assetId}/analyze`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  }
+
+  // ----- M5.2 — per-version comment thread -----
+
+  fetchDraftComments(draftId: number): Promise<DraftComment[]> {
+    return this.get<DraftComment[]>(`/drafts/${draftId}/comments`);
+  }
+
+  postDraftComment(
+    draftId: number,
+    payload: DraftCommentCreate,
+  ): Promise<DraftComment> {
+    return this.request<DraftComment>(`/drafts/${draftId}/comments`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),

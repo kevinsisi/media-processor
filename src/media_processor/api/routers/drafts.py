@@ -16,12 +16,20 @@ from media_processor.api.deps import get_llm_patcher, get_profile_loader, get_se
 from media_processor.api.schemas import (
     CutPlanOut,
     CutPlanSegmentOut,
+    DraftCommentCreate,
+    DraftCommentOut,
     DraftDetail,
     DraftPatchRequest,
     DraftPatchResponse,
     DraftSegmentOut,
 )
-from media_processor.models import AssetSegment, AssetTag, Draft, DraftSegment
+from media_processor.models import (
+    AssetSegment,
+    AssetTag,
+    Draft,
+    DraftComment,
+    DraftSegment,
+)
 from media_processor.profile.loader import ProfileSpec
 from media_processor.services.llm_patcher import (
     DraftSegmentSummary,
@@ -259,6 +267,49 @@ async def _build_segment_summaries(
             )
         )
     return summaries
+
+
+# ---------- M5.2 — comment thread ----------
+
+
+@router.get("/{draft_id}/comments", response_model=list[DraftCommentOut])
+async def list_draft_comments(
+    draft_id: int,
+    session: SessionDep,
+) -> list[DraftCommentOut]:
+    if (await session.get(Draft, draft_id)) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="draft not found")
+    rows = (
+        await session.execute(
+            select(DraftComment)
+            .where(DraftComment.draft_id == draft_id)
+            .order_by(DraftComment.created_at.asc(), DraftComment.id.asc())
+        )
+    ).scalars().all()
+    return [DraftCommentOut.model_validate(r) for r in rows]
+
+
+@router.post(
+    "/{draft_id}/comments",
+    response_model=DraftCommentOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_draft_comment(
+    draft_id: int,
+    payload: DraftCommentCreate,
+    session: SessionDep,
+) -> DraftCommentOut:
+    if (await session.get(Draft, draft_id)) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="draft not found")
+    comment = DraftComment(
+        draft_id=draft_id,
+        author=payload.author.strip(),
+        body=payload.body.strip(),
+    )
+    session.add(comment)
+    await session.commit()
+    await session.refresh(comment)
+    return DraftCommentOut.model_validate(comment)
 
 
 __all__ = [

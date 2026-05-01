@@ -23,6 +23,7 @@ from media_processor.models.base import Base
 from media_processor.models.enums import DRAFT_STATUS_VALUES, DraftStatus
 
 if TYPE_CHECKING:
+    from media_processor.models.draft_comment import DraftComment
     from media_processor.models.project import AssetSegment, Project
     from media_processor.models.review import Review
 
@@ -74,6 +75,13 @@ class Draft(Base):
         back_populates="draft",
         cascade="all, delete-orphan",
         passive_deletes=True,
+    )
+    comments: Mapped[list[DraftComment]] = relationship(
+        "DraftComment",
+        back_populates="draft",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="DraftComment.created_at",
     )
 
     __table_args__ = (

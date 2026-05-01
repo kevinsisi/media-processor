@@ -148,6 +148,21 @@ export interface EditTriggerResponse {
   status: string;
 }
 
+// ----- M5.2 — per-version draft comment thread -----
+
+export interface DraftComment {
+  id: number;
+  draft_id: number;
+  author: string;
+  body: string;
+  created_at: string;
+}
+
+export interface DraftCommentCreate {
+  author: string;
+  body: string;
+}
+
 export interface AssetTagOut {
   tag_type: string;
   tag_name: string;

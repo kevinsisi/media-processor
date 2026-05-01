@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ApiError, apiClient } from "../api/client";
-import type { DraftDetail, DraftSummary } from "../api/types";
+import type { DraftComment, DraftDetail, DraftSummary } from "../api/types";
 import { useDraftPolling } from "../hooks/useDraftPolling";
 import {
   EDIT_STEP_LABELS,
@@ -37,6 +37,179 @@ function classifyStepState(value: string | undefined): string {
   if (!value) return "pending";
   if (value.startsWith("failed:")) return "failed";
   return value;
+}
+
+// Comment author defaults to the value the user last typed; persists in
+// localStorage so reload keeps the same name. Falls back to "我" so a fresh
+// session has something usable.
+const COMMENT_AUTHOR_KEY = "media-processor:comment-author";
+const COMMENT_POLL_MS = 15_000;
+
+function loadCommentAuthor(): string {
+  try {
+    const v = window.localStorage.getItem(COMMENT_AUTHOR_KEY);
+    if (v && v.trim()) return v.trim();
+  } catch {
+    /* localStorage disabled — fall through */
+  }
+  return "我";
+}
+
+function formatCommentTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const now = Date.now();
+  const diffMs = now - d.getTime();
+  if (diffMs < 60_000) return "剛剛";
+  if (diffMs < 3_600_000) return `${Math.floor(diffMs / 60_000)} 分鐘前`;
+  const sameDay =
+    new Date().toDateString() === d.toDateString();
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mi = String(d.getMinutes()).padStart(2, "0");
+  if (sameDay) return `${hh}:${mi}`;
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${mm}/${dd} ${hh}:${mi}`;
+}
+
+interface DraftCommentsProps {
+  draftId: number;
+}
+
+function DraftComments({ draftId }: DraftCommentsProps) {
+  const [comments, setComments] = useState<DraftComment[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [author, setAuthor] = useState<string>(() => loadCommentAuthor());
+  const [body, setBody] = useState<string>("");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  const fetchOnce = useCallback(async () => {
+    try {
+      const list = await apiClient.fetchDraftComments(draftId);
+      setComments(list);
+      setLoadError(null);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [draftId]);
+
+  useEffect(() => {
+    setLoading(true);
+    void fetchOnce();
+    const handle = window.setInterval(() => {
+      void fetchOnce();
+    }, COMMENT_POLL_MS);
+    return () => window.clearInterval(handle);
+  }, [fetchOnce]);
+
+  const submit = useCallback(
+    async (ev: React.FormEvent<HTMLFormElement>) => {
+      ev.preventDefault();
+      const trimmedAuthor = author.trim();
+      const trimmedBody = body.trim();
+      if (!trimmedAuthor || !trimmedBody) return;
+      setSubmitting(true);
+      setSubmitError(null);
+      try {
+        const created = await apiClient.postDraftComment(draftId, {
+          author: trimmedAuthor,
+          body: trimmedBody,
+        });
+        setComments((prev) => [...prev, created]);
+        setBody("");
+        try {
+          window.localStorage.setItem(COMMENT_AUTHOR_KEY, trimmedAuthor);
+        } catch {
+          /* ignore */
+        }
+      } catch (err) {
+        setSubmitError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setSubmitting(false);
+      }
+    },
+    [author, body, draftId],
+  );
+
+  return (
+    <section className="draft-comments" aria-label="本版本留言">
+      <header className="draft-comments__head">
+        <h3 className="draft-comments__title">留言 / 討論</h3>
+        <span className="draft-comments__count mono">
+          {comments.length} 則
+        </span>
+      </header>
+
+      {loadError && (
+        <p className="edit-error" role="alert">
+          載入留言失敗：{loadError}
+        </p>
+      )}
+
+      {!loading && comments.length === 0 && (
+        <p className="draft-comments__empty mono">
+          這個版本還沒有留言，先寫第一則。
+        </p>
+      )}
+
+      <ol className="draft-comments__list">
+        {comments.map((c) => (
+          <li key={c.id} className="comment-item">
+            <div className="comment-item__head">
+              <span className="comment-item__author">{c.author}</span>
+              <span className="comment-item__time mono">
+                {formatCommentTime(c.created_at)}
+              </span>
+            </div>
+            <p className="comment-item__body">{c.body}</p>
+          </li>
+        ))}
+      </ol>
+
+      <form className="draft-comments__form" onSubmit={submit}>
+        <div className="draft-comments__form-row">
+          <label className="draft-comments__author-label">
+            <span className="mono">名字</span>
+            <input
+              type="text"
+              className="draft-comments__author-input"
+              value={author}
+              maxLength={64}
+              onChange={(e) => setAuthor(e.currentTarget.value)}
+              disabled={submitting}
+            />
+          </label>
+        </div>
+        <textarea
+          className="draft-comments__body"
+          value={body}
+          placeholder="對這個版本有什麼想法？"
+          rows={3}
+          maxLength={4000}
+          onChange={(e) => setBody(e.currentTarget.value)}
+          disabled={submitting}
+        />
+        <div className="draft-comments__form-actions">
+          {submitError && (
+            <span className="draft-comments__form-err mono" role="alert">
+              {submitError}
+            </span>
+          )}
+          <button
+            type="submit"
+            className="cta cta--primary"
+            disabled={submitting || !author.trim() || !body.trim()}
+          >
+            {submitting ? "送出中…" : "送出留言"}
+          </button>
+        </div>
+      </form>
+    </section>
+  );
 }
 
 interface VersionSwitcherProps {
@@ -540,6 +713,8 @@ export default function ProjectEdit() {
           </div>
         </section>
       )}
+
+      {selectedDraftId !== null && <DraftComments draftId={selectedDraftId} />}
     </main>
   );
 }
