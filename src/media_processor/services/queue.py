@@ -42,7 +42,7 @@ def enqueue_asset_analysis(
 
     queue = Queue(ANALYSIS_QUEUE, connection=_redis(), default_timeout=JOB_TIMEOUT_SECONDS)
     job_kwargs: dict[str, Any] = {"steps": steps, "force": force}
-    job = queue.enqueue(ANALYZE_ASSET_FN, asset_id, **{"kwargs": job_kwargs})
+    job = queue.enqueue(ANALYZE_ASSET_FN, args=(asset_id,), kwargs=job_kwargs)
     logger.info(
         "enqueued analyze_asset(asset_id=%d, steps=%s, force=%s) as job %s",
         asset_id,
