@@ -60,6 +60,4 @@ class AssetTranscript(Base):
 
     asset: Mapped[Asset] = relationship("Asset", back_populates="transcript")
 
-    __table_args__ = (
-        UniqueConstraint("asset_id", name="uq_asset_transcripts_asset_id"),
-    )
+    __table_args__ = (UniqueConstraint("asset_id", name="uq_asset_transcripts_asset_id"),)

@@ -72,6 +72,7 @@ def _draft_summary_with_urls(draft: Draft) -> DraftSummary:
         subtitle_url=_url_for("srt", draft.subtitle_path),
     )
 
+
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 
@@ -206,19 +207,13 @@ async def trigger_project_edit(
     """
     project = await session.get(Project, project_id)
     if project is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="project not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
 
     in_flight = (
         await session.execute(
             select(Draft)
             .where(Draft.project_id == project_id)
-            .where(
-                Draft.status.in_(
-                    (DraftStatus.PENDING.value, DraftStatus.PROCESSING.value)
-                )
-            )
+            .where(Draft.status.in_((DraftStatus.PENDING.value, DraftStatus.PROCESSING.value)))
             .order_by(Draft.version.desc())
             .limit(1)
         )
@@ -230,14 +225,17 @@ async def trigger_project_edit(
             "pass force=true to start a new version anyway",
         )
 
-    next_version = int(
-        (
-            await session.scalar(
-                select(func.max(Draft.version)).where(Draft.project_id == project_id)
+    next_version = (
+        int(
+            (
+                await session.scalar(
+                    select(func.max(Draft.version)).where(Draft.project_id == project_id)
+                )
             )
+            or 0
         )
-        or 0
-    ) + 1
+        + 1
+    )
     new_draft = Draft(
         project_id=project_id,
         profile_name=project.profile_name,
@@ -323,9 +321,7 @@ async def upsert_project_script(
         ).all()
     ]
     if asset_ids:
-        await session.execute(
-            delete(ScriptCoverage).where(ScriptCoverage.asset_id.in_(asset_ids))
-        )
+        await session.execute(delete(ScriptCoverage).where(ScriptCoverage.asset_id.in_(asset_ids)))
         await session.commit()
     return ScriptOut.model_validate(row)
 

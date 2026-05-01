@@ -199,9 +199,7 @@ async def _load_session(session_id: str, session: AsyncSession) -> UploadSession
     return row
 
 
-async def _build_complete_response(
-    row: UploadSession, session: AsyncSession
-) -> UploadCompleteOut:
+async def _build_complete_response(row: UploadSession, session: AsyncSession) -> UploadCompleteOut:
     # Idempotent re-complete: rebuild the response from current DB state.
     if row.kind == UploadKind.VIDEO.value:
         # Best-effort: find the latest asset for this project with this filename.
@@ -223,9 +221,7 @@ async def _build_complete_response(
         )
     if row.kind == UploadKind.SCRIPT.value:
         script = (
-            await session.execute(
-                select(Script).where(Script.project_id == row.project_id)
-            )
+            await session.execute(select(Script).where(Script.project_id == row.project_id))
         ).scalar_one_or_none()
         return UploadCompleteOut(
             session=_to_session_out(row),
@@ -234,9 +230,7 @@ async def _build_complete_response(
     return UploadCompleteOut(session=_to_session_out(row))
 
 
-async def _finalize_video(
-    row: UploadSession, session: AsyncSession, expected: int
-) -> AssetDetail:
+async def _finalize_video(row: UploadSession, session: AsyncSession, expected: int) -> AssetDetail:
     target_dir = Path(settings.assets_dir) / str(row.project_id)
     target_path = target_dir / row.filename
     upload_svc.assemble_file(settings.uploads_dir, row.id, target_path, expected)
@@ -304,9 +298,7 @@ async def _finalize_video(
     return _asset_to_detail(asset_loaded)
 
 
-async def _finalize_script(
-    row: UploadSession, session: AsyncSession, expected: int
-) -> ScriptOut:
+async def _finalize_script(row: UploadSession, session: AsyncSession, expected: int) -> ScriptOut:
     target_dir = Path(settings.uploads_dir) / row.id
     assembled = target_dir / "_assembled.txt"
     upload_svc.assemble_file(settings.uploads_dir, row.id, assembled, expected)
@@ -319,9 +311,7 @@ async def _finalize_script(
     body = assembled.read_text(encoding="utf-8", errors="replace")
 
     existing = (
-        await session.execute(
-            select(Script).where(Script.project_id == row.project_id)
-        )
+        await session.execute(select(Script).where(Script.project_id == row.project_id))
     ).scalar_one_or_none()
     now = datetime.now(UTC)
     if existing is None:

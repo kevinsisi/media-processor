@@ -104,11 +104,7 @@ class CutPlan:
 
 def _format_scene_tags(asset: Asset) -> str:
     pairs = sorted(
-        (
-            (t.tag_name, round(float(t.confidence), 2))
-            for t in asset.tags
-            if t.tag_type == "scene"
-        ),
+        ((t.tag_name, round(float(t.confidence), 2)) for t in asset.tags if t.tag_type == "scene"),
         key=lambda p: p[1],
         reverse=True,
     )
@@ -207,9 +203,9 @@ def _format_asset_block(
 # numeric thresholds so the prompt is auditable: when a draft only uses
 # 2 / 14 clips like project 3 did, you can compare the rendered plan
 # against these constants instead of guessing what the model heard.
-MIN_ASSET_COVERAGE_RATIO = 0.5   # use at least half of the available clips
-TARGET_IMPROV_SHARE = 0.4        # ~40% of total length should be improv
-MIN_SEGMENTS_FALLBACK = 6        # at least this many cuts even on tiny shoots
+MIN_ASSET_COVERAGE_RATIO = 0.5  # use at least half of the available clips
+TARGET_IMPROV_SHARE = 0.4  # ~40% of total length should be improv
+MIN_SEGMENTS_FALLBACK = 6  # at least this many cuts even on tiny shoots
 MIN_SEGMENT_DURATION_S = 1.5
 MAX_SEGMENT_DURATION_S = 6.0
 
@@ -319,9 +315,7 @@ def _validate_plan(
     if not isinstance(data, dict):
         raise EditPlanInvalidError("top-level JSON is not an object")
     if data.get("schema_version") != SCHEMA_VERSION:
-        raise EditPlanInvalidError(
-            f"schema_version mismatch: got {data.get('schema_version')!r}"
-        )
+        raise EditPlanInvalidError(f"schema_version mismatch: got {data.get('schema_version')!r}")
     raw_segments = data.get("segments")
     if not isinstance(raw_segments, list) or not raw_segments:
         raise EditPlanInvalidError("segments empty or wrong type")
@@ -376,9 +370,7 @@ class _ProjectContext:
     asset_bounds: dict[int, int]
 
 
-async def _load_project_context(
-    session: AsyncSession, project_id: int
-) -> _ProjectContext:
+async def _load_project_context(session: AsyncSession, project_id: int) -> _ProjectContext:
     project = await session.get(Project, project_id)
     if project is None:
         raise EditPlanError(f"project {project_id} not found")
@@ -502,9 +494,7 @@ async def plan(
                     f"status={response.status_code} body={response.text[:200]}"
                 )
             try:
-                segments, notes = _validate_plan(
-                    response.json(), asset_bounds=ctx.asset_bounds
-                )
+                segments, notes = _validate_plan(response.json(), asset_bounds=ctx.asset_bounds)
             except EditPlanInvalidError as exc:
                 last_invalid = exc
                 logger.warning("edit-planner JSON invalid (%s); rotating key", exc)

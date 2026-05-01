@@ -81,9 +81,7 @@ async def _load_script_body(session: AsyncSession, project_id: int) -> str:
     return script.body or ""
 
 
-async def _set_step_state(
-    session: AsyncSession, asset_id: int, step: str, value: str
-) -> None:
+async def _set_step_state(session: AsyncSession, asset_id: int, step: str, value: str) -> None:
     """Read-modify-write the analysis_steps_json blob for ``asset_id``."""
     asset = await session.get(Asset, asset_id)
     if asset is None:
@@ -120,9 +118,7 @@ async def _finalise_status(
     blob: dict[str, str] = dict(asset.analysis_steps_json or {})
     requested_states = [blob.get(s, "pending") for s in requested_steps]
     has_failure = any(state.startswith("failed:") for state in requested_states)
-    has_pending_or_running = any(
-        state in {"pending", "running"} for state in requested_states
-    )
+    has_pending_or_running = any(state in {"pending", "running"} for state in requested_states)
     if has_pending_or_running:
         # Should not happen after a normal pipeline run — leave status alone.
         return
@@ -145,14 +141,10 @@ async def _run_stt(
 ) -> str:
     """Run STT step. Returns the new state token for the step."""
     existing = (
-        await session.execute(
-            select(AssetTranscript).where(AssetTranscript.asset_id == asset.id)
-        )
+        await session.execute(select(AssetTranscript).where(AssetTranscript.asset_id == asset.id))
     ).scalar_one_or_none()
     if existing is not None and existing.edited and not force:
-        logger.info(
-            "asset %d transcript edited=true, skipping STT (force=False)", asset.id
-        )
+        logger.info("asset %d transcript edited=true, skipping STT (force=False)", asset.id)
         return "done"
 
     media_path = Path(asset.file_path)
@@ -304,9 +296,7 @@ async def _run_coverage(session: AsyncSession, asset: Asset) -> str:
         raise script_coverage.ScriptCoverageError("LLM_API_KEYS not configured")
 
     transcript = (
-        await session.execute(
-            select(AssetTranscript).where(AssetTranscript.asset_id == asset.id)
-        )
+        await session.execute(select(AssetTranscript).where(AssetTranscript.asset_id == asset.id))
     ).scalar_one_or_none()
     if transcript is None or not transcript.segments_json:
         raise script_coverage.ScriptCoverageError("transcript missing for coverage")

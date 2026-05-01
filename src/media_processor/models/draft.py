@@ -141,8 +141,7 @@ class DraftSegment(Base):
             name="ck_draft_segments_range",
         ),
         CheckConstraint(
-            "asset_start_ms IS NULL OR asset_end_ms IS NULL "
-            "OR asset_start_ms < asset_end_ms",
+            "asset_start_ms IS NULL OR asset_end_ms IS NULL OR asset_start_ms < asset_end_ms",
             name="ck_draft_segments_asset_range",
         ),
     )

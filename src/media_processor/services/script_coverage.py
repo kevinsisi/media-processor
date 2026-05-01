@@ -88,9 +88,7 @@ def _strip_fence(text: str) -> str:
 
 
 def _format_segments(segments: list[TranscriptSegmentInput]) -> str:
-    return "\n".join(
-        f"{seg.idx}, [{seg.start_ms} - {seg.end_ms}] {seg.text}" for seg in segments
-    )
+    return "\n".join(f"{seg.idx}, [{seg.start_ms} - {seg.end_ms}] {seg.text}" for seg in segments)
 
 
 def _validate_response(

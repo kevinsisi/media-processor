@@ -137,9 +137,7 @@ def serialise_draft_detail(draft: Draft) -> DraftDetail:
         created_at=draft.created_at,
         progress_steps=dict(draft.progress_steps_json or {}) or None,
         mp4_url=_resolve_draft_url(draft, suffix="mp4", stored_path=draft.mp4_preview_path),
-        subtitle_url=_resolve_draft_url(
-            draft, suffix="srt", stored_path=draft.subtitle_path
-        ),
+        subtitle_url=_resolve_draft_url(draft, suffix="srt", stored_path=draft.subtitle_path),
         cut_plan=_cut_plan_out(draft.cut_plan_json),
         prompt_feedback=draft.prompt_feedback,
         segments=[
@@ -280,12 +278,16 @@ async def list_draft_comments(
     if (await session.get(Draft, draft_id)) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="draft not found")
     rows = (
-        await session.execute(
-            select(DraftComment)
-            .where(DraftComment.draft_id == draft_id)
-            .order_by(DraftComment.created_at.asc(), DraftComment.id.asc())
+        (
+            await session.execute(
+                select(DraftComment)
+                .where(DraftComment.draft_id == draft_id)
+                .order_by(DraftComment.created_at.asc(), DraftComment.id.asc())
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return [DraftCommentOut.model_validate(r) for r in rows]
 
 

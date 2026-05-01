@@ -53,6 +53,7 @@ def thumbnail_urls_for_asset(asset_id: int) -> list[str]:
         out.append(thumbnail_url_for(asset_id, idx))
     return out
 
+
 router = APIRouter(prefix="/assets", tags=["assets"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
@@ -143,9 +144,7 @@ async def get_asset_transcript(
     if asset is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="asset not found")
     row = (
-        await session.execute(
-            select(AssetTranscript).where(AssetTranscript.asset_id == asset_id)
-        )
+        await session.execute(select(AssetTranscript).where(AssetTranscript.asset_id == asset_id))
     ).scalar_one_or_none()
     if row is None:
         raise HTTPException(
@@ -201,9 +200,7 @@ async def put_asset_transcript(
     now = datetime.now(UTC)
 
     row = (
-        await session.execute(
-            select(AssetTranscript).where(AssetTranscript.asset_id == asset_id)
-        )
+        await session.execute(select(AssetTranscript).where(AssetTranscript.asset_id == asset_id))
     ).scalar_one_or_none()
     if row is None:
         row = AssetTranscript(
@@ -261,9 +258,7 @@ async def get_asset_coverage(
     if asset is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="asset not found")
     row = (
-        await session.execute(
-            select(ScriptCoverage).where(ScriptCoverage.asset_id == asset_id)
-        )
+        await session.execute(select(ScriptCoverage).where(ScriptCoverage.asset_id == asset_id))
     ).scalar_one_or_none()
     if row is None:
         raise HTTPException(

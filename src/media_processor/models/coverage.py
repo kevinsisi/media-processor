@@ -61,6 +61,4 @@ class ScriptCoverage(Base):
 
     asset: Mapped[Asset] = relationship("Asset", back_populates="coverage")
 
-    __table_args__ = (
-        UniqueConstraint("asset_id", name="uq_script_coverage_asset_id"),
-    )
+    __table_args__ = (UniqueConstraint("asset_id", name="uq_script_coverage_asset_id"),)

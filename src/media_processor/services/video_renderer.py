@@ -125,9 +125,7 @@ def _run(cmd: list[str], *, timeout_s: float, stage: str) -> None:
     try:
         subprocess.run(cmd, capture_output=True, timeout=timeout_s, check=True)
     except subprocess.TimeoutExpired as exc:
-        raise VideoRenderTimeoutError(
-            f"{stage} timed out after {timeout_s}s"
-        ) from exc
+        raise VideoRenderTimeoutError(f"{stage} timed out after {timeout_s}s") from exc
     except FileNotFoundError as exc:
         raise FFmpegMissingError(str(exc)) from exc
     except subprocess.CalledProcessError as exc:
@@ -210,9 +208,7 @@ def cut_segments(
     for cut in plan.segments:
         src = asset_paths.get(cut.asset_id)
         if src is None or not Path(src).is_file():
-            raise VideoRenderError(
-                f"segment {cut.order}: asset {cut.asset_id} source missing"
-            )
+            raise VideoRenderError(f"segment {cut.order}: asset {cut.asset_id} source missing")
         out = intermediate_dir / f"seg_{cut.order:04d}.mp4"
         _cut_segment(Path(src), cut, out, target_aspect)
         out_paths.append(out)
@@ -357,9 +353,7 @@ def render(
     # subtitles we still concat first so a subtitle failure leaves a
     # playable preview behind.
     list_path = intermediate_dir / "concat.txt"
-    concat_path = (
-        intermediate_dir / "concat.mp4" if srt_path is not None else output_path
-    )
+    concat_path = intermediate_dir / "concat.mp4" if srt_path is not None else output_path
     concat_segments(intermediates, concat_path, list_path)
     if on_progress is not None:
         on_progress("concat", 1, 1)

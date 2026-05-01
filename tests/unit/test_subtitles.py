@@ -117,9 +117,7 @@ def test_build_cues_no_overlap_returns_empty() -> None:
         reason="",
     )
     plan = _plan([cut])
-    transcript = _FakeTranscript(
-        [{"idx": 0, "start_ms": 0, "end_ms": 1_000, "text": "略"}]
-    )
+    transcript = _FakeTranscript([{"idx": 0, "start_ms": 0, "end_ms": 1_000, "text": "略"}])
     cues = build_cues(plan, {1: transcript})  # type: ignore[arg-type]
     assert cues == []
 
@@ -131,12 +129,8 @@ def test_build_cues_advances_timeline_across_cuts() -> None:
     ]
     plan = _plan(cuts)
     transcripts = {
-        1: _FakeTranscript(
-            [{"idx": 0, "start_ms": 0, "end_ms": 1_500, "text": "甲"}]
-        ),
-        2: _FakeTranscript(
-            [{"idx": 0, "start_ms": 0, "end_ms": 2_000, "text": "乙"}]
-        ),
+        1: _FakeTranscript([{"idx": 0, "start_ms": 0, "end_ms": 1_500, "text": "甲"}]),
+        2: _FakeTranscript([{"idx": 0, "start_ms": 0, "end_ms": 2_000, "text": "乙"}]),
     }
     cues = build_cues(plan, transcripts)  # type: ignore[arg-type]
     # Second cue's timeline anchor must be >= cumulative duration of cut 0.

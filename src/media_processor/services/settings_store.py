@@ -85,9 +85,7 @@ async def get_llm_api_keys(session: AsyncSession) -> tuple[str, ...]:
     """Resolve the active key pool: DB row first, env fallback."""
 
     row = (
-        await session.execute(
-            select(AppSetting.value).where(AppSetting.key == LLM_API_KEYS_KEY)
-        )
+        await session.execute(select(AppSetting.value).where(AppSetting.key == LLM_API_KEYS_KEY))
     ).scalar_one_or_none()
     if row:
         keys = [k.strip() for k in row.split(",") if k.strip()]
@@ -98,9 +96,7 @@ async def get_llm_api_keys(session: AsyncSession) -> tuple[str, ...]:
 
 async def get_pool_summary(session: AsyncSession) -> KeyPoolSummary:
     row = (
-        await session.execute(
-            select(AppSetting.value).where(AppSetting.key == LLM_API_KEYS_KEY)
-        )
+        await session.execute(select(AppSetting.value).where(AppSetting.key == LLM_API_KEYS_KEY))
     ).scalar_one_or_none()
     db_keys = [k.strip() for k in (row or "").split(",") if k.strip()]
     if db_keys:

@@ -43,9 +43,7 @@ def render_draft(
     # Local import keeps the api container free of ffmpeg / heavy deps.
     from media_processor.services.edit_orchestrator import run_render
 
-    return asyncio.run(
-        run_render(project_id, force=force, target_duration_ms=target_duration_ms)
-    )
+    return asyncio.run(run_render(project_id, force=force, target_duration_ms=target_duration_ms))
 
 
 def _scratch_dir() -> Path:

@@ -57,9 +57,7 @@ _USER_TARGET_MIN_MS = 10_000
 _USER_TARGET_MAX_MS = 300_000
 
 
-def _compute_auto_target_ms(
-    profile_target_ms: int, total_source_ms: int, asset_count: int
-) -> int:
+def _compute_auto_target_ms(profile_target_ms: int, total_source_ms: int, asset_count: int) -> int:
     """Pick a target render length from the available source material.
 
     Profiles default to 30 s, fine for a 1–2 min shoot. With a lot of
@@ -69,9 +67,7 @@ def _compute_auto_target_ms(
     """
     if total_source_ms < 300_000:
         return profile_target_ms
-    source_based = max(
-        _AUTO_TARGET_MIN_MS, min(_AUTO_TARGET_MAX_MS, total_source_ms // 10)
-    )
+    source_based = max(_AUTO_TARGET_MIN_MS, min(_AUTO_TARGET_MAX_MS, total_source_ms // 10))
     asset_floor = max(_AUTO_TARGET_MIN_MS, (asset_count // 2) * 5_000)
     dynamic = max(source_based, asset_floor)
     return max(profile_target_ms, dynamic)
@@ -185,9 +181,7 @@ async def _persist_plan(handle: _DraftHandle, plan: CutPlan) -> None:
         draft.cut_plan_json = edit_planner.serialise_plan(plan)
         cursor_ms = 0
         # Replace any leftover segments from a prior run (force).
-        await session.execute(
-            delete(DraftSegment).where(DraftSegment.draft_id == handle.draft_id)
-        )
+        await session.execute(delete(DraftSegment).where(DraftSegment.draft_id == handle.draft_id))
         for cut in plan.segments:
             duration = cut.asset_end_ms - cut.asset_start_ms
             session.add(
@@ -254,9 +248,7 @@ async def _gather_render_inputs(
         tx_rows = (
             (
                 await session.execute(
-                    select(AssetTranscript).where(
-                        AssetTranscript.asset_id.in_(asset_paths.keys())
-                    )
+                    select(AssetTranscript).where(AssetTranscript.asset_id.in_(asset_paths.keys()))
                 )
             )
             .scalars()
@@ -350,8 +342,9 @@ async def run_render(
         # one. Cheap aggregate query — no asset rows materialised.
         source_total_ms, asset_count = (
             await session.execute(
-                select(func.coalesce(func.sum(Asset.duration_ms), 0), func.count(Asset.id))
-                .where(Asset.project_id == project_id)
+                select(func.coalesce(func.sum(Asset.duration_ms), 0), func.count(Asset.id)).where(
+                    Asset.project_id == project_id
+                )
             )
         ).one()
 
@@ -431,9 +424,9 @@ async def run_render(
             return  # only flip terminal state
         # Map the renderer's three buckets to our stage names + done state.
         if stage == "cut":
-            asyncio.run_coroutine_threadsafe(
-                update_state(EditStep.CUT.value, "done"), loop
-            ).result(timeout=10)
+            asyncio.run_coroutine_threadsafe(update_state(EditStep.CUT.value, "done"), loop).result(
+                timeout=10
+            )
             asyncio.run_coroutine_threadsafe(
                 update_state(EditStep.CONCAT.value, "running"), loop
             ).result(timeout=10)

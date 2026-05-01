@@ -96,9 +96,7 @@ async def update_llm_api_keys(
 ) -> LLMKeysUpdateOut:
     parsed = parse_keys_input(payload.raw)
     accepted = len(parsed)
-    raw_lines = sum(
-        1 for line in payload.raw.replace("\r\n", "\n").split("\n") if line.strip()
-    )
+    raw_lines = sum(1 for line in payload.raw.replace("\r\n", "\n").split("\n") if line.strip())
     rejected = max(0, raw_lines - accepted)
 
     if not payload.replace:
@@ -175,9 +173,7 @@ async def sync_from_key_manager(
     from media_processor.services.settings_store import LLM_API_KEYS_KEY
 
     existing = (
-        await session.execute(
-            select(AppSetting.value).where(AppSetting.key == LLM_API_KEYS_KEY)
-        )
+        await session.execute(select(AppSetting.value).where(AppSetting.key == LLM_API_KEYS_KEY))
     ).scalar_one_or_none()
     existing_keys = [k.strip() for k in (existing or "").split(",") if k.strip()]
 

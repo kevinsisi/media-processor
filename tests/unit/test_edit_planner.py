@@ -35,11 +35,7 @@ _MODEL = "gemini-2.5-flash"
 
 
 def _build_response(payload: dict[str, Any]) -> httpx.Response:
-    body = {
-        "candidates": [
-            {"content": {"parts": [{"text": json.dumps(payload)}]}}
-        ]
-    }
+    body = {"candidates": [{"content": {"parts": [{"text": json.dumps(payload)}]}}]}
     return httpx.Response(200, json=body)
 
 
@@ -179,9 +175,7 @@ async def test_plan_invalid_schema_raises(
 
 
 @pytest.mark.asyncio
-async def test_plan_quota_exhausted(
-    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_plan_quota_exhausted(session: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(429, text="rate-limited")
 
