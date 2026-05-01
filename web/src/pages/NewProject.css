@@ -1,0 +1,223 @@
+/* New project — single-column form, mobile-first, editorial palette. */
+
+.new-project {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: var(--space-7) var(--space-5) var(--space-9);
+}
+
+.np-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  margin-top: var(--space-6);
+}
+
+.np-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.np-field__label {
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.np-field__input {
+  width: 100%;
+  min-height: 48px;
+  padding: var(--space-3) var(--space-4);
+  background: var(--ink-elevated);
+  border: 1px solid var(--ink-line-strong);
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  font-size: var(--t-md);
+  letter-spacing: 0.01em;
+  transition:
+    border-color 200ms var(--ease-out),
+    background 200ms var(--ease-out);
+  -webkit-appearance: none;
+  appearance: none;
+  border-radius: 0;
+}
+
+.np-field__input:focus {
+  outline: none;
+  border-color: var(--gold);
+  background: var(--ink-overlay);
+}
+
+select.np-field__input {
+  background-image: linear-gradient(45deg, transparent 50%, var(--text-secondary) 50%),
+    linear-gradient(135deg, var(--text-secondary) 50%, transparent 50%);
+  background-position:
+    calc(100% - 18px) center,
+    calc(100% - 12px) center;
+  background-size: 6px 6px;
+  background-repeat: no-repeat;
+  padding-right: 36px;
+}
+
+/* Aspect-ratio picker */
+
+.np-ratios {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  border: none;
+  padding: 0;
+  margin: 0;
+}
+
+.np-ratios__legend {
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  margin-bottom: var(--space-2);
+}
+
+.np-ratios__grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-3);
+}
+
+.ratio-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-3);
+  background: var(--ink-elevated);
+  border: 1px solid var(--ink-line-strong);
+  cursor: pointer;
+  transition:
+    border-color 200ms var(--ease-out),
+    background 200ms var(--ease-out);
+  min-height: 140px;
+}
+
+.ratio-card:hover {
+  border-color: var(--gold);
+}
+
+.ratio-card--on {
+  border-color: var(--gold);
+  background: var(--ink-overlay);
+  box-shadow: 0 0 0 1px var(--gold) inset;
+}
+
+.ratio-card__radio {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ratio-card__frame {
+  width: 100%;
+  max-width: 56px;
+  background: linear-gradient(180deg, var(--gold-soft), transparent);
+  border: 1px solid var(--gold);
+}
+
+.ratio-card__label {
+  font-family: var(--font-display);
+  font-size: var(--t-md);
+  letter-spacing: 0.05em;
+  color: var(--text-primary);
+}
+
+.ratio-card__hint {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  text-align: center;
+}
+
+.ratio-card--on .ratio-card__hint {
+  color: var(--gold);
+}
+
+/* Submit area */
+
+.np-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--space-3);
+}
+
+.np-submit {
+  min-height: 48px;
+  padding: var(--space-3) var(--space-6);
+  font-family: var(--font-mono);
+  font-size: var(--t-sm);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  background: var(--gold);
+  border: 1px solid var(--gold);
+  color: var(--ink-base);
+  cursor: pointer;
+  transition:
+    background 200ms var(--ease-out),
+    transform 200ms var(--ease-out);
+}
+
+.np-submit:hover:not(:disabled) {
+  background: var(--gold-bright);
+  border-color: var(--gold-bright);
+  transform: translateY(-1px);
+}
+
+.np-submit:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.np-error {
+  padding: var(--space-3) var(--space-4);
+  border-left: 3px solid var(--status-down);
+  background: var(--ink-elevated);
+  color: var(--status-down);
+  font-size: var(--t-sm);
+}
+
+/* Mobile-first refinements */
+
+@media (max-width: 600px) {
+  .new-project {
+    padding: var(--space-5) var(--space-4) calc(var(--space-9) + 60px);
+  }
+  .np-ratios__grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--space-2);
+  }
+  .ratio-card {
+    padding: var(--space-3) var(--space-2);
+    min-height: 132px;
+  }
+  .ratio-card__frame {
+    max-width: 48px;
+  }
+  .np-actions {
+    position: sticky;
+    bottom: 12px;
+    background: linear-gradient(
+      to bottom,
+      transparent,
+      var(--ink-base) 30%
+    );
+    padding: var(--space-4) 0 0;
+  }
+  .np-submit {
+    width: 100%;
+    min-height: 52px;
+  }
+}

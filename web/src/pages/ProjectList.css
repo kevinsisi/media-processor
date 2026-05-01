@@ -54,6 +54,27 @@
   line-height: 1.55;
 }
 
+.hero__actions {
+  margin-top: var(--space-5);
+  display: flex;
+  gap: var(--space-3);
+}
+
+.cta--new {
+  min-height: 48px;
+  text-decoration: none;
+}
+
+@media (max-width: 600px) {
+  .cta--new {
+    width: 100%;
+    justify-content: center;
+  }
+  .hero__actions {
+    margin-top: var(--space-4);
+  }
+}
+
 /* Board column header */
 .board__columns {
   display: grid;

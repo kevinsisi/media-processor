@@ -96,6 +96,11 @@ export default function ProjectList() {
           每一件代表一個專案 ── AI 已將原始素材剪成短片。
           核准任一草稿，即會送入你的剪輯軟體。
         </p>
+        <div className="hero__actions">
+          <Link to="/projects/new" className="cta cta--primary cta--new">
+            新增專案 +
+          </Link>
+        </div>
       </section>
 
       <section className="board">

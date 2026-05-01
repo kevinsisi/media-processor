@@ -10,6 +10,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from media_processor.models.enums import REVIEW_ACTION_VALUES
 
 ReviewActionLiteral = Literal["approve", "reject", "repatch", "download"]
+TargetAspectRatioLiteral = Literal["9:16", "4:5", "1:1"]
+UploadKindLiteral = Literal["video", "script"]
 
 
 class ProjectSummary(BaseModel):
@@ -20,6 +22,7 @@ class ProjectSummary(BaseModel):
     client: str | None
     profile_name: str
     status: str
+    target_aspect_ratio: str
     created_at: datetime
     asset_count: int
     latest_draft_version: int | None
@@ -34,9 +37,58 @@ class ProjectDetail(BaseModel):
     profile_name: str
     source_dir: str
     status: str
+    target_aspect_ratio: str
     created_at: datetime
     asset_count: int
     draft_count: int
+
+
+class ProjectCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    client: str | None = Field(default=None, max_length=255)
+    profile_name: str = Field(..., min_length=1, max_length=128)
+    target_aspect_ratio: TargetAspectRatioLiteral = "9:16"
+
+
+class ScriptOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    project_id: int
+    body: str
+    source_filename: str | None
+    updated_at: datetime
+
+
+class ScriptUpsert(BaseModel):
+    body: str = Field(..., max_length=1_048_576)
+    source_filename: str | None = Field(default=None, max_length=255)
+
+
+class UploadSessionCreate(BaseModel):
+    kind: UploadKindLiteral
+    filename: str = Field(..., min_length=1, max_length=512)
+    total_size: int = Field(..., ge=0)
+    chunk_size: int = Field(..., gt=0, le=64 * 1024 * 1024)
+    sha256: str | None = Field(default=None, min_length=64, max_length=64)
+
+
+class UploadSessionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    project_id: int
+    kind: str
+    filename: str
+    total_size: int
+    chunk_size: int
+    received_chunks: list[int]
+    status: str
+
+
+class UploadCompleteOut(BaseModel):
+    session: UploadSessionOut
+    asset: "AssetDetail | None" = None
+    script: ScriptOut | None = None
 
 
 class DraftSummary(BaseModel):
@@ -126,3 +178,7 @@ class DraftPatchResponse(BaseModel):
     required_segments_overrides: dict[str, Any]
     patched_tag_weights: dict[str, float]
     patched_required_segments: dict[str, Any]
+
+
+# Resolve forward reference: UploadCompleteOut references AssetDetail defined below.
+UploadCompleteOut.model_rebuild()

@@ -19,10 +19,16 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from media_processor.models.base import Base
-from media_processor.models.enums import PROJECT_STATUS_VALUES, ProjectStatus
+from media_processor.models.enums import (
+    PROJECT_STATUS_VALUES,
+    TARGET_ASPECT_RATIO_VALUES,
+    ProjectStatus,
+    TargetAspectRatio,
+)
 
 if TYPE_CHECKING:
     from media_processor.models.draft import Draft
+    from media_processor.models.script import Script
 
 
 def _sql_in_list(values: tuple[str, ...]) -> str:
@@ -44,6 +50,12 @@ class Project(Base):
         nullable=False,
         default=ProjectStatus.PENDING.value,
     )
+    target_aspect_ratio: Mapped[str] = mapped_column(
+        String(8),
+        nullable=False,
+        default=TargetAspectRatio.REELS.value,
+        server_default=TargetAspectRatio.REELS.value,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -62,11 +74,22 @@ class Project(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
+    script: Mapped[Script | None] = relationship(
+        "Script",
+        back_populates="project",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        uselist=False,
+    )
 
     __table_args__ = (
         CheckConstraint(
             "status IN " + _sql_in_list(PROJECT_STATUS_VALUES),
             name="ck_projects_status",
+        ),
+        CheckConstraint(
+            "target_aspect_ratio IN " + _sql_in_list(TARGET_ASPECT_RATIO_VALUES),
+            name="ck_projects_target_aspect_ratio",
         ),
     )
 

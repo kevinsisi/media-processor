@@ -10,10 +10,16 @@ import type {
   AssetDetail,
   DraftDetail,
   DraftSummary,
+  ProjectCreate,
   ProjectDetail,
   ProjectSummary,
   ReviewCreate,
   ReviewOut,
+  ScriptOut,
+  ScriptUpsert,
+  UploadCompleteOut,
+  UploadSessionCreate,
+  UploadSessionOut,
 } from "./types";
 
 const DEFAULT_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
@@ -69,6 +75,56 @@ export class ApiClient {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
+  }
+
+  createProject(payload: ProjectCreate): Promise<ProjectDetail> {
+    return this.request<ProjectDetail>("/projects", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async fetchScript(projectId: number): Promise<ScriptOut | null> {
+    try {
+      return await this.get<ScriptOut>(`/projects/${projectId}/script`);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) return null;
+      throw err;
+    }
+  }
+
+  putScript(projectId: number, payload: ScriptUpsert): Promise<ScriptOut> {
+    return this.request<ScriptOut>(`/projects/${projectId}/script`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  }
+
+  createUploadSession(
+    projectId: number,
+    payload: UploadSessionCreate,
+  ): Promise<UploadSessionOut> {
+    return this.request<UploadSessionOut>(`/projects/${projectId}/uploads`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  }
+
+  fetchUploadSession(sessionId: string): Promise<UploadSessionOut> {
+    return this.get<UploadSessionOut>(`/uploads/${sessionId}`);
+  }
+
+  completeUploadSession(sessionId: string): Promise<UploadCompleteOut> {
+    return this.request<UploadCompleteOut>(`/uploads/${sessionId}/complete`, {
+      method: "POST",
+    });
+  }
+
+  uploadChunkUrl(sessionId: string, index: number): string {
+    return `${this.baseUrl}/uploads/${sessionId}/chunks/${index}`;
   }
 
   private get<T>(path: string): Promise<T> {

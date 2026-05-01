@@ -28,6 +28,13 @@ class Settings(BaseSettings):
 
     profiles_dir: str = Field(default="profiles")
 
+    # Storage roots — bind-mounted by docker-compose.
+    # MEDIA_STORAGE_DIR on the host -> /app/media in the container.
+    media_root: str = Field(default="/app/media")
+    assets_dir: str = Field(default="/app/media/assets")
+    drafts_dir: str = Field(default="/app/media/drafts")
+    uploads_dir: str = Field(default="/app/media/uploads")
+
     @property
     def postgres_dsn(self) -> str:
         return (

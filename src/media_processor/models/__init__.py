@@ -12,19 +12,30 @@ from media_processor.models.enums import (
     DRAFT_STATUS_VALUES,
     PROJECT_STATUS_VALUES,
     REVIEW_ACTION_VALUES,
+    TARGET_ASPECT_RATIO_VALUES,
+    UPLOAD_KIND_VALUES,
+    UPLOAD_STATUS_VALUES,
     DraftStatus,
     ProjectStatus,
     ReviewAction,
+    TargetAspectRatio,
+    UploadKind,
+    UploadStatus,
 )
 from media_processor.models.profile import Profile
 from media_processor.models.project import Asset, AssetSegment, AssetTag, Project
 from media_processor.models.review import Review
+from media_processor.models.script import Script
+from media_processor.models.upload_session import UploadSession
 
 __all__ = [
     "BGM",
     "DRAFT_STATUS_VALUES",
     "PROJECT_STATUS_VALUES",
     "REVIEW_ACTION_VALUES",
+    "TARGET_ASPECT_RATIO_VALUES",
+    "UPLOAD_KIND_VALUES",
+    "UPLOAD_STATUS_VALUES",
     "Asset",
     "AssetSegment",
     "AssetTag",
@@ -37,4 +48,9 @@ __all__ = [
     "ProjectStatus",
     "Review",
     "ReviewAction",
+    "Script",
+    "TargetAspectRatio",
+    "UploadKind",
+    "UploadSession",
+    "UploadStatus",
 ]

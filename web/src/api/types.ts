@@ -2,6 +2,9 @@
 // Hand-maintained for now — there's no OpenAPI codegen step yet.
 
 export type ReviewAction = "approve" | "reject" | "repatch" | "download";
+export type TargetAspectRatio = "9:16" | "4:5" | "1:1";
+export type UploadKind = "video" | "script";
+export type UploadStatus = "pending" | "complete" | "aborted";
 
 export interface ProjectSummary {
   id: number;
@@ -9,6 +12,7 @@ export interface ProjectSummary {
   client: string | null;
   profile_name: string;
   status: string;
+  target_aspect_ratio: string;
   created_at: string;
   asset_count: number;
   latest_draft_version: number | null;
@@ -21,9 +25,54 @@ export interface ProjectDetail {
   profile_name: string;
   source_dir: string;
   status: string;
+  target_aspect_ratio: string;
   created_at: string;
   asset_count: number;
   draft_count: number;
+}
+
+export interface ProjectCreate {
+  name: string;
+  client?: string | null;
+  profile_name: string;
+  target_aspect_ratio: TargetAspectRatio;
+}
+
+export interface ScriptOut {
+  project_id: number;
+  body: string;
+  source_filename: string | null;
+  updated_at: string;
+}
+
+export interface ScriptUpsert {
+  body: string;
+  source_filename?: string | null;
+}
+
+export interface UploadSessionCreate {
+  kind: UploadKind;
+  filename: string;
+  total_size: number;
+  chunk_size: number;
+  sha256?: string | null;
+}
+
+export interface UploadSessionOut {
+  id: string;
+  project_id: number;
+  kind: string;
+  filename: string;
+  total_size: number;
+  chunk_size: number;
+  received_chunks: number[];
+  status: string;
+}
+
+export interface UploadCompleteOut {
+  session: UploadSessionOut;
+  asset: AssetDetail | null;
+  script: ScriptOut | null;
 }
 
 export interface DraftSummary {
