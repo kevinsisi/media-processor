@@ -20,7 +20,8 @@ RUN pip install --no-cache-dir --upgrade pip \
         "asyncpg>=0.30.0" \
         "redis>=5.2.0" \
         "rq>=2.0.0" \
-        "pyyaml>=6.0.2"
+        "pyyaml>=6.0.2" \
+        "httpx>=0.28.0"
 
 COPY src/ ./src/
 COPY profiles/ ./profiles/
