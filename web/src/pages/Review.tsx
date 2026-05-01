@@ -26,7 +26,7 @@ function toneFor(order: number): (typeof TONE_CYCLE)[number] {
 function ScoreStars({ score }: { score: number }) {
   const filled = Math.round((score / 10) * 5);
   return (
-    <span className="stars" aria-label={`${score} out of 10`}>
+    <span className="stars" aria-label={`${score} 分（滿分 10 分）`}>
       {"★★★★★".slice(0, filled)}
       <span className="stars__empty">{"☆☆☆☆☆".slice(0, 5 - filled)}</span>
     </span>
@@ -49,13 +49,13 @@ function PromptDialog({
   return (
     <div className="modal-scrim" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal__eyebrow">RE-CUT WITH PROMPT</div>
+        <div className="modal__eyebrow">依指示重新剪輯</div>
         <h3 className="modal__title">
-          Tell the AI <em>what to change</em>.
+          告訴 AI <em>要改什麼</em>。
         </h3>
         <p className="modal__lede">
-          Plain text — describe the cut you want. The model adjusts profile
-          weights and re-runs cut planning. Costs a few NT$ in API.
+          用一般文字描述你要的剪法，模型會調整風格檔權重並重新規劃片段，
+          每次大約耗費數元新台幣的 API 費用。
         </p>
         <textarea
           className="modal__input"
@@ -67,14 +67,14 @@ function PromptDialog({
         />
         <div className="modal__actions">
           <button className="cta cta--quiet" onClick={onClose} disabled={busy}>
-            Cancel
+            取消
           </button>
           <button
             className="cta cta--primary"
             disabled={!text.trim() || busy}
             onClick={() => onSubmit(text)}
           >
-            {busy ? "Re-cutting…" : "Re-cut →"}
+            {busy ? "重新剪輯中…" : "重新剪輯 →"}
           </button>
         </div>
       </div>
@@ -130,26 +130,26 @@ function ReviewBody({ project, draft }: ReviewBodyProps) {
     <>
       <div className="bread">
         <Link to="/" className="bread__back">
-          ← Issues
+          ← 草稿清單
         </Link>
         <div className="bread__title">
-          <span className="bread__num">№ {String(project.id).padStart(3, "0")}</span>
+          <span className="bread__num">編號 {String(project.id).padStart(3, "0")}</span>
           <span className="bread__sep">·</span>
-          <span className="bread__client">{project.client ?? "freelance"}</span>
+          <span className="bread__client">{project.client ?? "自由案件"}</span>
           <span className="bread__sep">·</span>
           <span className="bread__name">{project.name}</span>
           <span className="bread__sep">·</span>
-          <span className="bread__draft">draft v{draft.version}</span>
+          <span className="bread__draft">草稿 v{draft.version}</span>
         </div>
         <div className="bread__score">
-          <span className="mono">AI confidence</span>
+          <span className="mono">AI 信心分數</span>
           <span className="bread__score-fig">{aiScore.toFixed(1)}</span>
           <span className="mono">/ 10</span>
         </div>
       </div>
 
       <div className="stage">
-        <figure className="player" aria-label="video preview">
+        <figure className="player" aria-label="影片預覽">
           <div className="player__frame">
             <div className="player__box">
               <PreviewArtwork />
@@ -166,14 +166,14 @@ function ReviewBody({ project, draft }: ReviewBodyProps) {
             </div>
           </div>
           <figcaption className="player__caption">
-            <span className="mono">9:16 reframe preview</span>
+            <span className="mono">9:16 直式預覽</span>
             <span className="mono">·</span>
-            <span className="mono">{segments.length} cuts</span>
+            <span className="mono">{segments.length} 段剪輯</span>
           </figcaption>
         </figure>
 
         <aside className="intel">
-          <div className="intel__eyebrow">DRAFT</div>
+          <div className="intel__eyebrow">草稿</div>
 
           <div className="intel__score">
             <div className="intel__score-fig">{aiScore.toFixed(1)}</div>
@@ -184,29 +184,29 @@ function ReviewBody({ project, draft }: ReviewBodyProps) {
           <ul className="intel__list">
             <li className="intel__row">
               <span className="pill pill--quiet">v</span>
-              <span className="intel__row-label">draft version</span>
+              <span className="intel__row-label">草稿版本</span>
               <span className="intel__row-count mono">{draft.version}</span>
             </li>
             <li className="intel__row">
               <span className="pill pill--quiet">#</span>
-              <span className="intel__row-label">cuts</span>
+              <span className="intel__row-label">片段數</span>
               <span className="intel__row-count mono">{segments.length}</span>
             </li>
             <li className="intel__row">
               <span className="pill pill--quiet">⏱</span>
-              <span className="intel__row-label">duration</span>
+              <span className="intel__row-label">片長</span>
               <span className="intel__row-count mono">
-                {(durationMs / 1000).toFixed(1)}s
+                {(durationMs / 1000).toFixed(1)} 秒
               </span>
             </li>
             <li className="intel__row">
               <span className="pill pill--quiet">P</span>
-              <span className="intel__row-label">profile</span>
+              <span className="intel__row-label">風格檔</span>
               <span className="intel__row-count mono">{draft.profile_name}</span>
             </li>
             <li className="intel__row">
               <span className="pill pill--quiet">S</span>
-              <span className="intel__row-label">status</span>
+              <span className="intel__row-label">狀態</span>
               <span className="intel__row-count mono">{draft.status}</span>
             </li>
           </ul>
@@ -215,8 +215,8 @@ function ReviewBody({ project, draft }: ReviewBodyProps) {
 
       <section className="tl">
         <div className="tl__head">
-          <div className="tl__eyebrow">TIMELINE</div>
-          <div className="tl__hint mono">click any block · see segment timing</div>
+          <div className="tl__eyebrow">時間軸</div>
+          <div className="tl__hint mono">點選任一段 · 查看該段時間</div>
         </div>
         <div className="tl__strip" role="list">
           {segments.map((seg, i) => {
@@ -230,7 +230,7 @@ function ReviewBody({ project, draft }: ReviewBodyProps) {
                 className={`tl__cell tl__cell--${tone}${isSel ? " tl__cell--selected" : ""}`}
                 style={{ flex: `${widthPct} 1 0` }}
                 onClick={() => setSelectedIdx(i)}
-                title={`segment #${seg.order} · ${(segDuration / 1000).toFixed(1)}s`}
+                title={`片段 #${seg.order} · ${(segDuration / 1000).toFixed(1)} 秒`}
                 role="listitem"
                 aria-pressed={isSel}
               >
@@ -250,17 +250,17 @@ function ReviewBody({ project, draft }: ReviewBodyProps) {
         <section className="why">
           <div className="why__head">
             <div className="why__eyebrow">
-              SEGMENT #{selectedSegment.order.toString().padStart(2, "0")}
+              片段 #{selectedSegment.order.toString().padStart(2, "0")}
             </div>
             <div className="why__time mono">
-              {(selectedSegment.on_timeline_start_ms / 1000).toFixed(1)}s —{" "}
-              {(selectedSegment.on_timeline_end_ms / 1000).toFixed(1)}s
+              {(selectedSegment.on_timeline_start_ms / 1000).toFixed(1)} 秒 —{" "}
+              {(selectedSegment.on_timeline_end_ms / 1000).toFixed(1)} 秒
               <span className="why__src">
-                · asset_segment {selectedSegment.asset_segment_id}
+                · 素材片段 {selectedSegment.asset_segment_id}
               </span>
             </div>
             <div className="why__score">
-              <span className="why__score-label mono">transition</span>
+              <span className="why__score-label mono">轉場</span>
               <span className="why__score-fig">
                 {selectedSegment.transition ?? "—"}
               </span>
@@ -277,9 +277,9 @@ function ReviewBody({ project, draft }: ReviewBodyProps) {
         >
           <span className="action__glyph">✓</span>
           <span className="action__label">
-            {pendingAction === "approve" ? "Approving…" : "Approve"}
+            {pendingAction === "approve" ? "核准中…" : "核准"}
           </span>
-          <span className="action__hint mono">→ auto-sync to CapCut</span>
+          <span className="action__hint mono">→ 自動同步到 CapCut</span>
         </button>
         <button
           className={`action${review.result?.action === "repatch" && !review.result?.prompt_feedback ? " action--done" : ""}`}
@@ -289,10 +289,10 @@ function ReviewBody({ project, draft }: ReviewBodyProps) {
           <span className="action__glyph">↺</span>
           <span className="action__label">
             {pendingAction === "repatch" && !promptOpen
-              ? "Regenerating…"
-              : "Regenerate"}
+              ? "重新生成中…"
+              : "重新生成"}
           </span>
-          <span className="action__hint mono">re-pick segments, same profile</span>
+          <span className="action__hint mono">同一風格檔，重新挑選片段</span>
         </button>
         <button
           className="action action--prompt"
@@ -300,8 +300,8 @@ function ReviewBody({ project, draft }: ReviewBodyProps) {
           onClick={() => setPromptOpen(true)}
         >
           <span className="action__glyph">❉</span>
-          <span className="action__label">Re-cut with prompt</span>
-          <span className="action__hint mono">tell the AI what to change</span>
+          <span className="action__label">依指示重剪</span>
+          <span className="action__hint mono">告訴 AI 要改什麼</span>
         </button>
         <button
           className={`action${review.result?.action === "download" ? " action--done" : ""}`}
@@ -310,9 +310,9 @@ function ReviewBody({ project, draft }: ReviewBodyProps) {
         >
           <span className="action__glyph">↓</span>
           <span className="action__label">
-            {pendingAction === "download" ? "Logging…" : "Download zip"}
+            {pendingAction === "download" ? "記錄中…" : "下載 zip"}
           </span>
-          <span className="action__hint mono">manual copy to CapCut</span>
+          <span className="action__hint mono">手動複製到 CapCut</span>
         </button>
         <button
           className={`action action--reject${review.result?.action === "reject" ? " action--done" : ""}`}
@@ -321,9 +321,9 @@ function ReviewBody({ project, draft }: ReviewBodyProps) {
         >
           <span className="action__glyph">×</span>
           <span className="action__label">
-            {pendingAction === "reject" ? "Rejecting…" : "Reject"}
+            {pendingAction === "reject" ? "退回中…" : "退回"}
           </span>
-          <span className="action__hint mono">discard draft v{draft.version}</span>
+          <span className="action__hint mono">捨棄草稿 v{draft.version}</span>
         </button>
       </div>
 
@@ -331,14 +331,14 @@ function ReviewBody({ project, draft }: ReviewBodyProps) {
         <div className="toast">
           <span className="mono">
             {review.error
-              ? `× api error · ${review.error.message}`
+              ? `× API 錯誤 · ${review.error.message}`
               : review.result?.action === "approve"
-                ? "✓ approved · syncing to CapCut draft folder"
+                ? "✓ 已核准 · 同步到 CapCut 草稿資料夾"
                 : review.result?.action === "repatch"
-                  ? "↺ repatch queued"
+                  ? "↺ 已排入重新生成佇列"
                   : review.result?.action === "reject"
-                    ? "× draft rejected"
-                    : "↓ download recorded · move zip to CapCut folder manually"}
+                    ? "× 草稿已退回"
+                    : "↓ 已記錄下載 · 請手動將 zip 移到 CapCut 資料夾"}
           </span>
           <button className="toast__close" onClick={review.reset}>
             ×
@@ -372,8 +372,8 @@ export default function Review() {
   if (projectId == null || Number.isNaN(projectId)) {
     return (
       <main className="page review">
-        <p>Invalid project id.</p>
-        <Link to="/">← back</Link>
+        <p>無效的專案編號。</p>
+        <Link to="/">← 返回</Link>
       </main>
     );
   }
@@ -384,11 +384,11 @@ export default function Review() {
       <main className="page review">
         <div className="bread">
           <Link to="/" className="bread__back">
-            ← Issues
+            ← 草稿清單
           </Link>
         </div>
         <p className="mono" role="alert">
-          api error · {error.message}
+          API 錯誤 · {error.message}
         </p>
       </main>
     );
@@ -399,10 +399,10 @@ export default function Review() {
       <main className="page review">
         <div className="bread">
           <Link to="/" className="bread__back">
-            ← Issues
+            ← 草稿清單
           </Link>
         </div>
-        <p className="mono">loading…</p>
+        <p className="mono">載入中…</p>
       </main>
     );
   }
@@ -410,8 +410,8 @@ export default function Review() {
   if (!projectQ.data) {
     return (
       <main className="page review">
-        <p>Project not found.</p>
-        <Link to="/">← back</Link>
+        <p>找不到此專案。</p>
+        <Link to="/">← 返回</Link>
       </main>
     );
   }
@@ -421,13 +421,13 @@ export default function Review() {
       <main className="page review">
         <div className="bread">
           <Link to="/" className="bread__back">
-            ← Issues
+            ← 草稿清單
           </Link>
           <div className="bread__title">
             <span className="bread__name">{projectQ.data.name}</span>
           </div>
         </div>
-        <p className="mono">no draft yet for this project.</p>
+        <p className="mono">此專案尚無草稿。</p>
       </main>
     );
   }
@@ -446,7 +446,7 @@ function PreviewArtwork() {
       preserveAspectRatio="xMidYMid slice"
       className="player__art"
       role="img"
-      aria-label="luxury car preview placeholder"
+      aria-label="預覽佔位圖"
     >
       <defs>
         <radialGradient id="floorlight" cx="50%" cy="0%" r="80%">
