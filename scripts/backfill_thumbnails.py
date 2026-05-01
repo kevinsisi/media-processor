@@ -23,6 +23,7 @@ from media_processor.api.config import settings
 from media_processor.core.db import async_session_maker
 from media_processor.models import Asset
 from media_processor.services import thumbnails as thumbnails_svc
+from media_processor.services import uploads as upload_svc
 
 
 def _setup_logging() -> None:
@@ -91,12 +92,44 @@ async def main(argv: list[str] | None = None) -> int:
     succeeded = 0
     failed = 0
     for asset in planned:
+        # Older deployments may have stored duration_ms=0 because ffprobe was
+        # missing from the api container (now fixed). Re-probe at backfill
+        # time so the keyframe seeks land at sensible offsets, and persist
+        # the corrected value back to the DB while we're at it.
+        duration_ms = asset.duration_ms
+        if duration_ms <= 0:
+            probe = await asyncio.to_thread(upload_svc.probe_media, asset.file_path)
+            if probe.duration_ms > 0:
+                duration_ms = probe.duration_ms
+                async with async_session_maker() as session:
+                    db_asset = await session.get(Asset, asset.id)
+                    if db_asset is not None:
+                        db_asset.duration_ms = duration_ms
+                        if not db_asset.resolution and probe.resolution:
+                            db_asset.resolution = probe.resolution
+                        if not db_asset.fps and probe.fps:
+                            db_asset.fps = probe.fps
+                        if not db_asset.codec and probe.codec:
+                            db_asset.codec = probe.codec
+                        await session.commit()
+                log.info(
+                    "asset %d: reprobed duration_ms=%d (was 0); persisted",
+                    asset.id,
+                    duration_ms,
+                )
+            else:
+                log.warning(
+                    "asset %d: ffprobe returned 0 duration — skipping (file may be unreadable)",
+                    asset.id,
+                )
+                failed += 1
+                continue
         try:
             result = await asyncio.to_thread(
                 thumbnails_svc.generate,
                 asset.id,
                 asset.file_path,
-                asset.duration_ms,
+                duration_ms,
                 thumb_root,
                 force=args.force,
             )
