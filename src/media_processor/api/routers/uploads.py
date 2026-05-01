@@ -31,6 +31,7 @@ from media_processor.models import (
     UploadStatus,
 )
 from media_processor.services import uploads as upload_svc
+from media_processor.services.queue import enqueue_asset_analysis
 
 SCRIPT_MAX_BYTES = 1_048_576
 
@@ -256,6 +257,21 @@ async def _finalize_video(
             select(Asset).where(Asset.id == asset_id).options(selectinload(Asset.tags))
         )
     ).scalar_one()
+
+    # M4 — kick off the analysis pipeline as a background RQ job. Failure to
+    # enqueue (e.g. Redis down) must NOT fail the upload — the operator can
+    # re-trigger via POST /assets/{id}/analyze.
+    try:
+        enqueue_asset_analysis(asset_id)
+    except Exception as exc:  # noqa: BLE001 — log and continue.
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "failed to enqueue analysis for asset %d: %s — operator can retry via POST /analyze",
+            asset_id,
+            exc,
+        )
+
     return {"asset": _asset_to_detail(asset_loaded), "script": None}
 
 

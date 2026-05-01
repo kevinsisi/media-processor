@@ -143,6 +143,133 @@ class AssetDetail(BaseModel):
     thumbnail_path: str | None
     status: str
     tags: list[AssetTagOut]
+    analysis_steps: dict[str, str] | None = None
+
+
+# ----- M4 — transcript / coverage / analyze schemas -----
+
+
+class TranscriptSegmentOut(BaseModel):
+    """One SRT-style segment as returned by /assets/{id}/transcript."""
+
+    idx: int
+    start_ms: int
+    end_ms: int
+    text: str
+
+
+class TranscriptSegmentIn(BaseModel):
+    """One SRT-style segment in a PUT body. ``idx`` is reassigned server-side."""
+
+    start_ms: int = Field(..., ge=0)
+    end_ms: int = Field(..., gt=0)
+    text: str = Field(..., max_length=10_000)
+
+
+class TranscriptOut(BaseModel):
+    asset_id: int
+    language: str
+    model: str
+    transcript_text: str
+    segments: list[TranscriptSegmentOut]
+    edited: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class TranscriptUpsert(BaseModel):
+    """Body for PUT /assets/{id}/transcript — replaces all segments."""
+
+    segments: list[TranscriptSegmentIn] = Field(..., max_length=10_000)
+
+
+class CoverageMatchOut(BaseModel):
+    transcript_idx: int
+    classification: Literal["scripted", "improvised"]
+    confidence: float
+    matched_script_excerpt: str
+
+
+class ScriptCoverageOut(BaseModel):
+    asset_id: int
+    script_id: int
+    model: str
+    scripted_segment_count: int
+    total_segment_count: int
+    coverage_ratio_by_count: float
+    coverage_ratio_by_duration_ms: float
+    matches: list[CoverageMatchOut]
+    computed_at: datetime
+
+
+class AnalyzeRequest(BaseModel):
+    """Body for POST /assets/{id}/analyze — both fields optional."""
+
+    steps: list[Literal["stt", "scene", "motion", "coverage"]] | None = None
+    force: bool = False
+
+
+class AnalyzeResponse(BaseModel):
+    """Returned by POST /assets/{id}/analyze (202 Accepted)."""
+
+    asset_id: int
+    job_id: str
+    status: str
+    analysis_steps: dict[str, str]
+
+
+# ----- M4 — project analysis page polling endpoint -----
+
+
+class TranscriptSummaryOut(BaseModel):
+    """Compact transcript info embedded in the assets-page list."""
+
+    segment_count: int
+    edited: bool
+    updated_at: datetime
+
+
+class CoverageSummaryOut(BaseModel):
+    """Compact coverage info embedded in the assets-page list."""
+
+    coverage_ratio_by_count: float
+    coverage_ratio_by_duration_ms: float
+    scripted_segment_count: int
+    total_segment_count: int
+
+
+class MotionSegmentOut(BaseModel):
+    motion_type: Literal["pan", "tilt", "zoom", "static", "handheld"]
+    start_ms: int
+    end_ms: int
+
+
+class SceneTagOut(BaseModel):
+    name: str
+    confidence: float
+
+
+class AssetAnalysisItem(BaseModel):
+    """One row for the project-analysis page polling list."""
+
+    id: int
+    file_path: str
+    filename: str
+    duration_ms: int
+    status: str
+    analysis_steps: dict[str, str] | None
+    transcript_summary: TranscriptSummaryOut | None
+    coverage_summary: CoverageSummaryOut | None
+    scene_tags: list[SceneTagOut]
+    motion_segments: list[MotionSegmentOut]
+
+
+class ProjectAnalysisOut(BaseModel):
+    """Returned by GET /projects/{id}/assets — drives the polling page."""
+
+    project: ProjectDetail
+    has_script: bool
+    assets: list[AssetAnalysisItem]
 
 
 class ReviewCreate(BaseModel):
