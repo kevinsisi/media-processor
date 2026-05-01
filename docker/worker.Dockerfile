@@ -13,10 +13,24 @@ WORKDIR /app
 # (services/video_renderer.SUBTITLE_FORCE_STYLE) renders zh-Hant glyphs
 # instead of tofu boxes; fontconfig refreshes the font cache so libass
 # can resolve the family name at filter time.
+#
+# We register the deadsnakes PPA via a direct sources.list.d entry rather
+# than `add-apt-repository`. The latter invokes python-launchpadlib which
+# hits launchpad.net via httplib2 and trips IncompleteRead errors when the
+# API is flaky — that's been costing us repeated build failures. Adding
+# the apt source + GPG key directly uses libcurl + apt's built-in fetch
+# logic, which is more robust under transient network conditions.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-        software-properties-common ca-certificates curl \
- && add-apt-repository -y ppa:deadsnakes/ppa \
+        ca-certificates curl gnupg \
+ && install -d -m 0755 /etc/apt/keyrings \
+ && for i in 1 2 3 4 5; do \
+        curl -fsSL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xF23C5A6CF475977595C89F51BA6932366A755776" \
+            | gpg --dearmor -o /etc/apt/keyrings/deadsnakes.gpg \
+        && break || (echo "keyserver attempt $i failed; retrying"; sleep $((i*5))); \
+    done \
+ && echo "deb [signed-by=/etc/apt/keyrings/deadsnakes.gpg] https://ppa.launchpadcontent.net/deadsnakes/ppa/ubuntu jammy main" \
+        > /etc/apt/sources.list.d/deadsnakes.list \
  && apt-get update \
  && apt-get install -y --no-install-recommends \
         python3.11 python3.11-venv python3.11-dev \
