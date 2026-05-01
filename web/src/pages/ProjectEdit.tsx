@@ -39,6 +39,49 @@ function classifyStepState(value: string | undefined): string {
   return value;
 }
 
+interface VersionSwitcherProps {
+  drafts: DraftSummary[];
+  selectedId: number | null;
+  onSelect: (id: number) => void;
+  disabled?: boolean;
+}
+
+function VersionSwitcher({
+  drafts,
+  selectedId,
+  onSelect,
+  disabled,
+}: VersionSwitcherProps) {
+  if (drafts.length === 0) return null;
+  return (
+    <nav className="version-switcher" aria-label="剪輯版本">
+      <span className="version-switcher__label">版本</span>
+      <div className="version-switcher__chips" role="tablist">
+        {drafts.map((d) => {
+          const isActive = d.id === selectedId;
+          return (
+            <button
+              key={d.id}
+              type="button"
+              role="tab"
+              aria-selected={isActive}
+              className={`version-chip version-chip--${d.status}${isActive ? " version-chip--active" : ""}`}
+              onClick={() => onSelect(d.id)}
+              disabled={disabled}
+              title={`v${d.version} · ${labelForDraftStatus(d.status)}`}
+            >
+              <span className="version-chip__num mono">v{d.version}</span>
+              <span className="version-chip__state mono">
+                {labelForDraftStatus(d.status)}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </nav>
+  );
+}
+
 interface DurationPickerProps {
   value: number;
   onChange: (next: number) => void;
@@ -189,7 +232,16 @@ export default function ProjectEdit() {
   const projectId = id ? Number(id) : NaN;
   const validProjectId = Number.isFinite(projectId) ? projectId : 0;
 
-  const [latestDraft, setLatestDraft] = useState<DraftSummary | null>(null);
+  // Full list of drafts for this project. Sorted version-desc so [0] is the
+  // newest version. Drives both the version switcher and the polling
+  // subscription.
+  const [drafts, setDrafts] = useState<DraftSummary[]>([]);
+  // Currently displayed version. Defaults to the latest after seed; changes
+  // when the user clicks a different chip in <VersionSwitcher>. Never
+  // auto-jumps away from a user's manual selection — but does follow when
+  // the user just kicked off a new render (handleStartEdit picks the new
+  // latest explicitly).
+  const [selectedDraftId, setSelectedDraftId] = useState<number | null>(null);
   const [seedLoading, setSeedLoading] = useState<boolean>(true);
   const [seedError, setSeedError] = useState<string | null>(null);
   const [triggering, setTriggering] = useState<boolean>(false);
@@ -198,22 +250,22 @@ export default function ProjectEdit() {
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
-  // Initial: pull the project's drafts list and pick the highest-version one.
-  // After the first POST /edit we'll learn the new draft id from the
-  // analysis polling endpoint (re-fetched) — this seed happens once.
+  const refreshDrafts = useCallback(async (): Promise<DraftSummary[]> => {
+    const list = await apiClient.fetchProjectDrafts(validProjectId);
+    list.sort((a, b) => b.version - a.version);
+    setDrafts(list);
+    return list;
+  }, [validProjectId]);
+
+  // Initial: pull the full drafts list and seed selection to the newest one.
   useEffect(() => {
     let cancelled = false;
     if (!Number.isFinite(projectId)) return;
     (async () => {
       try {
-        const drafts = await apiClient.fetchProjectDrafts(validProjectId);
+        const list = await refreshDrafts();
         if (cancelled) return;
-        if (drafts.length === 0) {
-          setLatestDraft(null);
-        } else {
-          drafts.sort((a, b) => b.version - a.version);
-          setLatestDraft(drafts[0]);
-        }
+        setSelectedDraftId(list[0]?.id ?? null);
         setSeedError(null);
       } catch (err) {
         if (cancelled) return;
@@ -227,10 +279,31 @@ export default function ProjectEdit() {
     return () => {
       cancelled = true;
     };
-  }, [projectId, validProjectId]);
+  }, [projectId, refreshDrafts]);
 
-  const polling = useDraftPolling(latestDraft?.id ?? null);
+  const selectedSummary = useMemo(
+    () => drafts.find((d) => d.id === selectedDraftId) ?? null,
+    [drafts, selectedDraftId],
+  );
+  const isLatestSelected = drafts.length > 0 && drafts[0].id === selectedDraftId;
+
+  const polling = useDraftPolling(selectedDraftId);
   const draft = polling.data;
+
+  // While the selected version is in flight (pending/processing), poll the
+  // drafts list too so the chip status updates live as it transitions to
+  // ready_for_review / failed. Cheap — list endpoint is one query.
+  useEffect(() => {
+    if (!selectedSummary) return;
+    const inFlight =
+      selectedSummary.status === "pending" ||
+      selectedSummary.status === "processing";
+    if (!inFlight) return;
+    const handle = window.setInterval(() => {
+      void refreshDrafts().catch(() => {});
+    }, 5_000);
+    return () => window.clearInterval(handle);
+  }, [selectedSummary, refreshDrafts]);
 
   const handleStartEdit = useCallback(
     async (force: boolean) => {
@@ -245,11 +318,11 @@ export default function ProjectEdit() {
           force,
           target_duration_seconds: target,
         });
-        // Re-seed with the just-created draft (the API returns 0 when no
-        // existing in-flight draft, so fetch the list fresh).
-        const drafts = await apiClient.fetchProjectDrafts(validProjectId);
-        drafts.sort((a, b) => b.version - a.version);
-        setLatestDraft(drafts[0] ?? null);
+        // Refresh the list and jump to the freshly-created version so the
+        // user sees the new render's progress, not the one they just left.
+        // Old versions stay in the list — clicking a chip switches back.
+        const list = await refreshDrafts();
+        setSelectedDraftId(list[0]?.id ?? null);
         polling.refresh();
       } catch (err) {
         if (err instanceof ApiError && err.status === 409) {
@@ -265,7 +338,7 @@ export default function ProjectEdit() {
         setTriggering(false);
       }
     },
-    [validProjectId, polling, durationSec],
+    [validProjectId, polling, durationSec, refreshDrafts],
   );
 
   const status = draft?.status ?? null;
@@ -276,8 +349,8 @@ export default function ProjectEdit() {
   // hasn't resolved yet — without this gap state the page snaps back to the
   // "開始剪輯" CTA for a few seconds and looks like the click did nothing.
   const showQueued =
-    !draft && !seedLoading && (triggering || latestDraft !== null);
-  const showInitial = !seedLoading && !triggering && latestDraft === null;
+    !draft && !seedLoading && (triggering || selectedDraftId !== null);
+  const showInitial = !seedLoading && !triggering && drafts.length === 0;
 
   return (
     <main className="page project-edit">
@@ -316,6 +389,20 @@ export default function ProjectEdit() {
           </p>
         )}
       </header>
+
+      <VersionSwitcher
+        drafts={drafts}
+        selectedId={selectedDraftId}
+        onSelect={setSelectedDraftId}
+        disabled={triggering}
+      />
+
+      {drafts.length > 1 && !isLatestSelected && (
+        <p className="edit-hint">
+          目前檢視的是舊版 v{selectedSummary?.version ?? "?"}；按「重新剪輯」會建立 v
+          {drafts[0].version + 1}，舊版保留。
+        </p>
+      )}
 
       {showInitial && (
         <section className="edit-card">
