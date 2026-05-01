@@ -64,8 +64,8 @@ artefact is captured.
 - [x] `mypy src` is clean (strict mode)
 - [x] `npm run build` produces a working web bundle
 - [ ] `docker compose up -d --build` brings all services up — depends on Step 0 GPU + SMB checks
-- [ ] `curl http://127.0.0.1:8000/health` returns `{"status":"ok"}` once Postgres + Redis are running
-- [ ] `curl http://127.0.0.1:8080/api/health` returns the same through the Nginx proxy
+- [ ] `curl http://127.0.0.1:8623/health` returns `{"status":"ok"}` once Postgres + Redis are running
+- [ ] `curl http://127.0.0.1:8523/api/health` returns the same through the Nginx proxy
 - [ ] CI green on `main`
 
 The remaining items run on the developer's Windows host once Step 0

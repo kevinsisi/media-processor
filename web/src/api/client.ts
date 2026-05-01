@@ -2,7 +2,7 @@
 //
 // Base URL resolution:
 //   1. VITE_API_URL env var if set (use for prod or non-proxied dev)
-//   2. "/api" default — vite dev server proxies /api → http://localhost:8000
+//   2. "/api" default — vite dev server proxies /api → http://localhost:8623
 //      (see web/vite.config.ts), and prod deployments are expected to expose
 //      the backend under the same /api path via reverse proxy.
 
