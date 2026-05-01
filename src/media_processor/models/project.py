@@ -20,15 +20,19 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from media_processor.models.base import Base
 from media_processor.models.enums import (
+    ASSET_STATUS_VALUES,
     PROJECT_STATUS_VALUES,
     TARGET_ASPECT_RATIO_VALUES,
+    AssetStatus,
     ProjectStatus,
     TargetAspectRatio,
 )
 
 if TYPE_CHECKING:
+    from media_processor.models.coverage import ScriptCoverage
     from media_processor.models.draft import Draft
     from media_processor.models.script import Script
+    from media_processor.models.transcript import AssetTranscript
 
 
 def _sql_in_list(values: tuple[str, ...]) -> str:
@@ -111,7 +115,12 @@ class Asset(Base):
     codec: Mapped[str | None] = mapped_column(String(64), nullable=True)
     sha256: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     thumbnail_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
-    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    status: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default=AssetStatus.PENDING.value,
+    )
+    analysis_steps_json: Mapped[Any] = mapped_column(JSON, nullable=True)
 
     project: Mapped[Project] = relationship("Project", back_populates="assets")
     tags: Mapped[list[AssetTag]] = relationship(
@@ -125,6 +134,27 @@ class Asset(Base):
         back_populates="asset",
         cascade="all, delete-orphan",
         passive_deletes=True,
+    )
+    transcript: Mapped[AssetTranscript | None] = relationship(
+        "AssetTranscript",
+        back_populates="asset",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        uselist=False,
+    )
+    coverage: Mapped[ScriptCoverage | None] = relationship(
+        "ScriptCoverage",
+        back_populates="asset",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        uselist=False,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN " + _sql_in_list(ASSET_STATUS_VALUES),
+            name="ck_assets_status",
+        ),
     )
 
 

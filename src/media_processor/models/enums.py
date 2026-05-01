@@ -47,9 +47,42 @@ class UploadStatus(StrEnum):
     ABORTED = "aborted"
 
 
+class AssetStatus(StrEnum):
+    """Lifecycle of an Asset row through M3 ingestion + M4 analysis."""
+
+    PENDING = "pending"
+    ANALYZING = "analyzing"
+    ANALYZED = "analyzed"
+    ANALYSIS_FAILED = "analysis_failed"
+
+
+class AnalysisStep(StrEnum):
+    """Per-step keys inside Asset.analysis_steps_json."""
+
+    STT = "stt"
+    SCENE = "scene"
+    MOTION = "motion"
+    COVERAGE = "coverage"
+
+
+class AnalysisStepState(StrEnum):
+    """Per-step state values inside Asset.analysis_steps_json.
+
+    Failure states are stored as the literal string ``failed:{reason}`` and
+    are not represented here — only the three canonical non-failed states
+    are enumerated. Use ``state.startswith("failed:")`` to detect failures.
+    """
+
+    PENDING = "pending"
+    RUNNING = "running"
+    DONE = "done"
+
+
 PROJECT_STATUS_VALUES: tuple[str, ...] = tuple(s.value for s in ProjectStatus)
 DRAFT_STATUS_VALUES: tuple[str, ...] = tuple(s.value for s in DraftStatus)
 REVIEW_ACTION_VALUES: tuple[str, ...] = tuple(a.value for a in ReviewAction)
 TARGET_ASPECT_RATIO_VALUES: tuple[str, ...] = tuple(a.value for a in TargetAspectRatio)
 UPLOAD_KIND_VALUES: tuple[str, ...] = tuple(k.value for k in UploadKind)
 UPLOAD_STATUS_VALUES: tuple[str, ...] = tuple(s.value for s in UploadStatus)
+ASSET_STATUS_VALUES: tuple[str, ...] = tuple(s.value for s in AssetStatus)
+ANALYSIS_STEP_VALUES: tuple[str, ...] = tuple(s.value for s in AnalysisStep)
