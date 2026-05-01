@@ -34,6 +34,19 @@ class Settings(BaseSettings):
     assets_dir: str = Field(default="/app/media/assets")
     drafts_dir: str = Field(default="/app/media/drafts")
     uploads_dir: str = Field(default="/app/media/uploads")
+    analysis_dir: str = Field(default="/app/media/analysis")
+
+    # M4 — Whisper local STT in the worker container.
+    # WHISPER_FAKE=1 swaps the engine for a deterministic canned zh-Hant
+    # transcript so CI / non-GPU dev boxes can drive the rest of the pipeline.
+    whisper_model: str = Field(default="medium")
+    whisper_compute_type: str = Field(default="int8_float16")
+    whisper_device: str = Field(default="cuda")
+    whisper_fake: int = Field(default=0)
+
+    # M4 — Vision frame sampling interval. Capped to 60 frames per asset
+    # inside the service so very long clips don't blow the Vision quota.
+    scene_sample_interval_ms: int = Field(default=5000)
 
     @property
     def postgres_dsn(self) -> str:

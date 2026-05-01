@@ -32,6 +32,16 @@ dev = [
     "mypy>=1.13.0",
     "types-pyyaml>=6.0.12",
 ]
+# M4 — heavy GPU/CV deps only the worker container installs.
+# Pinning to majors so the worker image build is reproducible without
+# constraining the api image (which doesn't import these).
+analysis = [
+    "faster-whisper>=1.0.3,<2.0",
+    "opencv-python-headless>=4.10.0,<5.0",
+    "opencc>=1.1.7",
+    "numpy>=1.26.0,<3.0",
+    "Pillow>=10.4.0",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/media_processor"]

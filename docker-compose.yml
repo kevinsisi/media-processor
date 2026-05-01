@@ -55,5 +55,31 @@ services:
     ports:
       - "0.0.0.0:8523:80"
 
+  # M4 — GPU-enabled RQ worker for analysis jobs (Whisper STT, Gemini
+  # Vision scene tagging, OpenCV motion, Gemini coverage compare).
+  # Requires nvidia-container-toolkit on the host.
+  worker:
+    build:
+      context: .
+      dockerfile: docker/worker.Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    volumes:
+      - ./src:/app/src:ro
+      - ./profiles:/app/profiles:ro
+      - "${MEDIA_STORAGE_DIR:-./.local/media}:/app/media"
+
 volumes:
   postgres_data:
