@@ -136,6 +136,24 @@
   font-size: var(--t-xs);
   letter-spacing: 0.06em;
   color: var(--text-tertiary);
+  /* Honour the \n emitted by formatCreatedAt() so date and time render
+     on two physical lines and neither truncates at the narrow column
+     widths used on phones / small tablets. */
+  white-space: pre-line;
+  line-height: 1.35;
+}
+
+.entry--clickable {
+  cursor: pointer;
+}
+
+.entry--clickable:hover {
+  background: var(--ink-elevated);
+}
+
+.entry--clickable:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: -2px;
 }
 
 .entry__body {

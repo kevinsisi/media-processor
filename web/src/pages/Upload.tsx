@@ -420,6 +420,9 @@ export default function Upload() {
           <Link to="/" className="summary-back">
             ← 返回專案清單
           </Link>
+          <Link to={`/projects/${projectId}/assets`} className="summary-next">
+            進入素材分析 →
+          </Link>
         </div>
       </section>
     </main>

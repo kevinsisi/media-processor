@@ -1,4 +1,5 @@
-import { Link } from "react-router-dom";
+import type React from "react";
+import { Link, useNavigate } from "react-router-dom";
 import type { ProjectSummary } from "../api/types";
 import { useProjects } from "../hooks";
 import "./ProjectList.css";
@@ -11,7 +12,9 @@ function formatCreatedAt(iso: string): string {
   const dd = String(d.getDate()).padStart(2, "0");
   const hh = String(d.getHours()).padStart(2, "0");
   const mi = String(d.getMinutes()).padStart(2, "0");
-  return `${yyyy}·${mm}·${dd} · ${hh}:${mi}`;
+  // Two physical lines (date + time) so neither truncates at narrow column
+  // widths; .entry__num-when uses white-space: pre-line to honour the \n.
+  return `${yyyy}/${mm}/${dd}\n${hh}:${mi}`;
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -81,7 +84,17 @@ function StatusCell({ project }: { project: ProjectSummary }) {
 
 export default function ProjectList() {
   const { data: projects, error, loading } = useProjects();
+  const navigate = useNavigate();
   const list = projects ?? [];
+
+  const goToProject = (projectId: number, ev: React.SyntheticEvent) => {
+    // Bail out if the click landed on an interactive child (status-cell CTA
+    // <Link> or button) — React Router refuses nested anchors so we render
+    // the row as a clickable container, not an anchor itself.
+    const target = ev.target as HTMLElement;
+    if (target.closest("a, button")) return;
+    navigate(`/projects/${projectId}/assets`);
+  };
 
   return (
     <main className="page projects">
@@ -132,7 +145,17 @@ export default function ProjectList() {
           {list.map((p, i) => (
             <li
               key={p.id}
-              className="entry"
+              className="entry entry--clickable"
+              role="link"
+              tabIndex={0}
+              aria-label={`開啟專案 ${p.name}`}
+              onClick={(e) => goToProject(p.id, e)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  goToProject(p.id, e);
+                }
+              }}
               style={{ animationDelay: `${100 + i * 90}ms` }}
             >
               <div className="entry__num">
