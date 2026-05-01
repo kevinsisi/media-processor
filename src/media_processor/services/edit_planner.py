@@ -479,7 +479,7 @@ async def plan(
             try:
                 response = await client.post(url, json=body)
             except httpx.HTTPError as exc:
-                logger.warning("edit-planner transport error; rotating key: %s", exc)
+                logger.warning("edit-planner transport error; rotating key: %r", exc)
                 continue
             last_status = response.status_code
             if response.status_code == 429 or 500 <= response.status_code < 600:
