@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Annotated
+from datetime import UTC, datetime
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
@@ -125,7 +125,8 @@ async def put_asset_transcript(
     # Validate ascending non-overlapping ranges; reassign idx server-side so a
     # caller can re-order segments without computing indices.
     last_end = -1
-    normalised = []
+    normalised: list[dict[str, Any]] = []
+    texts: list[str] = []
     for i, seg in enumerate(payload.segments):
         if seg.end_ms <= seg.start_ms:
             raise HTTPException(
@@ -146,9 +147,10 @@ async def put_asset_transcript(
                 "text": seg.text,
             }
         )
+        texts.append(seg.text)
 
-    transcript_text = "\n".join(s["text"] for s in normalised)
-    now = datetime.now(timezone.utc)
+    transcript_text = "\n".join(texts)
+    now = datetime.now(UTC)
 
     row = (
         await session.execute(

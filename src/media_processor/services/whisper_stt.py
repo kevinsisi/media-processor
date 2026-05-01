@@ -12,7 +12,7 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # heavy deps only present in the worker image.
     from faster_whisper import WhisperModel
@@ -172,7 +172,3 @@ __all__ = [
     "WhisperUnavailableError",
     "transcribe",
 ]
-
-
-# Silence "unused TYPE_CHECKING import" warning in editors that don't track it.
-_ = (Any,)

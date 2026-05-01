@@ -87,7 +87,7 @@ class UploadSessionOut(BaseModel):
 
 class UploadCompleteOut(BaseModel):
     session: UploadSessionOut
-    asset: "AssetDetail | None" = None
+    asset: AssetDetail | None = None
     script: ScriptOut | None = None
 
 

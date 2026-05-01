@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -177,7 +177,7 @@ async def _run_stt(
         existing.transcript_text = result.transcript_text
         existing.segments_json = segments_json
         existing.edited = False
-        existing.updated_at = datetime.now(timezone.utc)
+        existing.updated_at = datetime.now(UTC)
     await session.commit()
     return "done"
 
@@ -396,7 +396,7 @@ async def run_pipeline(
                         _dispatch(step, work_session, asset, force=force),
                         timeout=STEP_TIMEOUT_S,
                     )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 logger.warning("step %r timed out for asset %d", step, asset_id)
                 new_state = "failed:timeout"
             except Exception as exc:  # noqa: BLE001 — record and continue.

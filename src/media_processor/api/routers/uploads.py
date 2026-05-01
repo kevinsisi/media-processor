@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -164,9 +164,11 @@ async def complete_upload_session(
         )
 
     if row.kind == UploadKind.VIDEO.value:
-        result = await _finalize_video(row, session, expected)
+        finalised_asset = await _finalize_video(row, session, expected)
+        finalised_script: ScriptOut | None = None
     elif row.kind == UploadKind.SCRIPT.value:
-        result = await _finalize_script(row, session, expected)
+        finalised_asset = None
+        finalised_script = await _finalize_script(row, session, expected)
     else:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -174,11 +176,15 @@ async def complete_upload_session(
         )
 
     row.status = UploadStatus.COMPLETE.value
-    row.completed_at = datetime.now(timezone.utc)
+    row.completed_at = datetime.now(UTC)
     await session.commit()
     await session.refresh(row)
     upload_svc.cleanup_session_dir(settings.uploads_dir, session_id)
-    return UploadCompleteOut(session=_to_session_out(row), **result)
+    return UploadCompleteOut(
+        session=_to_session_out(row),
+        asset=finalised_asset,
+        script=finalised_script,
+    )
 
 
 async def _load_session(session_id: str, session: AsyncSession) -> UploadSession:
@@ -228,7 +234,7 @@ async def _build_complete_response(
 
 async def _finalize_video(
     row: UploadSession, session: AsyncSession, expected: int
-) -> dict[str, AssetDetail | ScriptOut | None]:
+) -> AssetDetail:
     target_dir = Path(settings.assets_dir) / str(row.project_id)
     target_path = target_dir / row.filename
     upload_svc.assemble_file(settings.uploads_dir, row.id, target_path, expected)
@@ -272,12 +278,12 @@ async def _finalize_video(
             exc,
         )
 
-    return {"asset": _asset_to_detail(asset_loaded), "script": None}
+    return _asset_to_detail(asset_loaded)
 
 
 async def _finalize_script(
     row: UploadSession, session: AsyncSession, expected: int
-) -> dict[str, AssetDetail | ScriptOut | None]:
+) -> ScriptOut:
     target_dir = Path(settings.uploads_dir) / row.id
     assembled = target_dir / "_assembled.txt"
     upload_svc.assemble_file(settings.uploads_dir, row.id, assembled, expected)
@@ -294,7 +300,7 @@ async def _finalize_script(
             select(Script).where(Script.project_id == row.project_id)
         )
     ).scalar_one_or_none()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     if existing is None:
         script = Script(
             project_id=row.project_id,
@@ -310,7 +316,7 @@ async def _finalize_script(
         script = existing
     await session.commit()
     await session.refresh(script)
-    return {"asset": None, "script": ScriptOut.model_validate(script)}
+    return ScriptOut.model_validate(script)
 
 
 def _asset_to_detail(asset: Asset) -> AssetDetail:

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -180,7 +180,7 @@ async def upsert_project_script(
     row = (
         await session.execute(select(Script).where(Script.project_id == project_id))
     ).scalar_one_or_none()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     if row is None:
         row = Script(
             project_id=project_id,

@@ -11,16 +11,12 @@ inline.
 
 from __future__ import annotations
 
+import contextlib
 import logging
-import math
 import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    import numpy as np  # heavy dep, worker only
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +99,7 @@ def _flow_per_frame(
     import cv2
     import numpy as np
 
-    cap_typed = cap  # type: ignore[var-annotated]
+    cap_typed = cap
 
     ok, prev = cap_typed.read()  # type: ignore[attr-defined]
     if not ok:
@@ -233,12 +229,10 @@ def detect_motion(media_path: Path, scratch_dir: Path) -> list[MotionSegment]:
     finally:
         # Always clean up the downscaled scratch file.
         downscaled.unlink(missing_ok=True)
-        # Also clean the (likely) empty scratch_dir if we created it just for this step.
-        try:
+        # Also clean the (likely) empty scratch_dir if we created it just for
+        # this step. If the dir is shared with other steps, leave it alone.
+        with contextlib.suppress(OSError):
             shutil.rmtree(scratch_dir)
-        except OSError:
-            # If the dir is shared with other steps, leave it alone.
-            pass
 
     if not flow:
         return []
@@ -255,10 +249,6 @@ def detect_motion(media_path: Path, scratch_dir: Path) -> list[MotionSegment]:
         )
         for start_idx, end_idx, cls in merged
     ]
-
-
-def _is_finite(x: float) -> bool:
-    return not (math.isnan(x) or math.isinf(x))
 
 
 __all__ = [
