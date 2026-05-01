@@ -77,6 +77,11 @@
 - [ ] 10b.1 `ProjectList` row becomes `<Link to="/projects/:id/assets">` — entire row clickable regardless of status. Status-cell buttons stay as inline overrides (use `e.stopPropagation` if React Router complains about nested links, or render the row's link as a `<div role="link">` with onClick + keyboard handler so the inner CTAs nest cleanly).
 - [ ] 10b.2 `formatCreatedAt` returns `YYYY/MM/DD\nHH:MM`; `.entry__num-when` gets `white-space: pre-line` so the newline renders on every breakpoint. Verify at 375 × 812 (iPhone), 768 (tablet), and 1280 (desktop) that both lines display in full.
 
+## 10c. Build-version visibility (operator-requested)
+- [ ] 10c.1 `web/vite.config.ts` (or new) — `define: { __APP_VERSION__: JSON.stringify(pkg.version) }` so the literal is replaced at build time.
+- [ ] 10c.2 `web/src/version.ts` — `export const APP_VERSION: string = __APP_VERSION__;` plus a `vite-env.d.ts` declaration so TS knows the constant exists.
+- [ ] 10c.3 `web/src/components/AppHeader.tsx` — render a quiet `v0.8.0` chip in the top-right corner; mobile-friendly (small text, never blocks a tap target). Visible on every route.
+
 ## 11. Mobile-first polish + zh-Hant copy
 - [ ] 11.1 Touch targets ≥ 44 px on all new controls.
 - [ ] 11.2 Per-segment textarea: 16 px font, line-height 1.6 for Chinese readability.

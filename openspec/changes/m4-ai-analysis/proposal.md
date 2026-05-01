@@ -92,8 +92,9 @@ This is the bridge from "real content in" (M3) to "AI cut planning that the oper
 - **Date format on the project list is truncated.** `formatCreatedAt` emits `2026·05·01 · 16:39` joined by middle dots; on the 48 px mobile / 64 px small-tablet column it visually clips to e.g. `2026-05:...16:39` per operator screenshot. Fix:
   - Change format to `2026/05/01` on line 1 and `16:39` on line 2 (`white-space: pre-line` on `.entry__num-when` honoring an embedded `\n`).
   - Two distinct lines mean both date and time render in full at every breakpoint.
+- **Build version not visible in the UI.** Operator can't tell which deploy she's looking at when reporting a bug. Fix: surface `package.json#version` at build time via Vite `define` (`__APP_VERSION__` literal) → new `web/src/version.ts` re-exports it → `AppHeader` renders a quiet `v0.8.0` chip in the top-right corner (matches the sheet-to-car convention). Visible regardless of route so screenshots always identify the deploy.
 
-These belong in M4 because the click fix routes into the new `/projects/:id/assets` page; doing them as a separate change would block the operator from testing M4 manually.
+These belong in M4 because the click fix routes into the new `/projects/:id/assets` page, and the version chip is the smallest possible UX-debugging affordance — doing them as a separate change would block the operator from testing M4 manually.
 
 ### Out of scope (deferred)
 
