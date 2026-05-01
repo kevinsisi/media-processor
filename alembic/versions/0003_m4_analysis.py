@@ -24,18 +24,15 @@ def _in_clause(values: tuple[str, ...]) -> str:
 
 
 def upgrade() -> None:
-    # assets.analysis_steps_json — per-step bookkeeping; null until pipeline starts.
-    op.add_column(
-        "assets",
-        sa.Column("analysis_steps_json", sa.JSON(), nullable=True),
-    )
-    # Tighten the assets.status accepted set; pre-M4 rows are all 'pending' so
-    # the constraint applies cleanly without data fixup.
-    op.create_check_constraint(
-        "ck_assets_status",
-        "assets",
-        "status IN " + _in_clause(ASSET_STATUS),
-    )
+    # Add analysis_steps_json + tighten assets.status check set in one batch so
+    # SQLite (unit tests) can rebuild the table without ALTER-constraint support.
+    # Pre-M4 rows are all 'pending', so the new constraint applies without fixup.
+    with op.batch_alter_table("assets") as batch_op:
+        batch_op.add_column(sa.Column("analysis_steps_json", sa.JSON(), nullable=True))
+        batch_op.create_check_constraint(
+            "ck_assets_status",
+            "status IN " + _in_clause(ASSET_STATUS),
+        )
 
     # asset_transcripts — 1:1 with assets, holds zh-Hant SRT-style segments.
     op.create_table(
@@ -125,5 +122,6 @@ def downgrade() -> None:
     op.drop_table("script_coverage")
     op.drop_index("ix_asset_transcripts_asset_id", table_name="asset_transcripts")
     op.drop_table("asset_transcripts")
-    op.drop_constraint("ck_assets_status", "assets", type_="check")
-    op.drop_column("assets", "analysis_steps_json")
+    with op.batch_alter_table("assets") as batch_op:
+        batch_op.drop_constraint("ck_assets_status", type_="check")
+        batch_op.drop_column("analysis_steps_json")

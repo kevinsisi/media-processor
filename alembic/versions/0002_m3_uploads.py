@@ -26,21 +26,21 @@ def _in_clause(values: tuple[str, ...]) -> str:
 
 
 def upgrade() -> None:
-    # Extend projects with target aspect ratio.
-    op.add_column(
-        "projects",
-        sa.Column(
-            "target_aspect_ratio",
-            sa.String(length=8),
-            nullable=False,
-            server_default="9:16",
-        ),
-    )
-    op.create_check_constraint(
-        "ck_projects_target_aspect_ratio",
-        "projects",
-        "target_aspect_ratio IN " + _in_clause(TARGET_ASPECT_RATIO),
-    )
+    # Extend projects with target aspect ratio. Wrap in batch mode so SQLite
+    # (used in unit tests) can rebuild the table to attach the CHECK constraint.
+    with op.batch_alter_table("projects") as batch_op:
+        batch_op.add_column(
+            sa.Column(
+                "target_aspect_ratio",
+                sa.String(length=8),
+                nullable=False,
+                server_default="9:16",
+            ),
+        )
+        batch_op.create_check_constraint(
+            "ck_projects_target_aspect_ratio",
+            "target_aspect_ratio IN " + _in_clause(TARGET_ASPECT_RATIO),
+        )
 
     # scripts: one per project.
     op.create_table(
@@ -114,5 +114,6 @@ def downgrade() -> None:
     op.drop_index("ix_upload_sessions_project_id", table_name="upload_sessions")
     op.drop_table("upload_sessions")
     op.drop_table("scripts")
-    op.drop_constraint("ck_projects_target_aspect_ratio", "projects", type_="check")
-    op.drop_column("projects", "target_aspect_ratio")
+    with op.batch_alter_table("projects") as batch_op:
+        batch_op.drop_constraint("ck_projects_target_aspect_ratio", type_="check")
+        batch_op.drop_column("target_aspect_ratio")

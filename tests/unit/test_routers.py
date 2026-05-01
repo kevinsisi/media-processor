@@ -83,7 +83,7 @@ async def _seed(session_maker: async_sessionmaker[AsyncSession]) -> None:
             fps=30.0,
             codec="h264",
             sha256="a" * 64,
-            status="ready",
+            status="analyzed",
         )
         s.add(a)
         await s.flush()
