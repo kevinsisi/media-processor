@@ -71,6 +71,84 @@
   font-size: var(--t-sm);
 }
 
+/* ---- Batch toolbar (asset multi-select + batch trigger) ---- */
+
+.batch-toolbar {
+  margin-top: var(--space-5);
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  border: 1px solid var(--ink-line);
+  background: var(--ink-elevated);
+  position: sticky;
+  top: 0;
+  z-index: 4;
+}
+
+.batch-toolbar__select-all {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--t-sm);
+  color: var(--text-primary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.batch-toolbar__select-all input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--gold);
+}
+
+.batch-toolbar__count {
+  color: var(--text-tertiary);
+  font-size: var(--t-xs);
+  letter-spacing: 0.06em;
+}
+
+.batch-toolbar__selected {
+  font-size: var(--t-xs);
+  letter-spacing: 0.08em;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+}
+
+.batch-toolbar__actions {
+  margin-left: auto;
+  display: flex;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+@media (max-width: 600px) {
+  .batch-toolbar {
+    position: static;
+  }
+  .batch-toolbar__actions {
+    margin-left: 0;
+    width: 100%;
+    justify-content: flex-end;
+  }
+}
+
+/* ---- Asset card per-row checkbox ---- */
+
+.asset-card__select {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px 6px 0;
+  cursor: pointer;
+}
+
+.asset-card__select input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--gold);
+}
+
 /* ---- Asset list ---- */
 
 .asset-list {
@@ -378,6 +456,11 @@
   border: 1px solid var(--ink-line);
   padding: var(--space-3);
   resize: vertical;
+  /* Auto-resize via JS sets the inline height; min keeps the box at ~4 rows
+     even when freshly mounted, so users see the whole segment without
+     scrolling inside the textarea. */
+  min-height: calc(4 * 1.6em + 2 * var(--space-3));
+  overflow: hidden;
   font-variation-settings: "opsz" 36, "SOFT" 30;
 }
 

@@ -128,6 +128,43 @@ function CoverageCard({ summary }: CoverageCardProps) {
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
+interface AutoResizeTextareaProps {
+  value: string;
+  onChange: (value: string) => void;
+  className?: string;
+  minRows?: number;
+}
+
+function AutoResizeTextarea({
+  value,
+  onChange,
+  className,
+  minRows = 4,
+}: AutoResizeTextareaProps) {
+  const ref = useRef<HTMLTextAreaElement | null>(null);
+
+  // Grow the textarea so the entire transcript segment is visible without
+  // an inner scrollbar. Resets to "auto" first so the box can shrink when
+  // text is deleted.
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [value]);
+
+  return (
+    <textarea
+      ref={ref}
+      className={className}
+      value={value}
+      rows={minRows}
+      onChange={(e) => onChange(e.currentTarget.value)}
+      spellCheck={false}
+    />
+  );
+}
+
 interface TranscriptEditorProps {
   assetId: number;
 }
@@ -255,12 +292,11 @@ function TranscriptEditor({ assetId }: TranscriptEditorProps) {
             <div className="transcript-item__time">
               {formatDuration(seg.start_ms)} → {formatDuration(seg.end_ms)}
             </div>
-            <textarea
+            <AutoResizeTextarea
               className="transcript-item__text"
               value={seg.text}
-              rows={Math.min(4, Math.max(1, Math.ceil(seg.text.length / 24)))}
-              onChange={(e) => handleSegmentChange(seg.idx, e.currentTarget.value)}
-              spellCheck={false}
+              onChange={(value) => handleSegmentChange(seg.idx, value)}
+              minRows={4}
             />
           </li>
         ))}
@@ -269,16 +305,37 @@ function TranscriptEditor({ assetId }: TranscriptEditorProps) {
   );
 }
 
+function isAssetUnanalyzed(asset: AssetAnalysisItem): boolean {
+  // "Unanalyzed" = at least one of the 4 pipeline steps hasn't reached "done".
+  // Failed / pending / missing all qualify so the user can sweep them up in
+  // a single batch.
+  const steps = asset.analysis_steps ?? {};
+  return ANALYSIS_STEP_ORDER.some((s) => steps[s] !== "done");
+}
+
 interface AssetCardProps {
   asset: AssetAnalysisItem;
   onAnalyze: (assetId: number, force: boolean) => void;
+  selected: boolean;
+  onToggleSelect: (assetId: number, next: boolean) => void;
 }
 
-function AssetCard({ asset, onAnalyze }: AssetCardProps) {
+function AssetCard({ asset, onAnalyze, selected, onToggleSelect }: AssetCardProps) {
   const [expanded, setExpanded] = useState(false);
   return (
     <article className="asset-card" data-status={asset.status}>
       <header className="asset-card__head">
+        <label
+          className="asset-card__select"
+          aria-label={`選擇素材 ${asset.filename}`}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={(e) => onToggleSelect(asset.id, e.currentTarget.checked)}
+          />
+        </label>
         <div className="asset-card__title">
           <h3 className="asset-card__filename">{asset.filename}</h3>
           <span className="asset-card__duration mono">{formatDuration(asset.duration_ms)}</span>
@@ -355,6 +412,8 @@ export default function ProjectAnalysis() {
   const validProjectId = Number.isFinite(projectId) ? projectId : null;
   const polling = useAssetPolling(validProjectId);
   const [triggerError, setTriggerError] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [batchRunning, setBatchRunning] = useState(false);
 
   const handleAnalyze = useCallback(
     async (assetId: number, force: boolean) => {
@@ -370,6 +429,91 @@ export default function ProjectAnalysis() {
 
   const project = polling.data?.project;
   const assets = polling.data?.assets ?? [];
+
+  const unanalyzedIds = useMemo(
+    () => assets.filter(isAssetUnanalyzed).map((a) => a.id),
+    [assets],
+  );
+
+  // Drop selection IDs that no longer exist in the current asset list (e.g.
+  // after deletion / refresh) so "全選未分析" stays consistent.
+  useEffect(() => {
+    const valid = new Set(assets.map((a) => a.id));
+    setSelectedIds((prev) => {
+      let changed = false;
+      const next = new Set<number>();
+      for (const id of prev) {
+        if (valid.has(id)) next.add(id);
+        else changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [assets]);
+
+  const allUnanalyzedSelected =
+    unanalyzedIds.length > 0 &&
+    unanalyzedIds.every((id) => selectedIds.has(id));
+
+  const toggleSelect = useCallback((assetId: number, next: boolean) => {
+    setSelectedIds((prev) => {
+      const out = new Set(prev);
+      if (next) out.add(assetId);
+      else out.delete(assetId);
+      return out;
+    });
+  }, []);
+
+  const toggleSelectAllUnanalyzed = useCallback(() => {
+    setSelectedIds((prev) => {
+      if (unanalyzedIds.every((id) => prev.has(id))) {
+        const out = new Set(prev);
+        for (const id of unanalyzedIds) out.delete(id);
+        return out;
+      }
+      const out = new Set(prev);
+      for (const id of unanalyzedIds) out.add(id);
+      return out;
+    });
+  }, [unanalyzedIds]);
+
+  const clearSelection = useCallback(() => setSelectedIds(new Set()), []);
+
+  const runBatchAnalyze = useCallback(
+    async (force: boolean) => {
+      if (selectedIds.size === 0) return;
+      if (force) {
+        if (
+          !window.confirm(
+            `將強制重跑 ${selectedIds.size} 個素材，會覆蓋手動編輯的逐字稿。確定？`,
+          )
+        ) {
+          return;
+        }
+      }
+      setBatchRunning(true);
+      setTriggerError(null);
+      const ids = Array.from(selectedIds);
+      let failed = 0;
+      // Sequential trigger — each call hits the API/queue cheaply, and
+      // sequential posts make any 5xx easier to attribute to one asset.
+      for (const id of ids) {
+        try {
+          await apiClient.triggerAnalyze(id, { force });
+        } catch (err) {
+          failed += 1;
+          setTriggerError(
+            `素材 #${id} 觸發失敗：${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        }
+      }
+      setBatchRunning(false);
+      if (failed === 0) clearSelection();
+      polling.refresh();
+    },
+    [selectedIds, polling, clearSelection],
+  );
 
   const overallStatus = useMemo(() => {
     if (assets.length === 0) return "尚無素材";
@@ -422,6 +566,55 @@ export default function ProjectAnalysis() {
         )}
       </header>
 
+      {assets.length > 0 && (
+        <div className="batch-toolbar" role="toolbar" aria-label="批次分析">
+          <label className="batch-toolbar__select-all">
+            <input
+              type="checkbox"
+              checked={allUnanalyzedSelected}
+              onChange={toggleSelectAllUnanalyzed}
+              disabled={unanalyzedIds.length === 0}
+            />
+            <span>
+              全選未分析
+              <span className="batch-toolbar__count mono">
+                {" "}
+                ({unanalyzedIds.length})
+              </span>
+            </span>
+          </label>
+          <span className="batch-toolbar__selected mono" aria-live="polite">
+            已選 {selectedIds.size} / {assets.length}
+          </span>
+          <div className="batch-toolbar__actions">
+            <button
+              type="button"
+              className="cta cta--quiet"
+              onClick={clearSelection}
+              disabled={selectedIds.size === 0 || batchRunning}
+            >
+              取消選取
+            </button>
+            <button
+              type="button"
+              className="cta cta--primary"
+              onClick={() => void runBatchAnalyze(false)}
+              disabled={selectedIds.size === 0 || batchRunning}
+            >
+              {batchRunning ? "觸發中…" : `批次分析 (${selectedIds.size})`}
+            </button>
+            <button
+              type="button"
+              className="cta"
+              onClick={() => void runBatchAnalyze(true)}
+              disabled={selectedIds.size === 0 || batchRunning}
+            >
+              強制重跑
+            </button>
+          </div>
+        </div>
+      )}
+
       <section className="asset-list">
         {polling.loading && !polling.data && (
           <div className="board__notice mono">載入中…</div>
@@ -430,7 +623,13 @@ export default function ProjectAnalysis() {
           <div className="board__notice mono">這個專案尚未上傳素材。</div>
         )}
         {assets.map((asset) => (
-          <AssetCard key={asset.id} asset={asset} onAnalyze={handleAnalyze} />
+          <AssetCard
+            key={asset.id}
+            asset={asset}
+            onAnalyze={handleAnalyze}
+            selected={selectedIds.has(asset.id)}
+            onToggleSelect={toggleSelect}
+          />
         ))}
       </section>
     </main>
