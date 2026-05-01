@@ -20,18 +20,32 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
-def render_draft(project_id: int, *, force: bool = False) -> dict[str, Any]:
+def render_draft(
+    project_id: int,
+    *,
+    force: bool = False,
+    target_duration_ms: int | None = None,
+) -> dict[str, Any]:
     """RQ job — produce the next-version draft mp4 for ``project_id``.
 
     The return value is a small summary dict so RQ persists something
     debuggable. All status persistence lives in Postgres on the Draft
-    row; this dict is for ops, not the UI.
+    row; this dict is for ops, not the UI. ``target_duration_ms`` is the
+    user-configurable target render length; ``None`` means the
+    orchestrator picks one from the source material.
     """
-    logger.info("render_draft: project_id=%d force=%s", project_id, force)
+    logger.info(
+        "render_draft: project_id=%d force=%s target_duration_ms=%s",
+        project_id,
+        force,
+        target_duration_ms,
+    )
     # Local import keeps the api container free of ffmpeg / heavy deps.
     from media_processor.services.edit_orchestrator import run_render
 
-    return asyncio.run(run_render(project_id, force=force))
+    return asyncio.run(
+        run_render(project_id, force=force, target_duration_ms=target_duration_ms)
+    )
 
 
 def _scratch_dir() -> Path:

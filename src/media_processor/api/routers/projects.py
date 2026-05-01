@@ -254,7 +254,14 @@ async def trigger_project_edit(
     await session.commit()
     await session.refresh(new_draft)
 
-    job_id = enqueue_project_edit(project_id, force=payload.force)
+    target_duration_ms = (
+        payload.target_duration_seconds * 1000
+        if payload.target_duration_seconds is not None
+        else None
+    )
+    job_id = enqueue_project_edit(
+        project_id, force=payload.force, target_duration_ms=target_duration_ms
+    )
     return EditTriggerResponse(
         project_id=project_id,
         draft_id=new_draft.id,

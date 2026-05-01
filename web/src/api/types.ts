@@ -136,6 +136,9 @@ export interface DraftDetail extends DraftSummary {
 
 export interface EditTriggerRequest {
   force?: boolean;
+  // User-configurable render length in seconds. Backend clamps to 10–300;
+  // omit to let the orchestrator pick from source duration.
+  target_duration_seconds?: number;
 }
 
 export interface EditTriggerResponse {

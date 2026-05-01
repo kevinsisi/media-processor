@@ -55,23 +55,34 @@ def enqueue_asset_analysis(
     return job.id
 
 
-def enqueue_project_edit(project_id: int, *, force: bool = False) -> str:
-    """Schedule ``render_draft(project_id, force=...)`` on the editing queue.
+def enqueue_project_edit(
+    project_id: int,
+    *,
+    force: bool = False,
+    target_duration_ms: int | None = None,
+) -> str:
+    """Schedule ``render_draft(project_id, force=..., target_duration_ms=...)``.
 
     Returns the RQ job id. Like :func:`enqueue_asset_analysis`, the job target
     is referenced by string so the api container never imports the worker
-    code path that pulls in ffmpeg-heavy modules.
+    code path that pulls in ffmpeg-heavy modules. ``target_duration_ms`` is
+    the user-supplied override from POST /projects/{id}/edit; ``None`` lets
+    the orchestrator pick a length from the source material.
     """
     queue = Queue(EDITING_QUEUE, connection=_redis(), default_timeout=EDIT_JOB_TIMEOUT_SECONDS)
+    job_kwargs: dict[str, Any] = {"force": force}
+    if target_duration_ms is not None:
+        job_kwargs["target_duration_ms"] = target_duration_ms
     job = queue.enqueue(
         RENDER_DRAFT_FN,
         args=(project_id,),
-        kwargs={"force": force},
+        kwargs=job_kwargs,
     )
     logger.info(
-        "enqueued render_draft(project_id=%d, force=%s) as job %s",
+        "enqueued render_draft(project_id=%d, force=%s, target_duration_ms=%s) as job %s",
         project_id,
         force,
+        target_duration_ms,
         job.id,
     )
     return job.id

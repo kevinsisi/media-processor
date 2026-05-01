@@ -9,6 +9,10 @@ WORKDIR /app
 # System deps — Python 3.11 (ubuntu 22.04 ships 3.10 by default; pull from
 # deadsnakes for matching api image), ffmpeg (faster-whisper + frame sampling
 # + motion downscale), libpq for psycopg2, build tools for source wheels.
+# fonts-noto-cjk supplies "Noto Sans CJK TC" so the M5 subtitle burn-in
+# (services/video_renderer.SUBTITLE_FORCE_STYLE) renders zh-Hant glyphs
+# instead of tofu boxes; fontconfig refreshes the font cache so libass
+# can resolve the family name at filter time.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
         software-properties-common ca-certificates curl \
@@ -19,6 +23,8 @@ RUN apt-get update \
         build-essential libpq-dev \
         ffmpeg \
         libgl1 libglib2.0-0 \
+        fonts-noto-cjk fontconfig \
+ && fc-cache -f \
  && curl -sS https://bootstrap.pypa.io/get-pip.py | python3.11 \
  && ln -sf /usr/bin/python3.11 /usr/local/bin/python \
  && rm -rf /var/lib/apt/lists/*

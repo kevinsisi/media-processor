@@ -154,9 +154,16 @@ class DraftDetail(DraftSummary):
 
 
 class EditTriggerRequest(BaseModel):
-    """Body for POST /projects/{id}/edit — both fields optional."""
+    """Body for POST /projects/{id}/edit — every field optional."""
 
     force: bool = False
+    # User-configurable target duration in seconds. The web client offers
+    # quick-pick buttons (30/60/90/120) plus a free-form input; omit to
+    # let the orchestrator compute a duration from the source material.
+    # Bounds match the M5 design: 10 s floor (still a usable IG/TikTok
+    # short) and 300 s (5 min) ceiling so a single Gemini call stays
+    # within the prompt + response budget.
+    target_duration_seconds: int | None = Field(default=None, ge=10, le=300)
 
 
 class EditTriggerResponse(BaseModel):

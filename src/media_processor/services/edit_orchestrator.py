@@ -48,6 +48,34 @@ _STAGES: tuple[str, ...] = (
 )
 _GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 
+# Bounds on the auto-computed target render length. Mirrors the API's
+# 10–300 s validation on EditTriggerRequest.target_duration_seconds so
+# manual overrides and auto picks land in the same envelope.
+_AUTO_TARGET_MIN_MS = 60_000
+_AUTO_TARGET_MAX_MS = 180_000
+_USER_TARGET_MIN_MS = 10_000
+_USER_TARGET_MAX_MS = 300_000
+
+
+def _compute_auto_target_ms(
+    profile_target_ms: int, total_source_ms: int, asset_count: int
+) -> int:
+    """Pick a target render length from the available source material.
+
+    Profiles default to 30 s, fine for a 1–2 min shoot. With a lot of
+    source (>5 min, many clips) the planner should produce a longer reel
+    so a meaningful share of the footage shows up in the cut. Returns
+    the profile setting unchanged for small shoots.
+    """
+    if total_source_ms < 300_000:
+        return profile_target_ms
+    source_based = max(
+        _AUTO_TARGET_MIN_MS, min(_AUTO_TARGET_MAX_MS, total_source_ms // 10)
+    )
+    asset_floor = max(_AUTO_TARGET_MIN_MS, (asset_count // 2) * 5_000)
+    dynamic = max(source_based, asset_floor)
+    return max(profile_target_ms, dynamic)
+
 
 def _initial_progress() -> dict[str, str]:
     return dict.fromkeys(_STAGES, "pending")
@@ -297,11 +325,19 @@ def _output_paths(project_id: int, version: int) -> tuple[Path, Path]:
     return (base / f"v{version}.mp4", base / f"v{version}.srt")
 
 
-async def run_render(project_id: int, *, force: bool = False) -> dict[str, Any]:
+async def run_render(
+    project_id: int,
+    *,
+    force: bool = False,
+    target_duration_ms: int | None = None,
+) -> dict[str, Any]:
     """Run the full M5 pipeline for ``project_id`` and return a summary.
 
     The return value is for RQ's job-result store; the UI polls
     ``GET /drafts/{id}`` and the orchestrator keeps that row in sync.
+    ``target_duration_ms`` overrides the auto-computed length when set
+    (clamped to [10 s, 300 s] regardless of caller); ``None`` lets the
+    orchestrator pick from the source material.
     """
     # Load the project up-front so we know the draft will have something
     # to attach to before we reserve a draft id.
@@ -309,6 +345,15 @@ async def run_render(project_id: int, *, force: bool = False) -> dict[str, Any]:
         project = await session.get(Project, project_id)
         if project is None:
             raise RuntimeError(f"project {project_id} not found")
+        # Pull asset count + total source duration so we can size the
+        # target render length dynamically when the caller didn't supply
+        # one. Cheap aggregate query — no asset rows materialised.
+        source_total_ms, asset_count = (
+            await session.execute(
+                select(func.coalesce(func.sum(Asset.duration_ms), 0), func.count(Asset.id))
+                .where(Asset.project_id == project_id)
+            )
+        ).one()
 
     handle = await _claim_pending_draft(project)
     summary: dict[str, Any] = {
@@ -318,11 +363,19 @@ async def run_render(project_id: int, *, force: bool = False) -> dict[str, Any]:
     }
 
     profile_spec = _try_load_profile(handle.profile_name)
-    target_duration_ms = (
+    profile_target_ms = (
         profile_spec.editing_rules.target_duration_ms
         if profile_spec is not None
         else edit_planner.DEFAULT_TARGET_DURATION_MS
     )
+    if target_duration_ms is not None:
+        target_duration_ms = max(
+            _USER_TARGET_MIN_MS, min(_USER_TARGET_MAX_MS, int(target_duration_ms))
+        )
+    else:
+        target_duration_ms = _compute_auto_target_ms(
+            profile_target_ms, int(source_total_ms or 0), int(asset_count or 0)
+        )
 
     # Stage 1 — plan.
     await _set_stage_state(handle.draft_id, EditStep.PLAN.value, "running")

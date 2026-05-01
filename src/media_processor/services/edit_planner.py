@@ -203,25 +203,46 @@ def _format_asset_block(
     )
 
 
+# Coverage targets the planner is instructed to honour. We surface the
+# numeric thresholds so the prompt is auditable: when a draft only uses
+# 2 / 14 clips like project 3 did, you can compare the rendered plan
+# against these constants instead of guessing what the model heard.
+MIN_ASSET_COVERAGE_RATIO = 0.5   # use at least half of the available clips
+TARGET_IMPROV_SHARE = 0.4        # ~40% of total length should be improv
+MIN_SEGMENTS_FALLBACK = 6        # at least this many cuts even on tiny shoots
+MIN_SEGMENT_DURATION_S = 1.5
+MAX_SEGMENT_DURATION_S = 6.0
+
+
 _PROMPT_TEMPLATE = (
     "你是一位影片剪輯導演，正在為以下專案挑選最終剪輯使用的片段。\n\n"
     "專案資訊：\n"
     "- 名稱：{project_name}\n"
     "- 風格 profile：{profile_name}\n"
-    "- 目標長度：約 {target_duration_ms} ms\n"
-    "- 輸出比例：{target_aspect_ratio}\n\n"
+    "- 目標長度：約 {target_duration_ms} ms（容許 -10% / +20%）\n"
+    "- 輸出比例：{target_aspect_ratio}\n"
+    "- 可用素材數：{asset_count} 段（總時長約 {total_source_ms} ms）\n"
+    "- 至少使用 {min_assets_used} 段不同素材（{min_coverage_pct}% 覆蓋率）\n"
+    "- 至少產出 {min_segments} 個片段\n\n"
     "腳本（若有）：\n{script_body}\n\n"
     "可用素材（每段含逐字稿、場景、運鏡、腳本覆蓋）：\n\n"
     "{asset_blocks}\n"
     "請挑選並排序成一個剪輯計畫，遵守以下規則：\n"
-    "1. 「scripted」段（逐字稿與腳本相符）優先且依腳本敘事順序排列。\n"
-    "2. 以「improv」段補滿至目標長度；保持 1.5–6 秒/片段，避免單一場景或運鏡連續超過兩段。\n"
-    "3. 每段須完整落在素材內 (start_ms < end_ms ≤ asset duration)。\n"
-    "4. 若片段太短或品質低落寧可省略；總長可比目標短 ≤ 20%。\n\n"
+    "1. 不要過度保守。目標是說一個完整的小故事，不只是抓 2-3 段最像腳本的片段。\n"
+    "2. 結構：以「scripted」段組成敘事骨架（依腳本順序），以「improv」段加入"
+    "情緒、視覺亮點、運鏡轉場。整支片約 {improv_pct}% 為 improv，"
+    "{scripted_pct}% 為 scripted。\n"
+    "3. 素材覆蓋：必須使用 ≥ {min_assets_used} 段不同 asset_id（共 {asset_count} 段）；"
+    "不要把 80% 的鏡頭都來自同一段素材。\n"
+    "4. 場景／運鏡多樣性：避免同一場景標籤或同一運鏡連續超過 2 段；"
+    "穿插 pan / tilt / handheld / static 變化讓畫面有節奏。\n"
+    "5. 片段長度：每段 {min_seg_s}–{max_seg_s} 秒，總長 ≈ 目標長度。\n"
+    "6. 每段須完整落在素材內 (start_ms < end_ms ≤ asset duration)。\n"
+    "7. 即使腳本很短或腳本覆蓋率低，也要產出完整剪輯 — 缺腳本就以 improv 為主。\n\n"
     "嚴格輸出 JSON，schema：\n"
     "{{\n"
     f'  "schema_version": "{SCHEMA_VERSION}",\n'
-    '  "notes": "<剪輯思路 1–3 句>",\n'
+    '  "notes": "<剪輯思路 1–3 句，說明你怎麼分配 scripted vs improv 與覆蓋哪些素材>",\n'
     '  "segments": [\n'
     "    {{\n"
     '      "asset_id": <int>,\n'
@@ -240,7 +261,11 @@ def _build_prompt(
     script_body: str,
     target_duration_ms: int,
     asset_blocks: list[str],
+    *,
+    asset_count: int,
+    total_source_ms: int,
 ) -> str:
+    min_assets_used = max(1, int(round(asset_count * MIN_ASSET_COVERAGE_RATIO)))
     return _PROMPT_TEMPLATE.format(
         project_name=project.name,
         profile_name=project.profile_name,
@@ -248,6 +273,15 @@ def _build_prompt(
         target_aspect_ratio=project.target_aspect_ratio,
         script_body=script_body.strip() or "（無腳本）",
         asset_blocks="\n".join(asset_blocks) or "（無素材）",
+        asset_count=asset_count,
+        total_source_ms=total_source_ms,
+        min_assets_used=min_assets_used,
+        min_coverage_pct=int(round(MIN_ASSET_COVERAGE_RATIO * 100)),
+        min_segments=MIN_SEGMENTS_FALLBACK,
+        improv_pct=int(round(TARGET_IMPROV_SHARE * 100)),
+        scripted_pct=int(round((1 - TARGET_IMPROV_SHARE) * 100)),
+        min_seg_s=MIN_SEGMENT_DURATION_S,
+        max_seg_s=MAX_SEGMENT_DURATION_S,
     )
 
 
@@ -428,11 +462,14 @@ async def plan(
         )
         for asset in ctx.assets
     ]
+    total_source_ms = sum(int(a.duration_ms) for a in ctx.assets)
     prompt = _build_prompt(
         ctx.project,
         ctx.script_body,
         target_duration_ms,
         asset_blocks,
+        asset_count=len(ctx.assets),
+        total_source_ms=total_source_ms,
     )
     body = {
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],

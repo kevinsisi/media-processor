@@ -18,6 +18,14 @@ const EDIT_STEP_ORDER: ("plan" | "cut" | "concat" | "subtitles")[] = [
   "subtitles",
 ];
 
+// Quick-pick lengths offered alongside the free-form input. Matches the
+// IG/TikTok short-form sweet spots; backend clamps the final value to
+// the 10–300 s range regardless of what's typed.
+const DURATION_PRESETS_S = [30, 60, 90, 120] as const;
+const DEFAULT_DURATION_S = 60;
+const DURATION_MIN_S = 10;
+const DURATION_MAX_S = 300;
+
 function formatTimecode(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000));
   const m = Math.floor(total / 60);
@@ -29,6 +37,51 @@ function classifyStepState(value: string | undefined): string {
   if (!value) return "pending";
   if (value.startsWith("failed:")) return "failed";
   return value;
+}
+
+interface DurationPickerProps {
+  value: number;
+  onChange: (next: number) => void;
+  disabled?: boolean;
+}
+
+function DurationPicker({ value, onChange, disabled }: DurationPickerProps) {
+  return (
+    <div className="duration-picker" aria-label="目標成品長度">
+      <span className="duration-picker__label">目標長度</span>
+      <div className="duration-picker__presets">
+        {DURATION_PRESETS_S.map((sec) => (
+          <button
+            key={sec}
+            type="button"
+            className={`duration-chip${value === sec ? " duration-chip--active" : ""}`}
+            onClick={() => onChange(sec)}
+            disabled={disabled}
+          >
+            {sec}s
+          </button>
+        ))}
+      </div>
+      <label className="duration-picker__custom">
+        <input
+          type="number"
+          min={DURATION_MIN_S}
+          max={DURATION_MAX_S}
+          step={1}
+          value={value}
+          disabled={disabled}
+          onChange={(e) => {
+            const raw = Number(e.currentTarget.value);
+            if (Number.isFinite(raw)) onChange(Math.round(raw));
+          }}
+        />
+        <span className="duration-picker__unit mono">秒</span>
+      </label>
+      <p className="duration-picker__hint mono">
+        範圍 {DURATION_MIN_S}–{DURATION_MAX_S} 秒；超出會被自動修正。
+      </p>
+    </div>
+  );
 }
 
 interface ProgressTrackerProps {
@@ -141,6 +194,7 @@ export default function ProjectEdit() {
   const [seedError, setSeedError] = useState<string | null>(null);
   const [triggering, setTriggering] = useState<boolean>(false);
   const [triggerError, setTriggerError] = useState<string | null>(null);
+  const [durationSec, setDurationSec] = useState<number>(DEFAULT_DURATION_S);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
@@ -182,8 +236,15 @@ export default function ProjectEdit() {
     async (force: boolean) => {
       setTriggering(true);
       setTriggerError(null);
+      const target = Math.max(
+        DURATION_MIN_S,
+        Math.min(DURATION_MAX_S, Math.round(durationSec || DEFAULT_DURATION_S)),
+      );
       try {
-        await apiClient.triggerProjectEdit(validProjectId, { force });
+        await apiClient.triggerProjectEdit(validProjectId, {
+          force,
+          target_duration_seconds: target,
+        });
         // Re-seed with the just-created draft (the API returns 0 when no
         // existing in-flight draft, so fetch the list fresh).
         const drafts = await apiClient.fetchProjectDrafts(validProjectId);
@@ -204,7 +265,7 @@ export default function ProjectEdit() {
         setTriggering(false);
       }
     },
-    [validProjectId, polling],
+    [validProjectId, polling, durationSec],
   );
 
   const status = draft?.status ?? null;
@@ -263,6 +324,11 @@ export default function ProjectEdit() {
             AI 會根據腳本與素材的逐字稿、場景、運鏡，挑選最適合的片段並依節奏拼接成
             一支 9:16 / 4:5 / 1:1 的成品影片，並燒入繁體中文字幕。
           </p>
+          <DurationPicker
+            value={durationSec}
+            onChange={setDurationSec}
+            disabled={triggering}
+          />
           <div className="edit-card__actions">
             <button
               type="button"
@@ -270,7 +336,7 @@ export default function ProjectEdit() {
               onClick={() => void handleStartEdit(false)}
               disabled={triggering}
             >
-              {triggering ? "排隊中…" : "開始剪輯"}
+              {triggering ? "排隊中…" : `開始剪輯（${durationSec} 秒）`}
             </button>
           </div>
         </section>
@@ -343,10 +409,15 @@ export default function ProjectEdit() {
                   onClick={() => void handleStartEdit(true)}
                   disabled={triggering}
                 >
-                  {triggering ? "排隊中…" : "重新剪輯"}
+                  {triggering ? "排隊中…" : `重新剪輯（${durationSec} 秒）`}
                 </button>
               </div>
             </div>
+            <DurationPicker
+              value={durationSec}
+              onChange={setDurationSec}
+              disabled={triggering}
+            />
             <TimelineStrip
               draft={draft}
               videoRef={videoRef as React.RefObject<HTMLVideoElement>}
