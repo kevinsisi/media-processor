@@ -34,73 +34,52 @@ def upgrade() -> None:
 
     # DraftSegments: relax the asset_segment_id requirement and add direct
     # asset references so M5's Gemini planner can persist plans without
-    # pre-creating AssetSegment rows.
-    op.alter_column(
-        "draft_segments",
-        "asset_segment_id",
-        existing_type=sa.Integer(),
-        nullable=True,
-    )
-    op.add_column(
-        "draft_segments",
-        sa.Column("asset_id", sa.Integer(), nullable=True),
-    )
-    op.add_column(
-        "draft_segments",
-        sa.Column("asset_start_ms", sa.Integer(), nullable=True),
-    )
-    op.add_column(
-        "draft_segments",
-        sa.Column("asset_end_ms", sa.Integer(), nullable=True),
-    )
-    op.add_column(
-        "draft_segments",
-        sa.Column("source_kind", sa.String(length=16), nullable=True),
-    )
-    op.add_column(
-        "draft_segments",
-        sa.Column("plan_reason", sa.Text(), nullable=True),
-    )
-    op.create_foreign_key(
-        "fk_draft_segments_asset_id",
-        "draft_segments",
-        "assets",
-        ["asset_id"],
-        ["id"],
-        ondelete="RESTRICT",
-    )
+    # pre-creating AssetSegment rows. Wrap in batch mode so SQLite (unit
+    # tests) can rebuild the table for the alter/FK/check operations.
+    with op.batch_alter_table("draft_segments") as batch_op:
+        batch_op.alter_column(
+            "asset_segment_id",
+            existing_type=sa.Integer(),
+            nullable=True,
+        )
+        batch_op.add_column(sa.Column("asset_id", sa.Integer(), nullable=True))
+        batch_op.add_column(sa.Column("asset_start_ms", sa.Integer(), nullable=True))
+        batch_op.add_column(sa.Column("asset_end_ms", sa.Integer(), nullable=True))
+        batch_op.add_column(sa.Column("source_kind", sa.String(length=16), nullable=True))
+        batch_op.add_column(sa.Column("plan_reason", sa.Text(), nullable=True))
+        batch_op.create_foreign_key(
+            "fk_draft_segments_asset_id",
+            "assets",
+            ["asset_id"],
+            ["id"],
+            ondelete="RESTRICT",
+        )
+        batch_op.create_check_constraint(
+            "ck_draft_segments_asset_range",
+            "asset_start_ms IS NULL OR asset_end_ms IS NULL OR asset_start_ms < asset_end_ms",
+        )
     op.create_index(
         "ix_draft_segments_asset_id",
         "draft_segments",
         ["asset_id"],
     )
-    op.create_check_constraint(
-        "ck_draft_segments_asset_range",
-        "draft_segments",
-        "asset_start_ms IS NULL OR asset_end_ms IS NULL "
-        "OR asset_start_ms < asset_end_ms",
-    )
 
 
 def downgrade() -> None:
-    op.drop_constraint(
-        "ck_draft_segments_asset_range", "draft_segments", type_="check"
-    )
     op.drop_index("ix_draft_segments_asset_id", table_name="draft_segments")
-    op.drop_constraint(
-        "fk_draft_segments_asset_id", "draft_segments", type_="foreignkey"
-    )
-    op.drop_column("draft_segments", "plan_reason")
-    op.drop_column("draft_segments", "source_kind")
-    op.drop_column("draft_segments", "asset_end_ms")
-    op.drop_column("draft_segments", "asset_start_ms")
-    op.drop_column("draft_segments", "asset_id")
-    op.alter_column(
-        "draft_segments",
-        "asset_segment_id",
-        existing_type=sa.Integer(),
-        nullable=False,
-    )
+    with op.batch_alter_table("draft_segments") as batch_op:
+        batch_op.drop_constraint("ck_draft_segments_asset_range", type_="check")
+        batch_op.drop_constraint("fk_draft_segments_asset_id", type_="foreignkey")
+        batch_op.drop_column("plan_reason")
+        batch_op.drop_column("source_kind")
+        batch_op.drop_column("asset_end_ms")
+        batch_op.drop_column("asset_start_ms")
+        batch_op.drop_column("asset_id")
+        batch_op.alter_column(
+            "asset_segment_id",
+            existing_type=sa.Integer(),
+            nullable=False,
+        )
 
     op.drop_column("drafts", "cut_plan_json")
     op.drop_column("drafts", "subtitle_path")
