@@ -88,10 +88,36 @@ class _DraftHandle:
     version: int
 
 
-async def _create_draft_row(
+async def _claim_pending_draft(
     project: Project,
 ) -> _DraftHandle:
+    """Claim the latest ``pending`` draft for the project and flip it to
+    ``processing``. The API creates the row synchronously when the user
+    triggers an edit, so by the time the worker runs there should always
+    be a pending row to claim. As a defensive fallback we create one if
+    none exists (e.g. legacy in-flight RQ jobs from before this change)."""
     async with async_session_maker() as session:
+        pending = (
+            await session.execute(
+                select(Draft)
+                .where(Draft.project_id == project.id)
+                .where(Draft.status == DraftStatus.PENDING.value)
+                .order_by(Draft.version.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if pending is not None:
+            pending.status = DraftStatus.PROCESSING.value
+            if not pending.progress_steps_json:
+                pending.progress_steps_json = _initial_progress()
+            await session.commit()
+            await session.refresh(pending)
+            return _DraftHandle(
+                draft_id=pending.id,
+                profile_name=project.profile_name,
+                target_aspect=project.target_aspect_ratio,
+                version=pending.version,
+            )
         version = await _next_draft_version(session, project.id)
         draft = Draft(
             project_id=project.id,
@@ -284,7 +310,7 @@ async def run_render(project_id: int, *, force: bool = False) -> dict[str, Any]:
         if project is None:
             raise RuntimeError(f"project {project_id} not found")
 
-    handle = await _create_draft_row(project)
+    handle = await _claim_pending_draft(project)
     summary: dict[str, Any] = {
         "draft_id": handle.draft_id,
         "version": handle.version,

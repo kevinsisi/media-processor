@@ -198,10 +198,11 @@ async def trigger_project_edit(
 ) -> EditTriggerResponse:
     """M5 — kick off the auto-edit pipeline for ``project_id``.
 
-    Returns 202 with a placeholder draft id (set by the worker once it
-    creates the row); the client polls ``GET /projects/{id}/assets`` or
-    ``GET /drafts/{id}`` to watch progress. While a draft is already
-    `processing`, returns 409 unless ``force=true``.
+    Synchronously creates the Draft row in ``pending`` state and enqueues
+    the render job; the worker flips it to ``processing`` when it picks
+    the row up. Returns 202 with the new draft id so the UI can start
+    polling ``GET /drafts/{id}`` immediately. While a draft is already
+    pending or processing, returns 409 unless ``force=true``.
     """
     project = await session.get(Project, project_id)
     if project is None:
@@ -213,7 +214,11 @@ async def trigger_project_edit(
         await session.execute(
             select(Draft)
             .where(Draft.project_id == project_id)
-            .where(Draft.status == DraftStatus.PROCESSING.value)
+            .where(
+                Draft.status.in_(
+                    (DraftStatus.PENDING.value, DraftStatus.PROCESSING.value)
+                )
+            )
             .order_by(Draft.version.desc())
             .limit(1)
         )
@@ -225,10 +230,34 @@ async def trigger_project_edit(
             "pass force=true to start a new version anyway",
         )
 
+    next_version = int(
+        (
+            await session.scalar(
+                select(func.max(Draft.version)).where(Draft.project_id == project_id)
+            )
+        )
+        or 0
+    ) + 1
+    new_draft = Draft(
+        project_id=project_id,
+        profile_name=project.profile_name,
+        version=next_version,
+        status=DraftStatus.PENDING.value,
+        progress_steps_json={
+            "plan": "pending",
+            "cut": "pending",
+            "concat": "pending",
+            "subtitles": "pending",
+        },
+    )
+    session.add(new_draft)
+    await session.commit()
+    await session.refresh(new_draft)
+
     job_id = enqueue_project_edit(project_id, force=payload.force)
     return EditTriggerResponse(
         project_id=project_id,
-        draft_id=in_flight.id if in_flight is not None else 0,
+        draft_id=new_draft.id,
         job_id=job_id,
         status="enqueued",
     )
