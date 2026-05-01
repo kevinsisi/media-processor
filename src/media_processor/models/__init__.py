@@ -5,6 +5,7 @@ M2 §4.1 set up the original 9 entities (project / asset / draft / review / bgm
 + script_coverage and extends Asset with analysis bookkeeping.
 """
 
+from media_processor.models.app_setting import AppSetting
 from media_processor.models.base import Base
 from media_processor.models.bgm import BGM
 from media_processor.models.coverage import ScriptCoverage
@@ -38,6 +39,7 @@ from media_processor.models.upload_session import UploadSession
 __all__ = [
     "ANALYSIS_STEP_VALUES",
     "ASSET_STATUS_VALUES",
+    "AppSetting",
     "BGM",
     "DRAFT_STATUS_VALUES",
     "PROJECT_STATUS_VALUES",

@@ -388,16 +388,25 @@
   .hero__lede {
     font-size: var(--t-sm);
   }
+  /* First column must fit "YYYY/MM/DD" at the monospace xs size — 48px
+     clipped the last digit on phones, which visually overlapped the
+     project title in column 2. */
   .board__columns,
   .entry {
-    grid-template-columns: 48px 1fr;
+    grid-template-columns: 72px 1fr;
     gap: var(--space-3);
   }
   .entry {
     padding: var(--space-5) 0;
   }
+  .entry__num {
+    min-width: 0;
+  }
   .entry__num-fig {
     font-size: 28px;
+  }
+  .entry__num-when {
+    letter-spacing: 0.02em;
   }
   .entry__name {
     font-size: var(--t-lg);

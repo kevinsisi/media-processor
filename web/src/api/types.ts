@@ -247,3 +247,43 @@ export interface ReviewOut {
   prompt_feedback: string | null;
   reviewed_at: string;
 }
+
+// ----- Settings — runtime LLM key pool -----
+
+export type KeyPoolSource = "db" | "env" | "none";
+
+export interface KeyPoolOut {
+  count: number;
+  source: KeyPoolSource;
+  masked_suffixes: string[];
+}
+
+export interface SettingsOut {
+  llm_model: string;
+  llm_timeout_s: number;
+  llm_api_keys: KeyPoolOut;
+}
+
+export interface LLMKeysUpdateIn {
+  raw: string;
+  replace?: boolean;
+}
+
+export interface LLMKeysUpdateOut {
+  stored_count: number;
+  accepted_count: number;
+  rejected_count: number;
+}
+
+export interface SyncFromManagerIn {
+  url?: string;
+  trusted_only?: boolean;
+  replace?: boolean;
+}
+
+export interface SyncFromManagerOut {
+  fetched: number;
+  imported: number;
+  skipped: number;
+  stored_count: number;
+}

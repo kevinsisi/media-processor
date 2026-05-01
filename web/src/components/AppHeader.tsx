@@ -17,6 +17,9 @@ export default function AppHeader() {
           <NavLink to="/" end className="nav-link">
             專案
           </NavLink>
+          <NavLink to="/settings" className="nav-link nav-link--quiet">
+            設定
+          </NavLink>
           <NavLink to="/health" className="nav-link nav-link--quiet">
             系統狀態
           </NavLink>

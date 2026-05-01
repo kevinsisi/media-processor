@@ -8,12 +8,13 @@ from media_processor.api.routers import (
     health,
     projects,
     reviews,
+    settings,
     uploads,
 )
 
 app = FastAPI(
     title="media-processor API",
-    version="0.8.0",
+    version="0.9.0",
 )
 
 app.include_router(health.router)
@@ -21,4 +22,5 @@ app.include_router(projects.router)
 app.include_router(drafts.router)
 app.include_router(assets.router)
 app.include_router(reviews.router)
+app.include_router(settings.router)
 app.include_router(uploads.router)

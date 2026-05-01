@@ -30,6 +30,7 @@ from media_processor.models import (
     ScriptCoverage,
 )
 from media_processor.services import camera_motion, scene_tagging, script_coverage, whisper_stt
+from media_processor.services.settings_store import get_llm_api_keys
 
 logger = logging.getLogger(__name__)
 
@@ -56,8 +57,8 @@ def _failure_reason(exc: Exception) -> str:
     return f"failed:model-error:{type(exc).__name__}"
 
 
-def _api_keys() -> tuple[str, ...]:
-    return tuple(k.strip() for k in settings.llm_api_keys.split(",") if k.strip())
+async def _api_keys(session: AsyncSession) -> tuple[str, ...]:
+    return await get_llm_api_keys(session)
 
 
 async def _load_asset(session: AsyncSession, asset_id: int) -> Asset:
@@ -188,7 +189,7 @@ async def _run_scene(
     *,
     force: bool,
 ) -> str:
-    api_keys = _api_keys()
+    api_keys = await _api_keys(session)
     if not api_keys:
         raise scene_tagging.SceneTaggingError("LLM_API_KEYS not configured")
 
@@ -298,7 +299,7 @@ async def _run_motion(
 
 
 async def _run_coverage(session: AsyncSession, asset: Asset) -> str:
-    api_keys = _api_keys()
+    api_keys = await _api_keys(session)
     if not api_keys:
         raise script_coverage.ScriptCoverageError("LLM_API_KEYS not configured")
 

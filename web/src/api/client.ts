@@ -12,6 +12,8 @@ import type {
   AssetDetail,
   DraftDetail,
   DraftSummary,
+  LLMKeysUpdateIn,
+  LLMKeysUpdateOut,
   ProjectAnalysisOut,
   ProjectCreate,
   ProjectDetail,
@@ -21,6 +23,9 @@ import type {
   ScriptCoverageOut,
   ScriptOut,
   ScriptUpsert,
+  SettingsOut,
+  SyncFromManagerIn,
+  SyncFromManagerOut,
   TranscriptOut,
   TranscriptUpsert,
   UploadCompleteOut,
@@ -177,6 +182,42 @@ export class ApiClient {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
+  }
+
+  // ----- Settings — LLM key pool -----
+
+  fetchSettings(): Promise<SettingsOut> {
+    return this.get<SettingsOut>("/settings");
+  }
+
+  updateLLMKeys(payload: LLMKeysUpdateIn): Promise<LLMKeysUpdateOut> {
+    return this.request<LLMKeysUpdateOut>("/settings/llm-api-keys", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async clearLLMKeys(): Promise<void> {
+    const url = `${this.baseUrl}/settings/llm-api-keys`;
+    const response = await this.fetchImpl(url, { method: "DELETE" });
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      throw new ApiError(response.status, url, text || response.statusText);
+    }
+  }
+
+  syncKeysFromManager(
+    payload: SyncFromManagerIn = {},
+  ): Promise<SyncFromManagerOut> {
+    return this.request<SyncFromManagerOut>(
+      "/settings/sync-from-key-manager",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      },
+    );
   }
 
   private get<T>(path: string): Promise<T> {

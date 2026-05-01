@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
+from typing import Annotated
 
-from fastapi import HTTPException, status
+from fastapi import Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from media_processor.api.config import settings
@@ -13,6 +14,7 @@ from media_processor.core.db import async_session_maker
 from media_processor.profile import load_profile
 from media_processor.profile.loader import ProfileSpec, ProfileValidationError
 from media_processor.services.llm_patcher import GeminiKeyPoolConfig, LLMPatcher
+from media_processor.services.settings_store import get_llm_api_keys
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:
@@ -20,17 +22,19 @@ async def get_session() -> AsyncIterator[AsyncSession]:
         yield session
 
 
-def get_llm_patcher() -> LLMPatcher:
+async def get_llm_patcher(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> LLMPatcher:
     """Build an ``LLMPatcher`` from the configured key pool.
 
-    Raises ``503`` when no keys are configured so callers can fall back to a
-    non-LLM recut path (see spec §6.5 fallback).
+    Resolves keys from the DB-backed settings store (set via the Settings UI)
+    with env fallback. Raises ``503`` when no keys are configured.
     """
-    keys = tuple(k.strip() for k in settings.llm_api_keys.split(",") if k.strip())
+    keys = await get_llm_api_keys(session)
     if not keys:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="LLM patcher not configured: set LLM_API_KEYS",
+            detail="LLM patcher not configured: set LLM_API_KEYS in Settings or env",
         )
     config = GeminiKeyPoolConfig(
         api_keys=keys,
