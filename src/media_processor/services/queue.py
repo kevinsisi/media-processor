@@ -55,8 +55,14 @@ def enqueue_asset_analysis(
     return job.id
 
 
-def enqueue_project_edit(project_id: int, *, force: bool = False) -> str:
-    """Schedule ``render_draft(project_id, force=...)`` on the editing queue.
+def enqueue_project_edit(
+    project_id: int, *, draft_id: int, force: bool = False
+) -> str:
+    """Schedule ``render_draft(project_id, draft_id=…, force=…)`` on the editing queue.
+
+    The API endpoint creates the Draft row up-front (so the response can carry
+    a real draft id and the UI can start polling immediately) and hands the id
+    to the worker — the worker no longer creates its own row.
 
     Returns the RQ job id. Like :func:`enqueue_asset_analysis`, the job target
     is referenced by string so the api container never imports the worker
@@ -66,11 +72,12 @@ def enqueue_project_edit(project_id: int, *, force: bool = False) -> str:
     job = queue.enqueue(
         RENDER_DRAFT_FN,
         args=(project_id,),
-        kwargs={"force": force},
+        kwargs={"draft_id": draft_id, "force": force},
     )
     logger.info(
-        "enqueued render_draft(project_id=%d, force=%s) as job %s",
+        "enqueued render_draft(project_id=%d, draft_id=%d, force=%s) as job %s",
         project_id,
+        draft_id,
         force,
         job.id,
     )

@@ -32,6 +32,7 @@ from media_processor.api.schemas import (
     TranscriptSummaryOut,
 )
 from media_processor.models import (
+    EDIT_STEP_VALUES,
     Asset,
     AssetTranscript,
     Draft,
@@ -198,10 +199,13 @@ async def trigger_project_edit(
 ) -> EditTriggerResponse:
     """M5 — kick off the auto-edit pipeline for ``project_id``.
 
-    Returns 202 with a placeholder draft id (set by the worker once it
-    creates the row); the client polls ``GET /projects/{id}/assets`` or
-    ``GET /drafts/{id}`` to watch progress. While a draft is already
-    `processing`, returns 409 unless ``force=true``.
+    Creates the Draft row synchronously (status=processing, progress steps
+    pending) and returns 202 with its real id, so the UI can start polling
+    ``GET /drafts/{id}`` immediately without racing the worker. The worker
+    later adopts the same row via ``run_render(project_id, draft_id=…)``.
+
+    While another draft for this project is already ``processing``, returns
+    409 unless ``force=true``.
     """
     project = await session.get(Project, project_id)
     if project is None:
@@ -225,10 +229,29 @@ async def trigger_project_edit(
             "pass force=true to start a new version anyway",
         )
 
-    job_id = enqueue_project_edit(project_id, force=payload.force)
+    next_version = (
+        await session.scalar(
+            select(func.max(Draft.version)).where(Draft.project_id == project_id)
+        )
+    ) or 0
+    # Mirror the worker's initial-progress shape (services.edit_orchestrator
+    # uses the same map). Inlined here so the api container doesn't have to
+    # import the orchestrator module.
+    draft = Draft(
+        project_id=project_id,
+        profile_name=project.profile_name,
+        version=next_version + 1,
+        status=DraftStatus.PROCESSING.value,
+        progress_steps_json=dict.fromkeys(EDIT_STEP_VALUES, "pending"),
+    )
+    session.add(draft)
+    await session.commit()
+    await session.refresh(draft)
+
+    job_id = enqueue_project_edit(project_id, draft_id=draft.id, force=payload.force)
     return EditTriggerResponse(
         project_id=project_id,
-        draft_id=in_flight.id if in_flight is not None else 0,
+        draft_id=draft.id,
         job_id=job_id,
         status="enqueued",
     )

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ApiError, apiClient } from "../api/client";
-import type { DraftDetail, DraftSummary } from "../api/types";
+import type { DraftDetail } from "../api/types";
 import { useDraftPolling } from "../hooks/useDraftPolling";
 import {
   EDIT_STEP_LABELS,
@@ -136,7 +136,7 @@ export default function ProjectEdit() {
   const projectId = id ? Number(id) : NaN;
   const validProjectId = Number.isFinite(projectId) ? projectId : 0;
 
-  const [latestDraft, setLatestDraft] = useState<DraftSummary | null>(null);
+  const [latestDraftId, setLatestDraftId] = useState<number | null>(null);
   const [seedLoading, setSeedLoading] = useState<boolean>(true);
   const [seedError, setSeedError] = useState<string | null>(null);
   const [triggering, setTriggering] = useState<boolean>(false);
@@ -145,8 +145,8 @@ export default function ProjectEdit() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
   // Initial: pull the project's drafts list and pick the highest-version one.
-  // After the first POST /edit we'll learn the new draft id from the
-  // analysis polling endpoint (re-fetched) — this seed happens once.
+  // After POST /edit we point latestDraftId straight at the row the API
+  // pre-created, so we don't have to re-fetch the list.
   useEffect(() => {
     let cancelled = false;
     if (!Number.isFinite(projectId)) return;
@@ -155,10 +155,10 @@ export default function ProjectEdit() {
         const drafts = await apiClient.fetchProjectDrafts(validProjectId);
         if (cancelled) return;
         if (drafts.length === 0) {
-          setLatestDraft(null);
+          setLatestDraftId(null);
         } else {
           drafts.sort((a, b) => b.version - a.version);
-          setLatestDraft(drafts[0]);
+          setLatestDraftId(drafts[0].id);
         }
         setSeedError(null);
       } catch (err) {
@@ -175,7 +175,7 @@ export default function ProjectEdit() {
     };
   }, [projectId, validProjectId]);
 
-  const polling = useDraftPolling(latestDraft?.id ?? null);
+  const polling = useDraftPolling(latestDraftId);
   const draft = polling.data;
 
   const handleStartEdit = useCallback(
@@ -183,13 +183,12 @@ export default function ProjectEdit() {
       setTriggering(true);
       setTriggerError(null);
       try {
-        await apiClient.triggerProjectEdit(validProjectId, { force });
-        // Re-seed with the just-created draft (the API returns 0 when no
-        // existing in-flight draft, so fetch the list fresh).
-        const drafts = await apiClient.fetchProjectDrafts(validProjectId);
-        drafts.sort((a, b) => b.version - a.version);
-        setLatestDraft(drafts[0] ?? null);
-        polling.refresh();
+        const resp = await apiClient.triggerProjectEdit(validProjectId, { force });
+        // The API now creates the Draft row synchronously, so resp.draft_id
+        // is always a real id we can hand straight to the polling hook.
+        // Changing draftId restarts useDraftPolling and triggers an
+        // immediate fetch — no separate refresh() call needed.
+        setLatestDraftId(resp.draft_id);
       } catch (err) {
         if (err instanceof ApiError && err.status === 409) {
           setTriggerError(
@@ -204,14 +203,21 @@ export default function ProjectEdit() {
         setTriggering(false);
       }
     },
-    [validProjectId, polling],
+    [validProjectId],
   );
 
   const status = draft?.status ?? null;
-  const showProcessing = status === "pending" || status === "processing";
-  const showReady = status === "ready_for_review";
-  const showFailed = status === "failed";
-  const showInitial = !draft && !seedLoading;
+  // True both for the first-ever trigger (draft is null) and for a force-retry
+  // (draft still holds the previous version's data until the next poll lands).
+  // Used to suppress stale Failed/Ready cards and to keep 開始剪輯 from
+  // reappearing in the brief gap between POST and the first /drafts/{id} fetch.
+  const awaitingFirstFetch =
+    latestDraftId !== null && draft?.id !== latestDraftId;
+  const showProcessing =
+    (status === "pending" || status === "processing") && !awaitingFirstFetch;
+  const showReady = status === "ready_for_review" && !awaitingFirstFetch;
+  const showFailed = status === "failed" && !awaitingFirstFetch;
+  const showInitial = !draft && !seedLoading && !triggering && !awaitingFirstFetch;
 
   return (
     <main className="page project-edit">
@@ -226,7 +232,9 @@ export default function ProjectEdit() {
             ? labelForDraftStatus(draft.status)
             : seedLoading
               ? "載入中…"
-              : "尚未產生剪輯"}
+              : triggering || awaitingFirstFetch
+                ? "排隊中…"
+                : "尚未產生剪輯"}
           {polling.isPolling && draft && (
             <span className="polling-indicator" aria-live="polite">
               {" · 更新中"}
@@ -270,6 +278,18 @@ export default function ProjectEdit() {
           </div>
         </section>
       )}
+
+      {(triggering || awaitingFirstFetch) &&
+        !showProcessing &&
+        !showReady &&
+        !showFailed && (
+          <section className="edit-card">
+            <h2 className="edit-card__title">剪輯中…</h2>
+            <p className="edit-card__body mono">
+              排隊中，等待 worker 接手後即會顯示進度。
+            </p>
+          </section>
+        )}
 
       {showProcessing && draft && (
         <section className="edit-card">
