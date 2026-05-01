@@ -1,6 +1,7 @@
 """Health endpoint."""
 
-from importlib.metadata import PackageNotFoundError, version
+import tomllib
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter
@@ -11,16 +12,27 @@ router = APIRouter()
 
 
 def _package_version() -> str:
-    """Read media-processor version from the installed package metadata.
+    """Read media-processor version directly from pyproject.toml at startup.
 
-    Single source of truth: pyproject.toml. Avoids the M3/M4 drift where
-    a hardcoded VERSION string in this module silently lagged the bumps
-    in pyproject.toml + main.py.
+    Single source of truth: pyproject.toml. The api Dockerfile copies
+    pyproject.toml to /app/pyproject.toml so the runtime can read it
+    without the package being pip-installed. importlib.metadata.version()
+    is not used because the api image installs the dependencies but does
+    NOT install media-processor itself, so the metadata is absent.
     """
-    try:
-        return version("media-processor")
-    except PackageNotFoundError:
-        return "0.0.0"
+    candidates = [
+        Path("/app/pyproject.toml"),
+        Path(__file__).resolve().parents[4] / "pyproject.toml",
+    ]
+    for path in candidates:
+        if path.exists():
+            with path.open("rb") as fh:
+                data = tomllib.load(fh)
+            project = data.get("project", {})
+            v = project.get("version")
+            if isinstance(v, str) and v:
+                return v
+    return "0.0.0"
 
 
 VERSION = _package_version()
