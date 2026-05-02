@@ -19,6 +19,15 @@ MAX_LINE_CHARS = 12
 MAX_LINES = 2
 MIN_DISPLAY_MS = 700
 
+# M6.3 introduced xfade transitions between adjacent cuts: each pair
+# overlaps by ``video_renderer.TRANSITION_DURATION_S`` on the rendered
+# timeline, so cut N starts at ``sum(d_i for i<N) - N * TRANSITION_MS``
+# rather than the simple sum. The subtitle generator must shrink its
+# per-cut advance by the same amount or every cut after the first lands
+# late on the rendered video. Mirrored from video_renderer to avoid an
+# import cycle.
+TRANSITION_OVERLAP_MS = 500
+
 
 @dataclass(frozen=True)
 class SubtitleCue:
@@ -103,10 +112,19 @@ def build_cues(
     cues: list[SubtitleCue] = []
     timeline_cursor = 0
     sequence = 1
+    is_first = True
     for cut in sorted(plan.segments, key=lambda s: s.order):
         cut_duration = cut.asset_end_ms - cut.asset_start_ms
         if cut_duration <= 0:
             continue
+        # Every cut after the first overlaps the previous one by
+        # ``TRANSITION_OVERLAP_MS`` because of xfade — pull the cursor back
+        # by that amount before placing this cut's subtitles, mirroring
+        # the renderer's cumulative offset arithmetic in
+        # ``_build_xfade_filter``.
+        if not is_first:
+            timeline_cursor = max(0, timeline_cursor - TRANSITION_OVERLAP_MS)
+        is_first = False
         tx = transcripts.get(cut.asset_id)
         raw_segments = list(tx.segments_json or []) if tx is not None else []
         clipped = _clip_transcript_to_cut(raw_segments, cut)
@@ -242,6 +260,7 @@ __all__ = [
     "MAX_LINE_CHARS",
     "MAX_LINES",
     "MIN_DISPLAY_MS",
+    "TRANSITION_OVERLAP_MS",
     "SubtitleCue",
     "build_cues",
     "build_srt",

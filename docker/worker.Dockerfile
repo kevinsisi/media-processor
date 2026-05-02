@@ -60,12 +60,17 @@ RUN pip install --upgrade pip \
         "httpx>=0.28.0"
 
 # Heavy analysis deps — the [analysis] extras group from pyproject.
+# mediapipe (Phase 8.1) drives services/emotion.py via the Face
+# Landmarker Tasks API; the .task model file itself is downloaded
+# lazily on first analyze run to /app/media/emotion_models, so the
+# image build doesn't need network access to a Google CDN.
 RUN pip install \
         "faster-whisper>=1.0.3,<2.0" \
         "opencv-python-headless>=4.10.0,<5.0" \
         "opencc>=1.1.7" \
         "numpy>=1.26.0,<3.0" \
-        "Pillow>=10.4.0"
+        "Pillow>=10.4.0" \
+        "mediapipe>=0.10.14,<0.11"
 
 COPY src/ ./src/
 COPY profiles/ ./profiles/

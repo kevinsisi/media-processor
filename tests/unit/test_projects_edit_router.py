@@ -180,12 +180,12 @@ def test_edit_trigger_persists_pending_draft(
     assert drafts[0]["id"] == new_draft_id
     assert drafts[0]["status"] == "pending"
     assert drafts[0]["version"] == 1
-    assert drafts[0]["progress_steps"] == {
-        "plan": "pending",
-        "cut": "pending",
-        "concat": "pending",
-        "subtitles": "pending",
-    }
+    # Progress map seeds every EditStep value to "pending" (M6.4 added
+    # ``bgm``); the API mirrors EDIT_STEP_VALUES so new stages show up
+    # automatically without the test needing to know about them.
+    from media_processor.models import EDIT_STEP_VALUES
+
+    assert drafts[0]["progress_steps"] == dict.fromkeys(EDIT_STEP_VALUES, "pending")
 
 
 def test_edit_trigger_409_when_pending_draft_exists(

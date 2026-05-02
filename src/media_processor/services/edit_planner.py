@@ -63,10 +63,23 @@ _MOTION_DEFAULT = "static"  # if asset has no motion tags, treat as static
 _MOTION_ALTERNATION_BONUS = 10  # boost for differing from prev cut's motion
 _MOTION_POSITION_BONUS = 15  # boost for matching opening=dynamic / closing=static
 
+# Phase 8.1 — emotion-aware bonuses. The planner cares about two things:
+# (1) tell the renderer the dominant emotion so it can apply zoompan, and
+# (2) when a cut sits next to one with a *different* emotion, escalate
+# the transition to the punchy ``circlecrop`` variant.
+EMOTION_DEFAULT: str = "neutral"
+DYNAMIC_EMOTIONS: frozenset[str] = frozenset({"happy", "surprised"})
+STATIC_EMOTIONS: frozenset[str] = frozenset({"serious", "neutral"})
+_EMOTION_SHIFT_TRANSITION: str = "circlecrop"
+
 # xfade transition whitelist — must match ffmpeg xfade filter values.
 # Any other suggestion from Gemini gets coerced to TRANSITION_DEFAULT so a
-# typo / hallucination doesn't crash the render stage.
-VALID_TRANSITIONS: frozenset[str] = frozenset({"fade", "dissolve", "wipeleft", "slideright"})
+# typo / hallucination doesn't crash the render stage. Phase 8.1 added
+# ``circlecrop`` as the strong-transition variant the renderer applies on
+# emotion shifts.
+VALID_TRANSITIONS: frozenset[str] = frozenset(
+    {"fade", "dissolve", "wipeleft", "slideright", "circlecrop"}
+)
 TRANSITION_DEFAULT: str = "dissolve"
 TRANSITION_DURATION_S: float = 0.5
 
@@ -117,6 +130,11 @@ class CutPlanSegment:
     # (no next). Defaults are safe so older serialised plans without this
     # field stay loadable.
     transition_to_next: str = "dissolve"
+    # Phase 8.1 — dominant face emotion across this cut's best span.
+    # Read by ``video_renderer`` to decide whether to apply zoompan
+    # (DYNAMIC_EMOTIONS get a slow zoom-in; STATIC stays locked off).
+    # Default keeps older serialised plans loadable.
+    dominant_emotion: str = EMOTION_DEFAULT
 
 
 @dataclass(frozen=True)
@@ -163,6 +181,52 @@ def _format_motion(asset: Asset) -> str:
     if not chunks:
         return "（無運鏡分段）"
     return ", ".join(chunks)
+
+
+def _format_emotion(asset: Asset) -> str:
+    """Render emotion tags + dominant verdict for the per-asset prompt.
+
+    Returns a single line summarising the asset's dominant face emotion
+    plus per-class time ranges, or a placeholder if the emotion stage
+    didn't run (or saw no faces). The dominant verdict lives in the
+    ``tag_name="dominant"`` row whose ``time_ranges_ms`` actually stores
+    the dominant class string — see ``analysis._run_emotion``.
+    """
+    dominant = EMOTION_DEFAULT
+    chunks: list[str] = []
+    for tag in asset.tags:
+        if tag.tag_type != "emotion":
+            continue
+        if tag.tag_name == "dominant":
+            stash = list(tag.time_ranges_ms or [])
+            if stash and isinstance(stash[0], str):
+                dominant = stash[0]
+            continue
+        ranges = list(tag.time_ranges_ms or [])
+        if not ranges:
+            continue
+        for r in ranges[:4]:
+            if isinstance(r, list | tuple) and len(r) == 2:
+                chunks.append(f"{tag.tag_name}[{int(r[0])}-{int(r[1])}]")
+    if not chunks and dominant == EMOTION_DEFAULT:
+        return "（無情緒分析）"
+    body = ", ".join(chunks) if chunks else "（無時間段）"
+    return f"主要情緒={dominant}; 分布: {body}"
+
+
+def _dominant_emotion_for_asset(asset: Asset) -> str:
+    """Pull the dominant emotion class from the ``dominant`` tag row.
+
+    Returns ``EMOTION_DEFAULT`` for assets that never went through the
+    emotion stage so downstream code (planner / renderer) can keep its
+    branches simple.
+    """
+    for tag in asset.tags:
+        if tag.tag_type == "emotion" and tag.tag_name == "dominant":
+            stash = list(tag.time_ranges_ms or [])
+            if stash and isinstance(stash[0], str):
+                return stash[0]
+    return EMOTION_DEFAULT
 
 
 def _bucket_transcript(
@@ -230,6 +294,7 @@ def _format_asset_block(
         f"== asset_id={asset.id}（{asset.duration_ms / 1000:.1f}s）==\n"
         f"場景標籤：{_format_scene_tags(asset)}\n"
         f"運鏡：{_format_motion(asset)}\n"
+        f"情緒：{_format_emotion(asset)}\n"
         f"逐字稿：\n{_format_transcript(transcript)}\n"
         f"腳本對應：{_format_coverage(coverage)}\n"
     )
@@ -255,6 +320,7 @@ _ASSET_SCORE_PROMPT = (
     "- 時長: {duration_s:.1f} 秒\n"
     "- 場景標籤: {scene_tags}\n"
     "- 運鏡: {motion}\n"
+    "- 情緒: {emotion}\n"
     "- 逐字稿:\n{transcript}\n"
     "- 腳本對應: {coverage}\n\n"
     "請評估：\n"
@@ -265,8 +331,11 @@ _ASSET_SCORE_PROMPT = (
     "[start_ms, end_ms]，必須在 [0, {duration_ms}] 之內\n"
     " 4. source_kind：scripted（照腳本講的部分）或 improv（自然發揮 / 情緒亮點）\n"
     " 5. transition_to_next：這段播完後若銜接「下一段」適合的轉場效果，"
-    "從 fade / dissolve / wipeleft / slideright 擇一（情緒延續用 dissolve；"
-    "場景大跳用 wipeleft 或 slideright；段落收束用 fade）\n\n"
+    "從 fade / dissolve / wipeleft / slideright / circlecrop 擇一。\n"
+    "    指引：情緒延續或同場景用 dissolve；情緒平緩接同類用 fade；"
+    "    場景大跳（室內↔戶外、人物↔產品）用 wipeleft 或 slideright；"
+    "    情緒大跳（平靜↔激動 / 嚴肅↔驚喜）用 circlecrop；"
+    "    避免整支片只用一種。\n\n"
     "嚴格輸出 JSON：\n"
     "{{\n"
     f'  "schema_version": "{ASSET_SCORE_SCHEMA_VERSION}",\n'
@@ -274,7 +343,7 @@ _ASSET_SCORE_PROMPT = (
     '  "position": "opening" | "middle" | "closing" | "skip",\n'
     '  "best_span_ms": [<start_ms>, <end_ms>],\n'
     '  "source_kind": "scripted" | "improv",\n'
-    '  "transition_to_next": "fade" | "dissolve" | "wipeleft" | "slideright",\n'
+    '  "transition_to_next": "fade" | "dissolve" | "wipeleft" | "slideright" | "circlecrop",\n'
     '  "reason": "<一句話原因>"\n'
     "}}\n"
 )
@@ -293,6 +362,7 @@ def _build_asset_prompt(
         duration_ms=int(asset.duration_ms),
         scene_tags=_format_scene_tags(asset),
         motion=_format_motion(asset),
+        emotion=_format_emotion(asset),
         transcript=_format_transcript(transcript),
         coverage=_format_coverage(coverage),
     )
@@ -327,6 +397,10 @@ class _AssetScore:
     reason: str
     dominant_motion: str = _MOTION_DEFAULT
     transition_to_next: str = TRANSITION_DEFAULT  # xfade filter type
+    # Phase 8.1 — copied from the asset's ``dominant`` emotion tag row
+    # before assembly. Carried through to ``CutPlanSegment.dominant_emotion``
+    # so the renderer can act on it without re-querying tags.
+    dominant_emotion: str = EMOTION_DEFAULT
 
 
 def _dominant_motion_for_span(asset: Asset, span_ms: tuple[int, int]) -> str:
@@ -542,18 +616,41 @@ def _assemble_plan(
         if accumulated >= target_duration_ms:
             break
 
-    return [
-        CutPlanSegment(
-            order=i,
-            asset_id=s.asset_id,
-            asset_start_ms=s.best_span_ms[0],
-            asset_end_ms=s.best_span_ms[1],
-            source_kind=s.source_kind,
-            reason=s.reason,
-            transition_to_next=s.transition_to_next,
+    # Phase 8.1 — escalate transition to ``circlecrop`` whenever the
+    # following cut's dominant emotion is a different bucket (dynamic
+    # vs static), so the visual jolt mirrors the emotional jolt. The
+    # last cut's transition is unused by the renderer so we leave it.
+    out: list[CutPlanSegment] = []
+    for i, s in enumerate(chosen):
+        next_emotion = chosen[i + 1].dominant_emotion if i + 1 < len(chosen) else None
+        transition = s.transition_to_next
+        if next_emotion is not None and _is_emotion_shift(s.dominant_emotion, next_emotion):
+            transition = _EMOTION_SHIFT_TRANSITION
+        out.append(
+            CutPlanSegment(
+                order=i,
+                asset_id=s.asset_id,
+                asset_start_ms=s.best_span_ms[0],
+                asset_end_ms=s.best_span_ms[1],
+                source_kind=s.source_kind,
+                reason=s.reason,
+                transition_to_next=transition,
+                dominant_emotion=s.dominant_emotion,
+            )
         )
-        for i, s in enumerate(chosen)
-    ]
+    return out
+
+
+def _is_emotion_shift(prev: str, nxt: str) -> bool:
+    """True when prev/next sit in different emotion buckets.
+
+    Treats {happy, surprised} as the dynamic bucket and {serious,
+    neutral} as static so quick same-bucket sequels (happy→surprised)
+    don't escalate every transition into a circlecrop.
+    """
+    prev_dyn = prev in DYNAMIC_EMOTIONS
+    nxt_dyn = nxt in DYNAMIC_EMOTIONS
+    return prev_dyn != nxt_dyn
 
 
 # ---------- DB loading ----------
@@ -692,10 +789,14 @@ async def _score_one_asset(
                 asset_id=asset.id,
                 asset_duration_ms=int(asset.duration_ms),
             )
-            # Attach motion context for the rhythm-aware assembler.
+            # Attach motion + emotion context for rhythm-aware assembly
+            # and renderer-side zoompan / transition decisions. We do
+            # this server-side rather than asking Gemini to echo back
+            # the tags so the model can't accidentally rewrite them.
             return replace(
                 parsed,
                 dominant_motion=_dominant_motion_for_span(asset, parsed.best_span_ms),
+                dominant_emotion=_dominant_emotion_for_asset(asset),
             )
         except EditPlanInvalidError as exc:
             last_invalid = exc
@@ -850,6 +951,7 @@ async def heuristic_fallback(
                         asset_end_ms=end,
                         source_kind="improv",
                         reason="fallback: middle slice",
+                        dominant_emotion=_dominant_emotion_for_asset(asset),
                     )
                 )
                 accumulated_ms += end - mid
@@ -868,6 +970,7 @@ async def heuristic_fallback(
                         asset_end_ms=end,
                         source_kind="improv",
                         reason="fallback: transcript segment",
+                        dominant_emotion=_dominant_emotion_for_asset(asset),
                     )
                 )
                 accumulated_ms += end - start
@@ -911,6 +1014,7 @@ def serialise_plan(plan_obj: CutPlan) -> dict[str, Any]:
                 "source_kind": s.source_kind,
                 "reason": s.reason,
                 "transition_to_next": s.transition_to_next,
+                "dominant_emotion": s.dominant_emotion,
             }
             for s in plan_obj.segments
         ],
@@ -936,6 +1040,7 @@ def deserialise_plan(blob: dict[str, Any]) -> CutPlan:
                 source_kind=str(seg["source_kind"]),
                 reason=str(seg.get("reason", "")),
                 transition_to_next=str(seg.get("transition_to_next", "dissolve")),
+                dominant_emotion=str(seg.get("dominant_emotion", EMOTION_DEFAULT)),
             )
         )
     segments.sort(key=lambda s: s.order)

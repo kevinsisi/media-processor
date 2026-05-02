@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "media-processor"
-version = "0.13.0"
+version = "0.14.0"
 description = "Content factory pipeline for short-form video production"
 requires-python = ">=3.11"
 dependencies = [
@@ -41,6 +41,9 @@ analysis = [
     "opencc>=1.1.7",
     "numpy>=1.26.0,<3.0",
     "Pillow>=10.4.0",
+    # Phase 8.1 — face emotion analysis via MediaPipe Face Landmarker.
+    # Pinned to 0.10.x because the Tasks API surface stabilised there.
+    "mediapipe>=0.10.14,<0.11",
 ]
 
 [tool.hatch.build.targets.wheel]

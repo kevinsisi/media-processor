@@ -136,9 +136,88 @@ async def test_plan_happy_path(session: AsyncSession, monkeypatch: pytest.Monkey
     assert seg.asset_end_ms == 4000
     assert seg.source_kind == "scripted"
     assert seg.transition_to_next == "fade"
+    # Phase 8.1: with no emotion tags on the asset, dominant_emotion
+    # falls back to the canonical default.
+    assert seg.dominant_emotion == edit_planner.EMOTION_DEFAULT
     assert plan.target_duration_ms == 20_000
     # Notes are now synthesised locally summarising the fanout.
     assert "per-asset fanout" in plan.notes
+
+
+def test_emotion_shift_escalates_transition_to_circlecrop() -> None:
+    """Adjacent cuts whose dominant emotion buckets differ should burn a circlecrop."""
+    from media_processor.services.edit_planner import (
+        TRANSITION_DEFAULT,
+        VALID_TRANSITIONS,
+        _AssetScore,
+        _assemble_plan,
+    )
+
+    assert "circlecrop" in VALID_TRANSITIONS
+
+    scores = [
+        _AssetScore(
+            asset_id=1,
+            score=90,
+            position="opening",
+            best_span_ms=(0, 2_000),
+            source_kind="improv",
+            reason="",
+            dominant_motion="static",
+            transition_to_next=TRANSITION_DEFAULT,
+            dominant_emotion="happy",
+        ),
+        _AssetScore(
+            asset_id=2,
+            score=85,
+            position="middle",
+            best_span_ms=(0, 2_500),
+            source_kind="improv",
+            reason="",
+            dominant_motion="static",
+            transition_to_next="dissolve",
+            dominant_emotion="serious",
+        ),
+    ]
+    cuts = _assemble_plan(scores, target_duration_ms=10_000)
+    assert len(cuts) == 2
+    # First cut transitions across an emotion-bucket boundary → circlecrop.
+    assert cuts[0].transition_to_next == "circlecrop"
+    # Last cut's transition is unused; left as Gemini's suggestion.
+    assert cuts[1].transition_to_next == "dissolve"
+
+
+def test_serialise_round_trip_preserves_dominant_emotion() -> None:
+    """Phase 8.1 — dominant_emotion survives JSON round-trip via cut_plan_json."""
+    from media_processor.services.edit_planner import (
+        CutPlan,
+        CutPlanSegment,
+        deserialise_plan,
+        serialise_plan,
+    )
+
+    plan = CutPlan(
+        schema_version=SCHEMA_VERSION,
+        target_duration_ms=10_000,
+        target_aspect_ratio="9:16",
+        profile_name="universal",
+        segments=(
+            CutPlanSegment(
+                order=0,
+                asset_id=1,
+                asset_start_ms=0,
+                asset_end_ms=2_000,
+                source_kind="improv",
+                reason="",
+                transition_to_next="circlecrop",
+                dominant_emotion="surprised",
+            ),
+        ),
+    )
+    blob = serialise_plan(plan)
+    restored = deserialise_plan(blob)
+    assert restored.segments[0].dominant_emotion == "surprised"
+    assert restored.segments[0].transition_to_next == "circlecrop"
 
 
 @pytest.mark.asyncio

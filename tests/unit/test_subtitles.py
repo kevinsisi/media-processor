@@ -133,9 +133,33 @@ def test_build_cues_advances_timeline_across_cuts() -> None:
         2: _FakeTranscript([{"idx": 0, "start_ms": 0, "end_ms": 2_000, "text": "乙"}]),
     }
     cues = build_cues(plan, transcripts)  # type: ignore[arg-type]
-    # Second cue's timeline anchor must be >= cumulative duration of cut 0.
+    # Cut 0 starts at 0; cut 1 starts at d_0 - TRANSITION_OVERLAP_MS because
+    # adjacent cuts overlap on the rendered timeline (M6.3 xfade chain).
+    from media_processor.services.subtitles import TRANSITION_OVERLAP_MS
+
     assert cues[0].timeline_start_ms == 0
-    assert cues[1].timeline_start_ms >= 2_000
+    assert cues[1].timeline_start_ms == 2_000 - TRANSITION_OVERLAP_MS
+
+
+def test_build_cues_xfade_overlap_three_cuts() -> None:
+    """With N cuts, cut k starts at sum(d_i for i<k) - k*TRANSITION_OVERLAP_MS."""
+    from media_processor.services.subtitles import TRANSITION_OVERLAP_MS
+
+    cuts = [
+        CutPlanSegment(0, 1, 0, 2_000, "improv", ""),
+        CutPlanSegment(1, 2, 0, 2_500, "improv", ""),
+        CutPlanSegment(2, 3, 0, 3_000, "improv", ""),
+    ]
+    plan = _plan(cuts)
+    transcripts = {
+        i: _FakeTranscript([{"idx": 0, "start_ms": 0, "end_ms": 800, "text": f"第{i}"}])
+        for i in (1, 2, 3)
+    }
+    cues = build_cues(plan, transcripts)  # type: ignore[arg-type]
+    assert len(cues) == 3
+    assert cues[0].timeline_start_ms == 0
+    assert cues[1].timeline_start_ms == 2_000 - TRANSITION_OVERLAP_MS
+    assert cues[2].timeline_start_ms == 2_000 + 2_500 - 2 * TRANSITION_OVERLAP_MS
 
 
 def test_render_srt_round_trip() -> None:

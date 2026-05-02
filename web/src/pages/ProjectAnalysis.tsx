@@ -10,17 +10,20 @@ import type {
 import { useAssetPolling } from "../hooks/useAssetPolling";
 import {
   ANALYSIS_STEP_LABELS,
+  iconForEmotionTag,
   labelForAssetStatus,
+  labelForEmotionTag,
   labelForMotionType,
   labelForSceneTag,
   labelForStepState,
 } from "../i18n/tags";
 import "./ProjectAnalysis.css";
 
-const ANALYSIS_STEP_ORDER: ("stt" | "scene" | "motion" | "coverage")[] = [
+const ANALYSIS_STEP_ORDER: ("stt" | "scene" | "motion" | "emotion" | "coverage")[] = [
   "stt",
   "scene",
   "motion",
+  "emotion",
   "coverage",
 ];
 
@@ -404,6 +407,23 @@ function AssetCard({ asset, onAnalyze, selected, onToggleSelect }: AssetCardProp
       )}
 
       <MotionTimeline totalMs={asset.duration_ms} segments={asset.motion_segments} />
+
+      {asset.emotion_tags && (
+        <div
+          className={`emotion-chip emotion-chip--${asset.emotion_tags.dominant}`}
+          aria-label={`主要情緒：${labelForEmotionTag(asset.emotion_tags.dominant)}`}
+          title={`${asset.emotion_tags.ranges.length} 段情緒（${asset.emotion_tags.ranges
+            .map((r) => labelForEmotionTag(r.emotion))
+            .join(" / ")}）`}
+        >
+          <span className="emotion-chip__icon" aria-hidden>
+            {iconForEmotionTag(asset.emotion_tags.dominant)}
+          </span>
+          <span className="emotion-chip__label">
+            {labelForEmotionTag(asset.emotion_tags.dominant)}
+          </span>
+        </div>
+      )}
 
       <CoverageCard summary={asset.coverage_summary} />
 

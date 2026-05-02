@@ -88,6 +88,24 @@ def test_concat_rejects_empty(tmp_path: Path) -> None:
         video_renderer.concat_segments([], tmp_path / "out.mp4", tmp_path / "list.txt")
 
 
+def test_zoompan_filter_emits_canvas_size_and_increment() -> None:
+    """Phase 8.1 — zoompan chain ends at ZOOMPAN_END_ZOOM and matches canvas size."""
+    chain = video_renderer._zoompan_filter("9:16", duration_s=2.0)
+    assert "zoompan=" in chain
+    # Canvas matches the 9:16 portrait dimensions.
+    assert "s=1080x1920" in chain
+    # End zoom must be the documented ceiling.
+    assert f"{video_renderer.ZOOMPAN_END_ZOOM}" in chain
+    # FPS pinned to VIDEO_FPS so zoompan doesn't resample mid-clip.
+    assert f"fps={video_renderer.ZOOMPAN_FPS}" in chain
+
+
+def test_circlecrop_in_transition_whitelist() -> None:
+    """Phase 8.1 — emotion-shift transitions resolve to circlecrop, not the default."""
+    assert "circlecrop" in video_renderer.VALID_TRANSITIONS
+    assert video_renderer._safe_transition("circlecrop") == "circlecrop"
+
+
 def test_render_end_to_end_fake(tmp_path: Path) -> None:
     src = tmp_path / "asset.mp4"
     src.write_bytes(b"fake")

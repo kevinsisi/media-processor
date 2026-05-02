@@ -21,6 +21,8 @@ from media_processor.api.schemas import (
     DraftSummary,
     EditTriggerRequest,
     EditTriggerResponse,
+    EmotionRangeOut,
+    EmotionTagsOut,
     MotionSegmentOut,
     ProjectAnalysisOut,
     ProjectCreate,
@@ -471,6 +473,51 @@ def _motion_segments_for(asset: Asset) -> list[MotionSegmentOut]:
     return out
 
 
+_EMOTION_TAG_NAMES: frozenset[str] = frozenset({"happy", "surprised", "serious", "neutral"})
+
+
+def _emotion_tags_for(asset: Asset) -> EmotionTagsOut | None:
+    """Collapse the ``emotion``-typed AssetTag rows into the API shape.
+
+    ``tag_name="dominant"`` rows stash the dominant class string in
+    ``time_ranges_ms[0]`` (see ``services.analysis._run_emotion``); the
+    other rows store actual time ranges per class. Returns None when
+    the emotion stage hasn't produced any data so the UI can hide the
+    chip rather than show an "(empty)" pill.
+    """
+    dominant: str | None = None
+    ranges: list[EmotionRangeOut] = []
+    saw_emotion_row = False
+    for tag in asset.tags:
+        if tag.tag_type != "emotion":
+            continue
+        saw_emotion_row = True
+        if tag.tag_name == "dominant":
+            stash = list(tag.time_ranges_ms or [])
+            if stash and isinstance(stash[0], str) and stash[0] in _EMOTION_TAG_NAMES:
+                dominant = stash[0]
+            continue
+        if tag.tag_name not in _EMOTION_TAG_NAMES:
+            continue
+        for r in list(tag.time_ranges_ms or []):
+            if not isinstance(r, list | tuple) or len(r) != 2:
+                continue
+            try:
+                ranges.append(
+                    EmotionRangeOut(
+                        emotion=tag.tag_name,  # type: ignore[arg-type]
+                        start_ms=int(r[0]),
+                        end_ms=int(r[1]),
+                    )
+                )
+            except (TypeError, ValueError):
+                continue
+    if not saw_emotion_row:
+        return None
+    ranges.sort(key=lambda r: r.start_ms)
+    return EmotionTagsOut(dominant=dominant or "neutral", ranges=ranges)  # type: ignore[arg-type]
+
+
 @router.get("/{project_id}/assets", response_model=ProjectAnalysisOut)
 async def list_project_assets_with_analysis(
     project_id: int,
@@ -583,6 +630,7 @@ async def list_project_assets_with_analysis(
                 ),
                 scene_tags=_scene_tags_for(asset),
                 motion_segments=_motion_segments_for(asset),
+                emotion_tags=_emotion_tags_for(asset),
                 thumbnail_urls=thumbnail_urls_for_asset(asset.id),
             )
         )

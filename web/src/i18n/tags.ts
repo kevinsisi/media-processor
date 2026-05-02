@@ -28,8 +28,34 @@ export const ANALYSIS_STEP_LABELS: Record<string, string> = {
   stt: "轉錄",
   scene: "場景",
   motion: "運鏡",
+  emotion: "情緒",
   coverage: "對稿",
 };
+
+// Phase 8.1 — face emotion classes returned by services/emotion.py.
+export const EMOTION_TAG_LABELS: Record<string, string> = {
+  happy: "開心",
+  surprised: "驚喜",
+  serious: "嚴肅",
+  neutral: "平靜",
+};
+
+// Emoji glyphs used as the leading icon on the emotion chip; kept here
+// (not in styles) so swapping copy stays a one-file change.
+export const EMOTION_TAG_ICONS: Record<string, string> = {
+  happy: "😄",
+  surprised: "😮",
+  serious: "😐",
+  neutral: "🙂",
+};
+
+export function labelForEmotionTag(name: string): string {
+  return EMOTION_TAG_LABELS[name] ?? name;
+}
+
+export function iconForEmotionTag(name: string): string {
+  return EMOTION_TAG_ICONS[name] ?? "";
+}
 
 // M5 — auto-edit pipeline stage labels. Used by ProjectEdit.tsx.
 // M6.4 added the bgm stage; it no-ops (auto "done") when the project has

@@ -62,6 +62,7 @@ class AnalysisStep(StrEnum):
     STT = "stt"
     SCENE = "scene"
     MOTION = "motion"
+    EMOTION = "emotion"  # Phase 8.1 — MediaPipe face landmarker → emotion tags
     COVERAGE = "coverage"
 
 

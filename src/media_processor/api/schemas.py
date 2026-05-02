@@ -377,6 +377,23 @@ class SceneTagOut(BaseModel):
     confidence: float
 
 
+# Phase 8.1 — face emotion analysis output. ``ranges`` is the merged
+# per-class spans returned by ``services.emotion``; ``dominant`` is the
+# verdict the planner / renderer act on.
+EmotionTagLiteral = Literal["happy", "surprised", "serious", "neutral"]
+
+
+class EmotionRangeOut(BaseModel):
+    emotion: EmotionTagLiteral
+    start_ms: int
+    end_ms: int
+
+
+class EmotionTagsOut(BaseModel):
+    dominant: EmotionTagLiteral
+    ranges: list[EmotionRangeOut]
+
+
 class AssetAnalysisItem(BaseModel):
     """One row for the project-analysis page polling list."""
 
@@ -390,6 +407,8 @@ class AssetAnalysisItem(BaseModel):
     coverage_summary: CoverageSummaryOut | None
     scene_tags: list[SceneTagOut]
     motion_segments: list[MotionSegmentOut]
+    # Phase 8.1 — null when the emotion stage hasn't run for this asset.
+    emotion_tags: EmotionTagsOut | None = None
     # Public URLs for the keyframe gallery; empty list when frames have not
     # been generated yet (the UI shows a placeholder).
     thumbnail_urls: list[str]

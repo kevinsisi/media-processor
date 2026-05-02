@@ -153,6 +153,42 @@ def aspect_filter(target_aspect: str) -> str:
     )
 
 
+# Phase 8.1 — emotion-driven zoompan. Excited / surprised cuts get a slow
+# zoom-in (1.0 → ZOOMPAN_END_ZOOM over the cut's duration) so the camera
+# tracks the energy of the moment; serious / neutral cuts stay locked
+# off. ZOOMPAN_FPS matches VIDEO_FPS so the zoompan filter doesn't
+# resample mid-clip.
+ZOOMPAN_EMOTIONS: frozenset[str] = frozenset({"happy", "surprised"})
+ZOOMPAN_END_ZOOM: float = 1.15
+ZOOMPAN_FPS: int = VIDEO_FPS
+
+
+def _zoompan_filter(target_aspect: str, duration_s: float) -> str:
+    """Build a ``zoompan`` filter chain that smoothly zooms 1.0 → 1.15.
+
+    duration_s drives the per-frame increment so the end zoom lands at
+    ZOOMPAN_END_ZOOM regardless of cut length. Output canvas matches
+    ASPECT_DIMENSIONS so the surrounding ``aspect_filter`` chain doesn't
+    have to crop again. We cap ``d`` at the closest integer frame count
+    so ffmpeg's zoompan integer-frame requirement is met.
+    """
+    width, height = ASPECT_DIMENSIONS[target_aspect]
+    duration_s = max(0.001, duration_s)
+    total_frames = max(1, int(round(duration_s * ZOOMPAN_FPS)))
+    # Per-frame zoom increment so we land at ZOOMPAN_END_ZOOM after
+    # total_frames; clamped with min(...) so rounding never overshoots.
+    increment = (ZOOMPAN_END_ZOOM - 1.0) / float(total_frames)
+    return (
+        f"zoompan="
+        f"z='min(zoom+{increment:.6f},{ZOOMPAN_END_ZOOM})'"
+        f":d={total_frames}"
+        f":x='iw/2-(iw/zoom)/2'"
+        f":y='ih/2-(ih/zoom)/2'"
+        f":s={width}x{height}"
+        f":fps={ZOOMPAN_FPS}"
+    )
+
+
 def _run(cmd: list[str], *, timeout_s: float, stage: str) -> None:
     """Run ffmpeg with capture; raise descriptive errors on failure."""
     if _is_fake():
@@ -192,10 +228,22 @@ def _cut_segment(
     out_path: Path,
     target_aspect: str,
 ) -> None:
-    """Cut + scale-and-crop one segment to a uniform intermediate mp4."""
+    """Cut + scale-and-crop one segment to a uniform intermediate mp4.
+
+    Phase 8.1: when the cut's ``dominant_emotion`` is in
+    ``ZOOMPAN_EMOTIONS`` we tack a ``zoompan`` filter onto the chain so
+    the segment renders with a slow 1.00 → 1.15 zoom-in across its
+    duration. Other emotions (or unknown) keep the static aspect crop.
+    """
     out_path.parent.mkdir(parents=True, exist_ok=True)
     start_s = cut.asset_start_ms / 1000.0
     duration_s = max(0.001, (cut.asset_end_ms - cut.asset_start_ms) / 1000.0)
+    vf_chain = aspect_filter(target_aspect)
+    if getattr(cut, "dominant_emotion", "neutral") in ZOOMPAN_EMOTIONS:
+        # zoompan operates on its own canvas, so we run it AFTER the
+        # aspect crop so the zoom centre is the cropped frame's centre
+        # rather than the original asset's.
+        vf_chain = f"{vf_chain},{_zoompan_filter(target_aspect, duration_s)}"
     cmd = [
         "ffmpeg",
         "-hide_banner",
@@ -209,7 +257,7 @@ def _cut_segment(
         "-t",
         f"{duration_s:.3f}",
         "-vf",
-        aspect_filter(target_aspect),
+        vf_chain,
         "-r",
         str(VIDEO_FPS),
         "-c:v",
@@ -277,7 +325,12 @@ def _write_concat_list(intermediate_paths: list[Path], list_path: Path) -> None:
 # is the ffmpeg xfade values we promise to support; anything else from a
 # stored plan is coerced to the safe default.
 TRANSITION_DURATION_S: float = 0.5
-VALID_TRANSITIONS: frozenset[str] = frozenset({"fade", "dissolve", "wipeleft", "slideright"})
+# Whitelist of ffmpeg xfade values we ship. Phase 8.1 added ``circlecrop``
+# as the punchy variant the planner emits on emotion shifts. Any other
+# value from a stored plan is coerced to the safe default below.
+VALID_TRANSITIONS: frozenset[str] = frozenset(
+    {"fade", "dissolve", "wipeleft", "slideright", "circlecrop"}
+)
 TRANSITION_DEFAULT: str = "dissolve"
 
 
@@ -654,6 +707,8 @@ __all__ = [
     "VIDEO_PRESET",
     "VideoRenderError",
     "VideoRenderTimeoutError",
+    "ZOOMPAN_EMOTIONS",
+    "ZOOMPAN_END_ZOOM",
     "aspect_filter",
     "burn_subtitles",
     "cleanup_intermediates",

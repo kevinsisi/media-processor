@@ -280,7 +280,21 @@ export interface ScriptCoverageOut {
   computed_at: string;
 }
 
-export type AnalysisStep = "stt" | "scene" | "motion" | "coverage";
+export type AnalysisStep = "stt" | "scene" | "motion" | "emotion" | "coverage";
+
+// Phase 8.1 — face emotion analysis. Mirrors api/schemas.EmotionTagsOut.
+export type EmotionTag = "happy" | "surprised" | "serious" | "neutral";
+
+export interface EmotionRangeOut {
+  emotion: EmotionTag;
+  start_ms: number;
+  end_ms: number;
+}
+
+export interface EmotionTagsOut {
+  dominant: EmotionTag;
+  ranges: EmotionRangeOut[];
+}
 
 export interface AnalyzeRequest {
   steps?: AnalysisStep[] | null;
@@ -331,6 +345,8 @@ export interface AssetAnalysisItem {
   coverage_summary: CoverageSummaryOut | null;
   scene_tags: SceneTagOut[];
   motion_segments: MotionSegmentOut[];
+  // Phase 8.1 — null when the emotion stage hasn't run for this asset.
+  emotion_tags?: EmotionTagsOut | null;
   // Public URLs (e.g. "/api/media/thumbnails/12/frame_2.jpg") for the
   // keyframe gallery; empty until ffmpeg has produced the frames.
   thumbnail_urls: string[];

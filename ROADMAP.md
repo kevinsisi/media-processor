@@ -2,7 +2,7 @@
 
 > **單一定位**：個人 / 小團隊用的「拍完就上傳，AI 直接給可發佈影片」的工具。
 > 目標 UX：手機優先、繁體中文、高級感、最少手動編輯。
-> 目前版本：**0.12.0**（M6 完成）
+> 目前版本：**0.14.0**（Phase 8.1 — 情緒分析 + 運鏡縮放 完成）
 
 ## Phase 進度速覽
 
@@ -13,10 +13,11 @@
 | M4 | AI 分析 pipeline（Whisper + Vision + Coverage） | ✅ done | 0.4.x – 0.10.x |
 | M4.6 | Asset thumbnail gallery | ✅ done | 0.10.x |
 | M5 | Auto-edit MVP（cut planner + edit planner + LLM patcher） | ✅ done | 0.11.x |
-| M6 | Rhythm + Transitions + BGM | ✅ done | **0.12.0** |
-| **M7** | **Manual control（timeline / subtitle / export format）** | 🚧 in progress | **0.13.x** |
-| M8 | BGM library + 智慧選曲 + 動態元素 | 🔜 planned | 0.14.x |
-| M9 | 多專案批次 + 社群直接發布 | 🔮 future | 0.15.x+ |
+| M6 | Rhythm + Transitions + BGM | ✅ done | 0.12.0 |
+| M7 | Manual control（timeline / subtitle / export format） | ✅ done | 0.13.0 |
+| **M8.1** | **情緒分析 + 運鏡縮放（zoompan + emotion-shift transitions）** | ✅ done | **0.14.0** |
+| M8.2 | BGM library + 智慧選曲 + 動態元素（kinetic typography / hero shot） | 🔜 planned | 0.15.x |
+| M9 | 多專案批次 + 社群直接發布 | 🔮 future | 0.16.x+ |
 
 ---
 
@@ -113,19 +114,49 @@
 
 ---
 
-## 🔜 Phase 8（M8）— BGM library + 動態元素（0.14.x）
+## ✅ Phase 8.1（M8.1）— 情緒分析 + 運鏡縮放（已完成 0.14.0）
 
-### 8.1 內建 BGM library
+主題：**讓自動剪輯讀懂表情**，並順手清掉兩個 M6 留下的小 bug。
+
+### 8.1.1 字幕時間 remap 修正（bug fix）
+- `subtitles.build_cues` 沒扣掉 M6.3 xfade 的 0.5 s 重疊，所以 cut N 的字幕會晚 (N-1)*0.5 s 出。
+- 修：把 `TRANSITION_OVERLAP_MS = 500` 鏡像到 subtitles，每段 cut（除了第一段）開始前先把 timeline_cursor 拉回 500 ms。
+
+### 8.1.2 轉場停留在 dissolve（bug fix）
+- 加 `circlecrop` 到 `VALID_TRANSITIONS` whitelist（renderer + planner 兩處）。
+- 改 per-asset 評分 prompt：明確列出 fade/dissolve/wipeleft/slideright/circlecrop 五種、加上「避免整支片只用一種」指令。
+
+### 8.1.3 MediaPipe 臉部情緒分析
+- 新 `services/emotion.py`：MediaPipe Face Landmarker（Tasks API）以 2 fps 取樣，blendshapes 對應到 happy / surprised / serious / neutral，相鄰相同分類合併成 ranges。
+- 模型 `.task` 檔首次分析時懶下載到 `${EMOTION_MODEL_DIR}/face_landmarker.task`（預設 `/app/media/emotion_models/`），離線部署可用 `EMOTION_MODEL_PATH` 指向預下載檔。
+- `EMOTION_FAKE=1` 給 CI 用的確定性 stub。
+- 新 `AnalysisStep.EMOTION` + `_run_emotion`；存進現有 `asset_tags` 表（無 schema migration）。
+
+### 8.1.4 情緒驅動的剪輯決策
+- 每段 `_AssetScore` / `CutPlanSegment` 帶 `dominant_emotion`（`serialise_plan` 也持久化）。
+- `_assemble_plan` 在情緒桶（dynamic={happy, surprised} / static={serious, neutral}）跨界時把 `transition_to_next` 升級成 `circlecrop`。
+- `video_renderer._cut_segment` 對 `dominant_emotion ∈ {happy, surprised}` 的 cut 在 aspect 切完之後串一段 `zoompan`（`1.0 → 1.15` 跨 cut 全長），靜態 / 中性 cut 維持原尺寸。
+
+### 8.1.5 前端
+- API 新 `EmotionTagsOut`（dominant + per-class ranges），`AssetAnalysisItem.emotion_tags` 在沒跑情緒時為 null。
+- `i18n/tags.ts` 加 `EMOTION_TAG_LABELS / EMOTION_TAG_ICONS`（emoji + 繁中標籤）。
+- `ProjectAnalysis.tsx` 在運鏡時間軸下方多一顆色票化情緒 chip（happy 暖黃 / surprised 紫 / serious 灰 / neutral 中性）。
+
+---
+
+## 🔜 Phase 8.2（M8.2）— BGM library + 動態元素（0.15.x）
+
+### 8.2.1 內建 BGM library
 - `bgm_library` table：name, mood (warm / energetic / calm / cinematic / pop), tempo, file_path
 - 上傳合輯後可 tag 給每首；專案上 BGM 時可選「自動依片段情緒選曲」
-- 自動選曲：用 STT transcript + scene tags 餵 Gemini → 回 mood key → 從 library 抽
+- 自動選曲：用 STT transcript + scene tags + emotion 餵 Gemini → 回 mood key → 從 library 抽
 
-### 8.2 動態元素（kinetic typography）
+### 8.2.2 動態元素（kinetic typography）
 - 重點字幕高亮（粗體放大 + 短彈跳動畫，5 frames 內結束）
 - AI 自己挑「值得放大的字」（Gemini 看 transcript 給 1–3 個關鍵字 per cue）
 - 渲染走 ffmpeg 的 `drawtext` + `expr` enable 視窗
 
-### 8.3 Hero shot 自動放慢
+### 8.2.3 Hero shot 自動放慢
 - 若某段 score > 90 且 dominant_motion=static + closeup → 自動 0.7x 慢速
 - 配 BGM 重拍對齊（簡單啟發式：若 BGM tempo 已知，hero 進場對齊 beat）
 

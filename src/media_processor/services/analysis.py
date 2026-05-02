@@ -29,13 +29,19 @@ from media_processor.models import (
     Script,
     ScriptCoverage,
 )
-from media_processor.services import camera_motion, scene_tagging, script_coverage, whisper_stt
+from media_processor.services import (
+    camera_motion,
+    emotion,
+    scene_tagging,
+    script_coverage,
+    whisper_stt,
+)
 from media_processor.services.settings_store import get_llm_api_keys
 
 logger = logging.getLogger(__name__)
 
 
-VALID_STEPS = ("stt", "scene", "motion", "coverage")
+VALID_STEPS = ("stt", "scene", "motion", "emotion", "coverage")
 STEP_TIMEOUT_S = 30 * 60  # 30 min per step
 
 # Max retry-able exceptions that map to a known reason token.
@@ -45,6 +51,7 @@ _KNOWN_REASONS: dict[type[Exception], str] = {
     scene_tagging.SceneQuotaExhaustedError: "quota-exhausted",
     script_coverage.ScriptCoverageQuotaError: "quota-exhausted",
     script_coverage.ScriptCoverageMissingScriptError: "missing-script",
+    emotion.EmotionUnavailableError: "model-missing",
 }
 
 _GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
@@ -290,6 +297,99 @@ async def _run_motion(
     return "done"
 
 
+async def _run_emotion(
+    session: AsyncSession,
+    asset: Asset,
+    *,
+    force: bool,
+) -> str:
+    """Phase 8.1 — face emotion analysis via MediaPipe blendshapes.
+
+    Persists one ``AssetTag`` row per emotion class with merged
+    ``time_ranges_ms`` so the planner / renderer can read time-anchored
+    spans and the API can surface a dominant chip per asset. The
+    ``dominant`` emotion lands as a separate row (``tag_name="dominant"``)
+    so the planner can fetch it cheaply without reducing ranges every
+    call.
+    """
+    media_path = Path(asset.file_path)
+    result = await asyncio.to_thread(emotion.classify_asset, media_path, asset.duration_ms)
+
+    source_model = "mediapipe-face-landmarker"
+    if force:
+        await session.execute(
+            delete(AssetTag)
+            .where(AssetTag.asset_id == asset.id)
+            .where(AssetTag.tag_type == "emotion")
+            .where(AssetTag.source_model == source_model)
+        )
+        await session.commit()
+
+    # Group ranges by class and append; same merge pattern as motion.
+    by_class: dict[str, list[list[int]]] = {}
+    for r in result.ranges:
+        by_class.setdefault(r.emotion, []).append([r.start_ms, r.end_ms])
+
+    for tag_name, ranges in by_class.items():
+        existing = (
+            await session.execute(
+                select(AssetTag)
+                .where(AssetTag.asset_id == asset.id)
+                .where(AssetTag.tag_type == "emotion")
+                .where(AssetTag.tag_name == tag_name)
+                .where(AssetTag.source_model == source_model)
+            )
+        ).scalar_one_or_none()
+        if existing is None:
+            session.add(
+                AssetTag(
+                    asset_id=asset.id,
+                    tag_type="emotion",
+                    tag_name=tag_name,
+                    confidence=1.0,
+                    source_model=source_model,
+                    time_ranges_ms=ranges,
+                )
+            )
+        else:
+            merged = list(existing.time_ranges_ms or []) + ranges
+            existing.time_ranges_ms = merged
+
+    # Always write the dominant verdict so the planner can read one row
+    # rather than reducing ranges. ``time_ranges_ms`` is unused for this
+    # row (it's a summary), so we store an empty list.
+    dominant_existing = (
+        await session.execute(
+            select(AssetTag)
+            .where(AssetTag.asset_id == asset.id)
+            .where(AssetTag.tag_type == "emotion")
+            .where(AssetTag.tag_name == "dominant")
+            .where(AssetTag.source_model == source_model)
+        )
+    ).scalar_one_or_none()
+    if dominant_existing is None:
+        session.add(
+            AssetTag(
+                asset_id=asset.id,
+                tag_type="emotion",
+                tag_name="dominant",
+                confidence=float(result.faces_seen) / max(1, result.sampled_frames),
+                source_model=source_model,
+                # Stash dominant class in a single-element list so we
+                # don't need a schema change. Readers in edit_planner /
+                # API parse this with a bespoke helper rather than the
+                # range parser.
+                time_ranges_ms=[result.dominant],
+            )
+        )
+    else:
+        dominant_existing.time_ranges_ms = [result.dominant]
+        dominant_existing.confidence = float(result.faces_seen) / max(1, result.sampled_frames)
+
+    await session.commit()
+    return "done"
+
+
 async def _run_coverage(session: AsyncSession, asset: Asset) -> str:
     api_keys = await _api_keys(session)
     if not api_keys:
@@ -415,6 +515,8 @@ async def _dispatch(
         return await _run_scene(session, asset, force=force)
     if step == "motion":
         return await _run_motion(session, asset, force=force)
+    if step == "emotion":
+        return await _run_emotion(session, asset, force=force)
     if step == "coverage":
         return await _run_coverage(session, asset)
     raise ValueError(f"unknown step: {step}")
