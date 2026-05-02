@@ -397,9 +397,11 @@ def test_assemble_plan_tops_up_to_target() -> None:
             )
         )
     cuts = _assemble_plan(scores, target_duration_ms=20_000)
-    total_ms = sum(c.asset_end_ms - c.asset_start_ms for c in cuts)
-    assert total_ms >= 20_000, f"top-up failed: only {total_ms}ms vs 20000 target"
-    assert total_ms <= 24_000, f"overshot 1.2x cap: {total_ms}ms"
+    # Rendered = raw_total - (n-1) * 500 ms after xfade overlap.
+    raw_total = sum(c.asset_end_ms - c.asset_start_ms for c in cuts)
+    rendered = raw_total - max(0, len(cuts) - 1) * 500
+    assert rendered >= 20_000, f"top-up failed: only {rendered}ms rendered vs 20000 target"
+    assert rendered <= 24_000, f"overshot 1.2x cap: {rendered}ms rendered"
     assert len(cuts) >= 5
 
 

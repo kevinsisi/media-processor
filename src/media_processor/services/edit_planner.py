@@ -104,6 +104,13 @@ VALID_TRANSITIONS: frozenset[str] = frozenset(
 )
 TRANSITION_DEFAULT: str = "dissolve"
 TRANSITION_DURATION_S: float = 0.5
+# How much of each non-first cut gets consumed by the xfade overlap with
+# the previous cut. _assemble_plan budgets in *rendered* duration, so two
+# 4 s spans separated by an xfade contribute 4 + (4 - 0.5) = 7.5 s, not
+# 8 s. Mirrors video_renderer.TRANSITION_DURATION_S × 1000; if you change
+# one, change both — keeping the constant duplicated rather than imported
+# avoids an edit_planner ↔ video_renderer dependency cycle.
+TRANSITION_OVERLAP_MS: int = 500
 
 # Prompt-budget caps so very long shoots don't blow the context window.
 MAX_TRANSCRIPT_SEGMENTS_VERBATIM = 60
@@ -794,13 +801,21 @@ def _assemble_plan(
 
     def _try_consume(cand: _AssetScore) -> bool:
         """Append ``cand`` if it wouldn't blow past ``max_target``.
-        Returns True iff the candidate was added."""
+        Returns True iff the candidate was added.
+
+        ``accumulated`` tracks *rendered* duration: each non-first cut
+        contributes ``span - TRANSITION_OVERLAP_MS`` because xfade
+        overlaps that much of the new clip onto the previous one. This
+        is what lets a 60 s ask actually produce ~60 s of output rather
+        than ~50 s after the renderer eats 500 ms per transition.
+        """
         nonlocal accumulated
         span_dur = cand.best_span_ms[1] - cand.best_span_ms[0]
-        if accumulated + span_dur > max_target and chosen:
+        increment = span_dur - (TRANSITION_OVERLAP_MS if chosen else 0)
+        if accumulated + increment > max_target and chosen:
             return False
         chosen.append(cand)
-        accumulated += span_dur
+        accumulated += increment
         return True
 
     # Pass 1 — bucket-driven selection. Stop early if we already hit
