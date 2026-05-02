@@ -48,7 +48,7 @@ class StaticCacheMiddleware(BaseHTTPMiddleware):
 
 app = FastAPI(
     title="media-processor API",
-    version="0.15.1",
+    version="0.15.2",
 )
 
 app.include_router(health.router)

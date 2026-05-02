@@ -196,40 +196,74 @@ def generate(
 
     max_new_tokens = duration_s * DEFAULT_TOKENS_PER_SECOND
 
-    def _sample_safely() -> object:
-        """Run generate with sampling; on NaN/Inf in logits fall back to
-        greedy decoding so the user still gets *something* listenable
-        instead of a hard failure."""
+    # v0.15.2 — three-attempt sampling chain. The previous greedy
+    # fallback was a foot-gun: ``do_sample=False`` produced byte-
+    # identical degenerate output across every prompt (MD5-identical
+    # wavs verified in seed run; sounded like a sustained tone, not
+    # music). Greedy is REMOVED.
+    #
+    # The NaN-on-sampling failure mode is a classifier-free-guidance
+    # numerical issue on consumer Turing cards (RTX 2070): with
+    # ``guidance_scale=3.0`` the unguided forward pass occasionally
+    # produces inf/nan logits that multinomial sampling rejects.
+    # Lowering ``guidance_scale`` toward 1.0 gradually stabilises the
+    # math at the cost of looser prompt adherence — still musical, just
+    # less faithful. We try strongest guidance first and step down on
+    # NaN, ending at ``guidance_scale=1.0`` (CFG fully off) which is
+    # numerically rock-solid.
+    SAMPLING_ATTEMPTS = [
+        # Strict prompt adherence; usually works on second-or-later
+        # generations after the model warms up.
+        dict(do_sample=True, guidance_scale=3.0, temperature=1.0, top_k=250),
+        # Loose prompt adherence; combats NaN by halving the unguided
+        # contribution.
+        dict(do_sample=True, guidance_scale=1.5, temperature=1.0, top_k=100, top_p=0.95),
+        # No CFG — sampler sees only the guided forward pass, which
+        # never NaN'd in our soak. Bonus: slightly faster (one forward
+        # per token instead of two).
+        dict(do_sample=True, guidance_scale=1.0, temperature=1.0, top_k=50, top_p=0.95),
+    ]
+
+    audio_values: object | None = None
+    last_exc: Exception | None = None
+    for attempt_idx, params in enumerate(SAMPLING_ATTEMPTS, start=1):
         try:
             with torch.no_grad():
-                return model.generate(  # type: ignore[union-attr]
+                audio_values = model.generate(  # type: ignore[union-attr]
                     **inputs,
-                    do_sample=True,
-                    guidance_scale=GUIDANCE_SCALE,
-                    temperature=TEMPERATURE,
-                    top_k=250,
                     max_new_tokens=max_new_tokens,
+                    **params,
                 )
+            if attempt_idx > 1:
+                logger.info(
+                    "MusicGen succeeded on attempt %d/%d with %r",
+                    attempt_idx,
+                    len(SAMPLING_ATTEMPTS),
+                    params,
+                )
+            break
         except RuntimeError as exc:
             msg = str(exc).lower()
             if "inf" in msg or "nan" in msg or "probability" in msg:
                 logger.warning(
-                    "MusicGen sampling produced NaN/Inf logits; "
-                    "falling back to greedy decoding (less variety)",
+                    "MusicGen attempt %d/%d hit NaN/Inf with %r; trying next",
+                    attempt_idx,
+                    len(SAMPLING_ATTEMPTS),
+                    params,
                 )
-                with torch.no_grad():
-                    return model.generate(  # type: ignore[union-attr]
-                        **inputs,
-                        do_sample=False,
-                        guidance_scale=GUIDANCE_SCALE,
-                        max_new_tokens=max_new_tokens,
-                    )
+                last_exc = exc
+                continue
             raise
 
-    try:
-        audio_values = _sample_safely()
-    except Exception as exc:  # noqa: BLE001 — surface to caller.
-        raise MusicGenError(f"MusicGen inference failed: {exc}") from exc
+    if audio_values is None:
+        # Every CFG level NaN'd — that's a genuine failure (model
+        # corruption, broken CUDA, etc.). Don't fall back to greedy —
+        # it just produces identical garbage across prompts. Surface
+        # the error so the BGM gen job is marked failed.
+        raise MusicGenError(
+            f"MusicGen inference failed after {len(SAMPLING_ATTEMPTS)} sampling "
+            f"attempts at descending guidance levels: {last_exc}"
+        )
 
     sample_rate = int(getattr(model.config, "audio_encoder", None) and  # type: ignore[union-attr]
                       model.config.audio_encoder.sampling_rate
