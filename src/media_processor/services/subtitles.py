@@ -15,7 +15,7 @@ from media_processor.services.edit_planner import CutPlan, CutPlanSegment
 
 # Display rules. Constants live here so the renderer doesn't drift from
 # the SRT generator.
-MAX_LINE_CHARS = 15
+MAX_LINE_CHARS = 12
 MAX_LINES = 2
 MIN_DISPLAY_MS = 700
 

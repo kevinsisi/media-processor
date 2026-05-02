@@ -86,8 +86,17 @@ def subtitle_force_style(target_aspect: str) -> str:
 
 # Default 9:16 style — kept for legacy imports. New code should call
 # ``subtitle_force_style(target_aspect)`` and pass the result into the
-# subtitles filter.
+# subtitles filter. Retained even though burn_subtitles now uses drawtext
+# in case external callers / tests still import the constant.
 SUBTITLE_FORCE_STYLE: str = subtitle_force_style("9:16")
+
+# drawtext-based subtitle burn-in (replaces libass subtitles= filter so
+# Fontsize is pixel-accurate against the actual render canvas instead of
+# relying on the SRT→ASS conversion picking a sane PlayRes).
+SUBTITLE_FONT_PATH: str = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
+SUBTITLE_FONT_SIZE: int = 24
+SUBTITLE_BORDER_W: int = 2
+SUBTITLE_BOTTOM_OFFSET_PX: int = 80  # y=h-N from frame bottom
 
 # Timeouts. Per-call covers a single ffmpeg invocation; the worker job
 # layers its own outer cap on the whole render.
@@ -298,18 +307,94 @@ def concat_segments(
 # ---------- stage 3: subtitle burn-in ----------
 
 
+def _srt_timestamp_to_seconds(ts: str) -> float:
+    """``HH:MM:SS,mmm`` → float seconds. SRT uses ',' for ms separator."""
+    h, m, rest = ts.strip().split(":")
+    s, ms = rest.split(",")
+    return int(h) * 3600 + int(m) * 60 + int(s) + int(ms) / 1000.0
+
+
+def _parse_srt_cues(srt_text: str) -> list[tuple[float, float, str]]:
+    """Return ``[(start_s, end_s, text), …]``. Tolerant — bad blocks are skipped.
+
+    The text retains internal newlines so drawtext can render multi-line
+    cues by translating ``\\n`` → backslash-n in :func:`_drawtext_escape`.
+    """
+    cues: list[tuple[float, float, str]] = []
+    # Split on blank line; \r\n vs \n both common in SRT in the wild.
+    for raw_block in srt_text.replace("\r\n", "\n").strip().split("\n\n"):
+        lines = raw_block.split("\n")
+        if len(lines) < 3 or "-->" not in lines[1]:
+            continue
+        try:
+            start_str, end_str = lines[1].split("-->")
+            start_s = _srt_timestamp_to_seconds(start_str)
+            end_s = _srt_timestamp_to_seconds(end_str)
+        except (ValueError, IndexError):
+            continue
+        text = "\n".join(lines[2:]).strip()
+        if not text or end_s <= start_s:
+            continue
+        cues.append((start_s, end_s, text))
+    return cues
+
+
+def _drawtext_escape(text: str) -> str:
+    """Escape ``text`` so it can sit inside ``text='…'`` of a drawtext filter.
+
+    Order matters: backslash first (otherwise we double-escape later
+    substitutions). Real newlines in input become ``\\n`` so drawtext
+    renders them as line breaks (under default expansion=normal).
+    """
+    text = text.replace("\\", "\\\\")
+    text = text.replace("'", "\\'")
+    text = text.replace(":", "\\:")
+    text = text.replace("%", "\\%")
+    text = text.replace("\n", "\\n")
+    return text
+
+
+def _build_drawtext_chain(cues: list[tuple[float, float, str]]) -> str:
+    """Build a comma-chained drawtext filtergraph, one filter per cue.
+
+    Each filter is gated by ``enable=between(t,start,end)`` so only the
+    active cue draws on any given frame. Position matches the user spec:
+    ``x=(w-text_w)/2`` (centered), ``y=h-80`` (anchored 80px from bottom).
+    """
+    parts: list[str] = []
+    for start_s, end_s, text in cues:
+        escaped = _drawtext_escape(text)
+        parts.append(
+            f"drawtext=fontfile={SUBTITLE_FONT_PATH}"
+            f":fontsize={SUBTITLE_FONT_SIZE}"
+            f":fontcolor=white"
+            f":borderw={SUBTITLE_BORDER_W}"
+            f":bordercolor=black"
+            f":x=(w-text_w)/2"
+            f":y=h-{SUBTITLE_BOTTOM_OFFSET_PX}"
+            f":text='{escaped}'"
+            f":enable=between(t\\,{start_s:.3f}\\,{end_s:.3f})"
+        )
+    return ",".join(parts)
+
+
 def burn_subtitles(
     concat_path: Path,
     srt_path: Path,
     output_path: Path,
     target_aspect: str = "9:16",
 ) -> None:
-    """Re-encode ``concat_path`` with the SRT burned in via subtitles= filter.
+    """Re-encode ``concat_path`` with subtitles burned in via drawtext.
 
-    A separate stage from the concat mux so failures here can be retried
-    without redoing the cut work. ``target_aspect`` selects the per-canvas
-    style (Fontsize / MarginL / MarginR / MarginV) so portrait CJK lines
-    wrap within the frame instead of overflowing the side.
+    Replaces the previous libass subtitles= filter chain. drawtext's
+    ``fontsize`` is in actual pixel units of the render canvas, so we no
+    longer depend on the SRT→ASS PlayRes conversion picking a sane scale.
+    Each SRT cue becomes one drawtext filter gated by ``enable=between``;
+    a render with no cues still re-encodes (stays consistent with the
+    pre-drawtext behaviour of always producing a fresh mp4 here).
+
+    ``target_aspect`` is accepted for signature compatibility — drawtext
+    sizing is uniform across canvases now.
     """
     _require_ffmpeg()
     if target_aspect not in ASPECT_DIMENSIONS:
@@ -317,16 +402,14 @@ def burn_subtitles(
     if not concat_path.is_file() and not _is_fake():
         raise VideoRenderError(f"burn: concat output missing at {concat_path}")
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    # ffmpeg subtitle filter on Windows demands escaped colons and forward
-    # slashes inside the filter string.
-    posix_srt = str(srt_path).replace("\\", "/").replace(":", "\\:")
-    width, height = ASPECT_DIMENSIONS[target_aspect]
-    style = subtitle_force_style(target_aspect)
-    # original_size= forces libass to interpret ASS PlayRes as the actual
-    # output resolution, so Fontsize/Margins above are pixel-accurate.
-    sub_filter = (
-        f"subtitles={posix_srt}:original_size={width}x{height}:force_style='{style}'"
-    )
+
+    cues: list[tuple[float, float, str]] = []
+    if srt_path.is_file():
+        try:
+            cues = _parse_srt_cues(srt_path.read_text(encoding="utf-8"))
+        except OSError as exc:
+            raise VideoRenderError(f"burn: cannot read SRT at {srt_path}: {exc}") from exc
+
     cmd = [
         "ffmpeg",
         "-hide_banner",
@@ -335,8 +418,10 @@ def burn_subtitles(
         "-y",
         "-i",
         str(concat_path),
-        "-vf",
-        sub_filter,
+    ]
+    if cues:
+        cmd += ["-vf", _build_drawtext_chain(cues)]
+    cmd += [
         "-c:v",
         VIDEO_CODEC,
         "-pix_fmt",
