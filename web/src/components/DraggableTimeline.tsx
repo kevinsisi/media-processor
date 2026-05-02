@@ -24,6 +24,11 @@ import type { DraftDetail, DraftSegmentOut } from "../api/types";
 import { labelForCutSource } from "../i18n/tags";
 import "./DraggableTimeline.css";
 
+const VOLUME_DEBOUNCE_MS = 350;
+const VOLUME_MIN = 0;
+const VOLUME_MAX = 1.5;
+const VOLUME_STEP = 0.05;
+
 interface AssetThumbInfo {
   duration_ms: number;
   thumbnail_urls: string[];
@@ -99,6 +104,164 @@ function makeRow(seg: DraftSegmentOut): SegRowKey {
   return { key: `seg-${seg.id}`, segment: seg };
 }
 
+interface SegmentVolumeSlidersProps {
+  draftId: number;
+  segment: DraftSegmentOut;
+  disabled?: boolean;
+}
+
+function SegmentVolumeSliders({
+  draftId,
+  segment,
+  disabled,
+}: SegmentVolumeSlidersProps) {
+  const [voice, setVoice] = useState<number>(segment.voice_volume ?? 1.0);
+  const [bgmAuto, setBgmAuto] = useState<boolean>(
+    segment.bgm_volume === null || segment.bgm_volume === undefined,
+  );
+  const [bgm, setBgm] = useState<number>(segment.bgm_volume ?? 0.4);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const debounceRef = useRef<number | null>(null);
+
+  // Re-sync when the upstream segment changes (e.g. another tab patched it).
+  useEffect(() => {
+    setVoice(segment.voice_volume ?? 1.0);
+    const auto = segment.bgm_volume === null || segment.bgm_volume === undefined;
+    setBgmAuto(auto);
+    if (!auto) setBgm(segment.bgm_volume ?? 0.4);
+  }, [segment.id, segment.voice_volume, segment.bgm_volume]);
+
+  const persist = useCallback(
+    async (next: { voice?: number; bgm?: number | null }) => {
+      setSaving(true);
+      setError(null);
+      try {
+        await apiClient.patchDraftSegmentVolume(draftId, segment.id, {
+          voice_volume: next.voice,
+          bgm_volume: next.bgm === undefined ? undefined : next.bgm,
+        });
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setSaving(false);
+      }
+    },
+    [draftId, segment.id],
+  );
+
+  const queue = useCallback(
+    (next: { voice?: number; bgm?: number | null }) => {
+      if (debounceRef.current !== null) {
+        window.clearTimeout(debounceRef.current);
+      }
+      debounceRef.current = window.setTimeout(() => {
+        void persist(next);
+      }, VOLUME_DEBOUNCE_MS);
+    },
+    [persist],
+  );
+
+  const onVoiceChange = useCallback(
+    (v: number) => {
+      setVoice(v);
+      queue({ voice: v });
+    },
+    [queue],
+  );
+
+  const onBgmChange = useCallback(
+    (v: number) => {
+      setBgm(v);
+      setBgmAuto(false);
+      queue({ bgm: v });
+    },
+    [queue],
+  );
+
+  const onBgmAutoToggle = useCallback(() => {
+    if (bgmAuto) {
+      // Switch from auto to manual at the current slider value.
+      setBgmAuto(false);
+      queue({ bgm });
+    } else {
+      setBgmAuto(true);
+      // Send an explicit null to clear the column.
+      queue({ bgm: null });
+    }
+  }, [bgmAuto, bgm, queue]);
+
+  const onResetVoice = useCallback(() => {
+    setVoice(1.0);
+    queue({ voice: 1.0 });
+  }, [queue]);
+
+  return (
+    <div className="dt-cell__volumes" onPointerDown={(e) => e.stopPropagation()}>
+      <div className="dt-cell__volume-row">
+        <span className="dt-cell__volume-label">🎤 原聲</span>
+        <input
+          type="range"
+          className="dt-cell__volume-slider"
+          min={VOLUME_MIN}
+          max={VOLUME_MAX}
+          step={VOLUME_STEP}
+          value={voice}
+          disabled={disabled || saving}
+          onChange={(e) => onVoiceChange(Number(e.currentTarget.value))}
+          aria-label="原聲音量"
+        />
+        <span className="dt-cell__volume-readout mono">
+          {Math.round(voice * 100)}%
+        </span>
+        <button
+          type="button"
+          className="dt-cell__volume-reset"
+          onClick={onResetVoice}
+          disabled={disabled || saving}
+          aria-label="重設原聲音量為 100%"
+          title="重設為 100%"
+        >
+          ↺
+        </button>
+      </div>
+      <div className="dt-cell__volume-row">
+        <span className="dt-cell__volume-label">🎵 配樂</span>
+        <input
+          type="range"
+          className="dt-cell__volume-slider"
+          min={VOLUME_MIN}
+          max={VOLUME_MAX}
+          step={VOLUME_STEP}
+          value={bgmAuto ? 0.4 : bgm}
+          disabled={disabled || saving || bgmAuto}
+          onChange={(e) => onBgmChange(Number(e.currentTarget.value))}
+          aria-label="配樂音量"
+        />
+        <span className="dt-cell__volume-readout mono">
+          {bgmAuto ? "自動" : `${Math.round(bgm * 100)}%`}
+        </span>
+        <button
+          type="button"
+          className="dt-cell__volume-reset"
+          onClick={onBgmAutoToggle}
+          disabled={disabled || saving}
+          aria-label={bgmAuto ? "切換為手動" : "切回自動 ducking"}
+          title={bgmAuto ? "切換為手動" : "切回自動 ducking"}
+        >
+          {bgmAuto ? "✋" : "↺"}
+        </button>
+      </div>
+      {error && (
+        <p className="dt-cell__volume-hint" role="alert">
+          儲存失敗：{error}
+        </p>
+      )}
+      {!error && saving && <p className="dt-cell__volume-hint">儲存中…</p>}
+    </div>
+  );
+}
+
 interface CellContentProps {
   row: SegRowKey;
   totalMs: number;
@@ -108,6 +271,11 @@ interface CellContentProps {
   // useSortable is wired up. The DragOverlay clone renders without
   // these so we accept undefined.
   handleAttrs?: React.HTMLAttributes<HTMLDivElement>;
+  // v0.17 — when set, the cell renders the per-segment volume sliders.
+  // Omitted on the DragOverlay floating clone so the dragging card
+  // stays slim and doesn't fire the slider's own pointer events.
+  draftId?: number;
+  volumeDisabled?: boolean;
 }
 
 function CellContent({
@@ -116,6 +284,8 @@ function CellContent({
   thumbnailUrl,
   onTap,
   handleAttrs,
+  draftId,
+  volumeDisabled,
 }: CellContentProps) {
   const seg = row.segment;
   const cls =
@@ -154,6 +324,13 @@ function CellContent({
           <p className="dt-cell__reason">{seg.plan_reason}</p>
         )}
       </button>
+      {draftId !== undefined && (
+        <SegmentVolumeSliders
+          draftId={draftId}
+          segment={seg}
+          disabled={volumeDisabled}
+        />
+      )}
     </div>
   );
 }
@@ -163,6 +340,8 @@ interface DraggableCellProps {
   totalMs: number;
   thumbnailUrl: string | null;
   onTap: (seg: DraftSegmentOut) => void;
+  draftId: number;
+  volumeDisabled?: boolean;
 }
 
 function DraggableCell({
@@ -170,6 +349,8 @@ function DraggableCell({
   totalMs,
   thumbnailUrl,
   onTap,
+  draftId,
+  volumeDisabled,
 }: DraggableCellProps) {
   const {
     attributes,
@@ -199,6 +380,8 @@ function DraggableCell({
         thumbnailUrl={thumbnailUrl}
         onTap={onTap}
         handleAttrs={{ ...attributes, ...listeners }}
+        draftId={draftId}
+        volumeDisabled={volumeDisabled}
       />
     </li>
   );
@@ -432,6 +615,8 @@ export default function DraggableTimeline({
                   totalMs={totalMs}
                   thumbnailUrl={thumbnailUrl}
                   onTap={handleTap}
+                  draftId={draft.id}
+                  volumeDisabled={inFlight}
                 />
               );
             })}

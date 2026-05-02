@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -21,11 +23,16 @@ from media_processor.api.schemas import (
     CoverageMatchOut,
     ScriptCoverageOut,
     ThumbnailUrl,
+    TrackingDetailOut,
+    TrackingTargetRequest,
+    TrackingTargetResponse,
+    TrackingTrackOut,
     TranscriptOut,
     TranscriptSegmentOut,
     TranscriptUpsert,
 )
 from media_processor.models import Asset, AssetTranscript, ScriptCoverage
+from media_processor.services import object_tracking
 from media_processor.services import thumbnails as thumbnails_svc
 from media_processor.services.queue import enqueue_asset_analysis
 
@@ -266,6 +273,189 @@ async def get_asset_coverage(
             detail="coverage not yet computed",
         )
     return _coverage_to_out(row)
+
+
+# ----- v0.17 — tracking detail + tracking-target picker -----
+
+
+# Sample-frame downsample target for the analysis page picker. The full
+# per-frame bbox track can run into thousands of rows on a long clip;
+# we only need a handful (one every ~500 ms) to draw the bbox + show a
+# motion preview if we want one later.
+_SAMPLE_FRAME_LIMIT = 24
+
+
+def _downsample_frames(frames: list[dict[str, Any]]) -> list[list[int]]:
+    if not frames:
+        return []
+    n = len(frames)
+    step = max(1, n // _SAMPLE_FRAME_LIMIT)
+    out: list[list[int]] = []
+    for i in range(0, n, step):
+        f = frames[i]
+        out.append(
+            [
+                int(f.get("t_ms", 0)),
+                int(f.get("x", 0)),
+                int(f.get("y", 0)),
+                int(f.get("w", 0)),
+                int(f.get("h", 0)),
+            ]
+        )
+    return out
+
+
+@router.get("/{asset_id}/tracking", response_model=TrackingDetailOut)
+async def get_asset_tracking(
+    asset_id: int,
+    session: SessionDep,
+) -> TrackingDetailOut:
+    """Return the full per-track YOLO data for the picker UI."""
+    asset = await session.get(Asset, asset_id)
+    if asset is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="asset not found")
+    blob = getattr(asset, "tracking_json", None)
+    if not isinstance(blob, dict):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="tracking has not run for this asset",
+        )
+    raw_tracks = blob.get("tracks") or []
+    tracks: list[TrackingTrackOut] = []
+    if raw_tracks:
+        for t in raw_tracks:
+            if not isinstance(t, dict):
+                continue
+            frames = list(t.get("frames") or [])
+            tracks.append(
+                TrackingTrackOut(
+                    object_index=int(t.get("object_index", 0)),
+                    cls_name=str(t.get("cls_name", "")),
+                    confidence=float(t.get("confidence", 0.0)),
+                    area_score=float(t.get("area_score", 0.0)),
+                    frame_count=len(frames),
+                    sample_frames=_downsample_frames(frames),
+                )
+            )
+    else:
+        # Legacy tracking_json (pre-v0.17, single-track). Synthesise a
+        # one-track view from ``frames`` so the picker has something
+        # to render before the user re-runs the tracking step.
+        legacy_frames = list(blob.get("frames") or [])
+        if legacy_frames:
+            tracks.append(
+                TrackingTrackOut(
+                    object_index=0,
+                    cls_name=str(blob.get("subject_class") or ""),
+                    confidence=float(blob.get("confidence") or 0.0),
+                    area_score=0.0,
+                    frame_count=len(legacy_frames),
+                    sample_frames=_downsample_frames(legacy_frames),
+                )
+            )
+    return TrackingDetailOut(
+        src_w=int(blob.get("src_w") or 0),
+        src_h=int(blob.get("src_h") or 0),
+        fps=float(blob.get("fps") or 0.0),
+        sampled_frames=int(blob.get("sampled_frames") or 0),
+        subject_class=str(blob.get("subject_class") or ""),
+        confidence=float(blob.get("confidence") or 0.0),
+        tracks=tracks,
+        tracked_object_index=getattr(asset, "tracked_object_index", None),
+        has_custom_roi=isinstance(getattr(asset, "custom_roi_json", None), dict),
+    )
+
+
+@router.patch("/{asset_id}/tracking-target", response_model=TrackingTargetResponse)
+async def patch_asset_tracking_target(
+    asset_id: int,
+    payload: TrackingTargetRequest,
+    session: SessionDep,
+) -> TrackingTargetResponse:
+    """Set which tracked object (or custom ROI) the renderer follows.
+
+    Modes:
+      * ``auto``    → ``tracked_object_index = NULL`` (use dominant track)
+      * ``object``  → ``tracked_object_index = N`` (must exist in tracking_json["tracks"])
+      * ``custom``  → ``tracked_object_index = -1`` + run CSRT to fill ``custom_roi_json``
+      * ``fixed``   → ``tracked_object_index = -2`` (static centered crop)
+      * ``none``    → ``tracked_object_index = -3`` (no auto-reframe at all)
+    """
+    asset = await session.get(Asset, asset_id)
+    if asset is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="asset not found")
+
+    if payload.mode == "auto":
+        asset.tracked_object_index = None
+    elif payload.mode == "object":
+        if payload.object_index is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="mode=object requires object_index",
+            )
+        # Validate the index exists in tracking_json["tracks"].
+        blob = getattr(asset, "tracking_json", None)
+        tracks = (blob or {}).get("tracks") if isinstance(blob, dict) else None
+        if not tracks or not any(
+            isinstance(t, dict) and int(t.get("object_index", -1)) == payload.object_index
+            for t in tracks
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"object_index={payload.object_index} not in tracking_json[\"tracks\"]",
+            )
+        asset.tracked_object_index = int(payload.object_index)
+    elif payload.mode == "custom":
+        if not payload.custom_roi:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="mode=custom requires custom_roi {x,y,w,h}",
+            )
+        try:
+            x = int(payload.custom_roi["x"])
+            y = int(payload.custom_roi["y"])
+            w = int(payload.custom_roi["w"])
+            h = int(payload.custom_roi["h"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"custom_roi must contain integer x,y,w,h: {exc}",
+            ) from exc
+        init_t_ms = int(payload.custom_roi.get("source_t_ms") or 0)
+        media_path = Path(asset.file_path)
+        # CSRT can be slow on long clips (real-time-ish), but the user
+        # is waiting on this single asset — run inline. asyncio.to_thread
+        # keeps the event loop responsive.
+        try:
+            roi_json = await asyncio.to_thread(
+                object_tracking.track_custom_roi,
+                media_path,
+                init_x=x,
+                init_y=y,
+                init_w=w,
+                init_h=h,
+                init_t_ms=init_t_ms,
+                duration_ms=asset.duration_ms,
+            )
+        except (object_tracking.TrackingError, object_tracking.TrackingUnavailableError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"CSRT failed: {exc}",
+            ) from exc
+        asset.custom_roi_json = roi_json
+        asset.tracked_object_index = -1
+    elif payload.mode == "fixed":
+        asset.tracked_object_index = -2
+    else:  # "none"
+        asset.tracked_object_index = -3
+
+    await session.commit()
+    await session.refresh(asset)
+    return TrackingTargetResponse(
+        asset_id=asset_id,
+        tracked_object_index=getattr(asset, "tracked_object_index", None),
+        has_custom_roi=isinstance(getattr(asset, "custom_roi_json", None), dict),
+    )
 
 
 # ----- analyze trigger -----

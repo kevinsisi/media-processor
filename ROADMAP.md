@@ -2,7 +2,7 @@
 
 > **單一定位**：個人 / 小團隊用的「拍完就上傳，AI 直接給可發佈影片」的工具。
 > 目標 UX：手機優先、繁體中文、高級感、最少手動編輯。
-> 目前版本：**0.16.2**（M9.1 + per-draft BGM 快照、轉場 checkbox 正向語意、AI 配樂按鈕防連點）
+> 目前版本：**0.17.0**（M9.2 — 通用追蹤目標選擇 + 每片段音量控制）
 
 ## Phase 進度速覽
 
@@ -18,8 +18,9 @@
 | M8.1 | 情緒分析 + 運鏡縮放（zoompan + emotion-shift transitions） | ✅ done | 0.14.0 – 0.14.2 |
 | M8.3 | vidstab digital stabilization + subtitle/transition toggles + AI feedback | ✅ done | 0.14.3 – 0.14.9 |
 | M9.0 | AI BGM 生成（MusicGen）+ curated music library | ✅ done | 0.15.0 – 0.15.3 |
-| **M9.1** | **YOLO 物件追蹤 + auto-reframe 動態裁切** | ✅ done | **0.16.0 – 0.16.1** |
-| M9.2 | 多專案批次 + 社群直接發布 | 🔮 future | 0.17.x+ |
+| M9.1 | YOLO 物件追蹤 + auto-reframe 動態裁切 | ✅ done | 0.16.0 – 0.16.2 |
+| **M9.2** | **通用追蹤目標選擇 + 每片段音量控制** | ✅ done | **0.17.0** |
+| M9.3 | 多專案批次 + 社群直接發布 | 🔮 future | 0.18.x+ |
 
 ---
 
@@ -161,6 +162,34 @@
 ### 8.2.3 Hero shot 自動放慢
 - 若某段 score > 90 且 dominant_motion=static + closeup → 自動 0.7x 慢速
 - 配 BGM 重拍對齊（簡單啟發式：若 BGM tempo 已知，hero 進場對齊 beat）
+
+---
+
+## ✅ Phase 9.2（M9.2）— 通用追蹤目標選擇 + 每片段音量（已完成 0.17.0）
+
+主題：**讓 YOLO 不再只能看單一主體，並把音量交回給人**。
+
+### 9.2.1 多物件追蹤 + 通用目標選擇
+- `services/object_tracking.detect` 不再只回傳 dominant track；按 class 分群成 `tracks[]`，每個 track 有 `object_index`、`cls_name`、`area_score`、`frames`。
+- COCO 80 類全開（不再只有 SUBJECT_CLASS_PRIORITY 10 類），但排序仍偏向 person/car/dog 等主流主體。
+- 新欄位 `Asset.tracked_object_index`：null=自動 / >=0=指定物件 / -1=自訂 ROI / -2=固定構圖 / -3=不追蹤。
+- 新欄位 `Asset.custom_roi_json`：CSRT 追蹤的使用者畫框（OpenCV `TrackerCSRT`）。
+- API：
+  - `GET /assets/{id}/tracking` 回傳每 track 的下采樣 bbox + 當前目標。
+  - `PATCH /assets/{id}/tracking-target` body `{mode, object_index?, custom_roi?}`。
+- 渲染：`auto_reframe.compute_crop_path(object_index=...)` + `compute_crop_path_from_custom_roi(...)` + `video_renderer._cut_segment(custom_roi=...)`，特殊 sentinel -2/-3 直接退回靜態置中。
+
+### 9.2.2 每片段音量
+- `DraftSegment.voice_volume`（float, default 1.0）+ `bgm_volume`（float, nullable, null=自動 ducking）。
+- API：`PATCH /drafts/{id}/segments/{seg_id}/volume` body `{voice_volume?, bgm_volume?}`，partial 寫入；body 含 `bgm_volume: null` 顯式回 auto。
+- `services/bgm_mixer.SegmentVolume` + `_build_voice_volume_expr` / `_build_bgm_volume_expr`：把每段 timeline 的 gain 表達式組成 nested `if(between(t,...))`，BGM 在沒設 override 的窗口內仍走 auto duck。
+- `apply_voice_volume`：沒有 BGM 也能跑 voice-only re-encode，不強迫使用者上傳 BGM 才能改音量。
+
+### 9.2.3 前端
+- `web/src/components/AssetTrackingTarget.tsx`：縮圖上 overlay 所有 bbox（按物件索引彩色標記 + label），下方分頁切換五種 mode（自動/指定物件/自訂區域/固定構圖/不追蹤）。
+- 自訂區域用 PointerEvent + getBoundingClientRect 把 CSS 座標換算成原圖像素再 PATCH。
+- `web/src/i18n/tags.ts` 把 COCO 80 類全部標繁中（汽車/人物/狗/瓶子/筆電 等）。
+- `web/src/components/DraggableTimeline.tsx` 新增 `SegmentVolumeSliders`：每片段卡片下方兩條 range slider（🎤 原聲 / 🎵 配樂），350 ms debounce 後 PATCH，BGM slider 有「↺ 自動」開關。
 
 ---
 

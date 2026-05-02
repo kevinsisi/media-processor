@@ -1,0 +1,170 @@
+/* v0.17 — tracking-target picker on the analysis page asset card. */
+
+.tracking-target {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.tracking-target__head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.tracking-target__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.tracking-target__mode {
+  margin-left: auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.tracking-target__mode-btn {
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.85);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.tracking-target__mode-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.tracking-target__mode-btn--active {
+  background: rgba(255, 200, 0, 0.18);
+  border-color: rgba(255, 200, 0, 0.55);
+  color: #ffe27a;
+}
+
+.tracking-target__mode-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.tracking-target__canvas-wrap {
+  position: relative;
+  width: 100%;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #000;
+  aspect-ratio: 16 / 9;
+  user-select: none;
+  touch-action: none;
+}
+
+.tracking-target__canvas-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+  background: #000;
+}
+
+.tracking-target__bbox {
+  position: absolute;
+  border: 2px solid rgba(255, 200, 0, 0.85);
+  background: rgba(255, 200, 0, 0.08);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.tracking-target__bbox:hover {
+  background: rgba(255, 200, 0, 0.18);
+}
+
+.tracking-target__bbox--active {
+  border-color: #ffd166;
+  background: rgba(255, 209, 102, 0.28);
+  box-shadow: 0 0 0 2px rgba(255, 209, 102, 0.4);
+}
+
+.tracking-target__bbox-label {
+  position: absolute;
+  top: -22px;
+  left: -1px;
+  background: rgba(0, 0, 0, 0.75);
+  color: #fff;
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.tracking-target__custom-roi {
+  position: absolute;
+  border: 2px dashed #66d9ff;
+  background: rgba(102, 217, 255, 0.18);
+  pointer-events: none;
+}
+
+.tracking-target__hint {
+  margin: 0;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.tracking-target__hint--err {
+  color: #ff8a8a;
+}
+
+.tracking-target__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tracking-target__list-btn {
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.9);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 80px;
+}
+
+.tracking-target__list-btn--active {
+  background: rgba(255, 200, 0, 0.18);
+  border-color: rgba(255, 200, 0, 0.55);
+}
+
+.tracking-target__list-btn-name {
+  font-weight: 600;
+}
+
+.tracking-target__list-btn-meta {
+  font-size: 10px;
+  opacity: 0.65;
+}
+
+.tracking-target__busy {
+  font-size: 12px;
+  color: rgba(255, 209, 102, 0.85);
+}

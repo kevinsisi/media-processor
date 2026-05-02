@@ -144,6 +144,14 @@ class DraftSegment(Base):
     blurred_source_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     source_kind: Mapped[str | None] = mapped_column(String(16), nullable=True)
     plan_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # v0.17 — per-segment audio gain. ``voice_volume`` scales the source
+    # audio (0.0–1.5; 1.0 = original); ``bgm_volume`` overrides the auto
+    # voice-ducking expression (0.0–1.5; ``None`` = use the default
+    # bgm_mixer ducking curve).
+    voice_volume: Mapped[float] = mapped_column(
+        Float, nullable=False, default=1.0, server_default="1.0"
+    )
+    bgm_volume: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     draft: Mapped[Draft] = relationship("Draft", back_populates="segments")
     asset_segment: Mapped[AssetSegment | None] = relationship("AssetSegment")

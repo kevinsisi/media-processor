@@ -1,0 +1,426 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ApiError, apiClient } from "../api/client";
+import type {
+  TrackingDetailOut,
+  TrackingMode,
+  TrackingTrackOut,
+} from "../api/types";
+import {
+  labelForTrackingMode,
+  labelForTrackingSubject,
+} from "../i18n/tags";
+import "./AssetTrackingTarget.css";
+
+interface AssetTrackingTargetProps {
+  assetId: number;
+  // First (or any) thumbnail URL — drawn behind the bbox overlay so the
+  // user can see the actual frame they're choosing on top of.
+  thumbnailUrl: string | null;
+}
+
+interface RoiDraft {
+  startX: number;
+  startY: number;
+  curX: number;
+  curY: number;
+}
+
+const TRACKING_MODES: TrackingMode[] = [
+  "auto",
+  "object",
+  "custom",
+  "fixed",
+  "none",
+];
+
+function deriveActiveMode(detail: TrackingDetailOut | null): TrackingMode {
+  if (!detail) return "auto";
+  const idx = detail.tracked_object_index;
+  if (idx == null) return "auto";
+  if (idx === -1) return "custom";
+  if (idx === -2) return "fixed";
+  if (idx === -3) return "none";
+  return "object";
+}
+
+function pickRepresentativeFrame(track: TrackingTrackOut): number[] | null {
+  if (!track.sample_frames || track.sample_frames.length === 0) return null;
+  // Middle frame so the bbox approximates "where the subject usually is".
+  const mid = Math.floor(track.sample_frames.length / 2);
+  return track.sample_frames[mid];
+}
+
+export default function AssetTrackingTarget({
+  assetId,
+  thumbnailUrl,
+}: AssetTrackingTargetProps) {
+  const [detail, setDetail] = useState<TrackingDetailOut | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [activeMode, setActiveMode] = useState<TrackingMode>("auto");
+  const [pendingMode, setPendingMode] = useState<TrackingMode | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const [roiDraft, setRoiDraft] = useState<RoiDraft | null>(null);
+
+  const fetchDetail = useCallback(async () => {
+    try {
+      const d = await apiClient.fetchAssetTracking(assetId);
+      setDetail(d);
+      setActiveMode(deriveActiveMode(d));
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoaded(true);
+    }
+  }, [assetId]);
+
+  useEffect(() => {
+    void fetchDetail();
+  }, [fetchDetail]);
+
+  const applyTarget = useCallback(
+    async (
+      mode: TrackingMode,
+      objectIndex?: number,
+      customRoi?: { x: number; y: number; w: number; h: number },
+    ) => {
+      setBusy(true);
+      setError(null);
+      try {
+        const resp = await apiClient.patchAssetTrackingTarget(assetId, {
+          mode,
+          object_index: mode === "object" ? objectIndex : null,
+          custom_roi: mode === "custom" && customRoi ? customRoi : null,
+        });
+        setDetail((prev) =>
+          prev
+            ? {
+                ...prev,
+                tracked_object_index: resp.tracked_object_index,
+                has_custom_roi: resp.has_custom_roi,
+              }
+            : prev,
+        );
+        setActiveMode(mode);
+        setPendingMode(null);
+      } catch (err) {
+        const msg =
+          err instanceof ApiError
+            ? `${err.status}: ${err.message}`
+            : err instanceof Error
+              ? err.message
+              : String(err);
+        setError(msg);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [assetId],
+  );
+
+  const handleModeClick = useCallback(
+    (mode: TrackingMode) => {
+      if (busy) return;
+      setError(null);
+      if (mode === "auto" || mode === "fixed" || mode === "none") {
+        void applyTarget(mode);
+        return;
+      }
+      // For object / custom we wait for the user to actually pick.
+      setPendingMode(mode);
+    },
+    [busy, applyTarget],
+  );
+
+  const handleObjectPick = useCallback(
+    (objectIndex: number) => {
+      if (busy) return;
+      void applyTarget("object", objectIndex);
+    },
+    [busy, applyTarget],
+  );
+
+  const isCustomDrawing = activeMode === "custom" || pendingMode === "custom";
+
+  const onPointerDown = useCallback(
+    (ev: React.PointerEvent<HTMLDivElement>) => {
+      if (!isCustomDrawing) return;
+      const wrap = wrapRef.current;
+      if (!wrap) return;
+      const rect = wrap.getBoundingClientRect();
+      const x = ev.clientX - rect.left;
+      const y = ev.clientY - rect.top;
+      setRoiDraft({ startX: x, startY: y, curX: x, curY: y });
+      wrap.setPointerCapture(ev.pointerId);
+    },
+    [isCustomDrawing],
+  );
+
+  const onPointerMove = useCallback(
+    (ev: React.PointerEvent<HTMLDivElement>) => {
+      if (!roiDraft) return;
+      const wrap = wrapRef.current;
+      if (!wrap) return;
+      const rect = wrap.getBoundingClientRect();
+      const x = Math.max(0, Math.min(rect.width, ev.clientX - rect.left));
+      const y = Math.max(0, Math.min(rect.height, ev.clientY - rect.top));
+      setRoiDraft({ ...roiDraft, curX: x, curY: y });
+    },
+    [roiDraft],
+  );
+
+  const finishCustomRoi = useCallback(
+    (ev: React.PointerEvent<HTMLDivElement>) => {
+      if (!roiDraft) return;
+      const wrap = wrapRef.current;
+      if (!wrap || !detail) {
+        setRoiDraft(null);
+        return;
+      }
+      try {
+        wrap.releasePointerCapture(ev.pointerId);
+      } catch {
+        /* not captured — ignore */
+      }
+      const rect = wrap.getBoundingClientRect();
+      const xCss = Math.min(roiDraft.startX, roiDraft.curX);
+      const yCss = Math.min(roiDraft.startY, roiDraft.curY);
+      const wCss = Math.abs(roiDraft.curX - roiDraft.startX);
+      const hCss = Math.abs(roiDraft.curY - roiDraft.startY);
+      setRoiDraft(null);
+      if (wCss < 12 || hCss < 12) {
+        // Treat as click; nothing to commit.
+        return;
+      }
+      // Map the CSS rect to the source-pixel rect using the rendered
+      // image's contained box (object-fit: contain). The image fills
+      // the wrap on the limiting axis and letterboxes the other.
+      const srcW = detail.src_w || 1920;
+      const srcH = detail.src_h || 1080;
+      const wrapAspect = rect.width / rect.height;
+      const srcAspect = srcW / srcH;
+      let renderedW = rect.width;
+      let renderedH = rect.height;
+      let offsetX = 0;
+      let offsetY = 0;
+      if (srcAspect > wrapAspect) {
+        renderedH = rect.width / srcAspect;
+        offsetY = (rect.height - renderedH) / 2;
+      } else {
+        renderedW = rect.height * srcAspect;
+        offsetX = (rect.width - renderedW) / 2;
+      }
+      const sx = Math.max(0, xCss - offsetX);
+      const sy = Math.max(0, yCss - offsetY);
+      const sxClamped = Math.min(renderedW, sx);
+      const syClamped = Math.min(renderedH, sy);
+      const swClamped = Math.min(renderedW - sxClamped, wCss);
+      const shClamped = Math.min(renderedH - syClamped, hCss);
+      if (swClamped < 8 || shClamped < 8) return;
+      const scaleX = srcW / renderedW;
+      const scaleY = srcH / renderedH;
+      const roi = {
+        x: Math.round(sxClamped * scaleX),
+        y: Math.round(syClamped * scaleY),
+        w: Math.round(swClamped * scaleX),
+        h: Math.round(shClamped * scaleY),
+      };
+      void applyTarget("custom", undefined, roi);
+    },
+    [roiDraft, detail, applyTarget],
+  );
+
+  const onPointerUp = useCallback(
+    (ev: React.PointerEvent<HTMLDivElement>) => {
+      if (!roiDraft) return;
+      finishCustomRoi(ev);
+    },
+    [roiDraft, finishCustomRoi],
+  );
+
+  // Convert detail src pixels to wrap CSS pixels for bbox overlays.
+  const renderRect = useMemo(() => {
+    if (!detail) return null;
+    const wrap = wrapRef.current;
+    if (!wrap) return null;
+    const rect = wrap.getBoundingClientRect();
+    const srcW = detail.src_w || 1920;
+    const srcH = detail.src_h || 1080;
+    const wrapAspect = rect.width / rect.height;
+    const srcAspect = srcW / srcH;
+    let renderedW = rect.width;
+    let renderedH = rect.height;
+    let offsetX = 0;
+    let offsetY = 0;
+    if (srcAspect > wrapAspect) {
+      renderedH = rect.width / srcAspect;
+      offsetY = (rect.height - renderedH) / 2;
+    } else {
+      renderedW = rect.height * srcAspect;
+      offsetX = (rect.width - renderedW) / 2;
+    }
+    return { srcW, srcH, renderedW, renderedH, offsetX, offsetY };
+  }, [detail, wrapRef.current?.clientWidth, wrapRef.current?.clientHeight]);
+
+  // Also recompute on window resize so bboxes don't drift.
+  const [, forceTick] = useState(0);
+  useEffect(() => {
+    const handle = () => forceTick((n) => n + 1);
+    window.addEventListener("resize", handle);
+    return () => window.removeEventListener("resize", handle);
+  }, []);
+
+  if (!loaded) {
+    return (
+      <div className="tracking-target">
+        <p className="tracking-target__hint">追蹤資料載入中…</p>
+      </div>
+    );
+  }
+  if (!detail) {
+    return (
+      <div className="tracking-target">
+        <p className="tracking-target__hint">尚未跑追蹤分析。</p>
+      </div>
+    );
+  }
+
+  const cssBoxFor = (frame: number[] | null): React.CSSProperties | null => {
+    if (!frame || !renderRect) return null;
+    const [, fx, fy, fw, fh] = frame;
+    const { srcW, srcH, renderedW, renderedH, offsetX, offsetY } = renderRect;
+    return {
+      left: `${(fx / srcW) * renderedW + offsetX}px`,
+      top: `${(fy / srcH) * renderedH + offsetY}px`,
+      width: `${(fw / srcW) * renderedW}px`,
+      height: `${(fh / srcH) * renderedH}px`,
+    };
+  };
+
+  const draftStyle = roiDraft
+    ? {
+        left: `${Math.min(roiDraft.startX, roiDraft.curX)}px`,
+        top: `${Math.min(roiDraft.startY, roiDraft.curY)}px`,
+        width: `${Math.abs(roiDraft.curX - roiDraft.startX)}px`,
+        height: `${Math.abs(roiDraft.curY - roiDraft.startY)}px`,
+      }
+    : null;
+
+  return (
+    <div className="tracking-target" aria-label="追蹤目標">
+      <div className="tracking-target__head">
+        <h4 className="tracking-target__title">追蹤目標</h4>
+        <div className="tracking-target__mode" role="tablist">
+          {TRACKING_MODES.map((mode) => {
+            const active = activeMode === mode || pendingMode === mode;
+            return (
+              <button
+                key={mode}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                className={`tracking-target__mode-btn${active ? " tracking-target__mode-btn--active" : ""}`}
+                disabled={busy}
+                onClick={() => handleModeClick(mode)}
+              >
+                {labelForTrackingMode(mode)}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div
+        className="tracking-target__canvas-wrap"
+        ref={wrapRef}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+      >
+        {thumbnailUrl && (
+          <img
+            className="tracking-target__canvas-img"
+            src={thumbnailUrl}
+            alt="追蹤縮圖"
+            draggable={false}
+          />
+        )}
+        {detail.tracks.map((track) => {
+          const frame = pickRepresentativeFrame(track);
+          const style = cssBoxFor(frame);
+          if (!style) return null;
+          const isActive =
+            activeMode === "object" &&
+            detail.tracked_object_index === track.object_index;
+          return (
+            <button
+              key={track.object_index}
+              type="button"
+              className={`tracking-target__bbox${isActive ? " tracking-target__bbox--active" : ""}`}
+              style={style}
+              disabled={busy}
+              onClick={(ev) => {
+                ev.stopPropagation();
+                handleObjectPick(track.object_index);
+              }}
+              title={labelForTrackingSubject(track.cls_name)}
+            >
+              <span className="tracking-target__bbox-label">
+                {labelForTrackingSubject(track.cls_name)}（
+                {Math.round(track.confidence * 100)}%）
+              </span>
+            </button>
+          );
+        })}
+        {draftStyle && (
+          <div className="tracking-target__custom-roi" style={draftStyle} />
+        )}
+      </div>
+
+      {pendingMode === "custom" && !roiDraft && (
+        <p className="tracking-target__hint">
+          在縮圖上拖曳以畫出自訂追蹤區域；放開手指即套用。
+        </p>
+      )}
+      {activeMode === "object" && (
+        <div className="tracking-target__list" role="group">
+          {detail.tracks.map((track) => {
+            const isActive =
+              detail.tracked_object_index === track.object_index;
+            return (
+              <button
+                key={track.object_index}
+                type="button"
+                className={`tracking-target__list-btn${isActive ? " tracking-target__list-btn--active" : ""}`}
+                disabled={busy}
+                onClick={() => handleObjectPick(track.object_index)}
+              >
+                <span className="tracking-target__list-btn-name">
+                  {labelForTrackingSubject(track.cls_name)}
+                </span>
+                <span className="tracking-target__list-btn-meta mono">
+                  {Math.round(track.confidence * 100)}% · {track.frame_count} 幀
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {busy && <p className="tracking-target__busy">套用中…</p>}
+      {error && (
+        <p className="tracking-target__hint tracking-target__hint--err">
+          失敗：{error}
+        </p>
+      )}
+      {detail.tracks.length === 0 && (
+        <p className="tracking-target__hint">
+          這段素材沒有偵測到可追蹤主體；可改用「自訂區域」或「固定構圖」。
+        </p>
+      )}
+    </div>
+  );
+}

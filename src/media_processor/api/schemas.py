@@ -152,6 +152,10 @@ class DraftSegmentOut(BaseModel):
     transition: str | None
     source_kind: str | None = None
     plan_reason: str | None = None
+    # v0.17 — per-segment audio gain. ``voice_volume`` defaults to 1.0
+    # (original gain); ``bgm_volume`` is null = auto-ducking curve.
+    voice_volume: float = 1.0
+    bgm_volume: float | None = None
 
 
 class DraftDetail(DraftSummary):
@@ -425,6 +429,83 @@ class TrackingSummaryOut(BaseModel):
     confidence: float
     frame_count: int
     sampled_frames: int
+
+
+# v0.17 — one entry per detected object class (`tracks` in tracking_json).
+# The analysis page renders these as bbox overlays + labels so the user
+# can pick which one to follow.
+class TrackingTrackOut(BaseModel):
+    object_index: int
+    cls_name: str
+    confidence: float
+    area_score: float
+    frame_count: int
+    # Sample bboxes (downsampled to keep the JSON small for the polling
+    # endpoint). Each is the [t_ms, x, y, w, h] of one YOLO detection.
+    sample_frames: list[list[int]]
+
+
+class TrackingDetailOut(BaseModel):
+    """v0.17 — full tracking data needed by the picker UI.
+
+    Source dimensions come from the tracking blob (matches the YOLO
+    input frame size — ffprobe might report different anamorphic sizes,
+    but for tracking purposes we use what YOLO saw).
+    """
+
+    src_w: int
+    src_h: int
+    fps: float
+    sampled_frames: int
+    subject_class: str
+    confidence: float
+    tracks: list[TrackingTrackOut]
+    # Currently active mode. ``None`` (== auto) means "follow the
+    # dominant track"; ``-1`` means custom_roi; ``-2``/``-3`` disable
+    # auto-reframe.
+    tracked_object_index: int | None = None
+    has_custom_roi: bool = False
+
+
+class TrackingTargetRequest(BaseModel):
+    """PATCH /assets/{id}/tracking-target — body.
+
+    ``mode`` picks the kind of target. ``object_index`` is required when
+    ``mode == "object"``; ``custom_roi`` is required when ``mode ==
+    "custom"``. Other modes ignore those fields.
+    """
+
+    mode: Literal["auto", "object", "custom", "fixed", "none"]
+    object_index: int | None = Field(default=None, ge=0)
+    custom_roi: dict[str, Any] | None = None
+
+
+class TrackingTargetResponse(BaseModel):
+    asset_id: int
+    tracked_object_index: int | None
+    has_custom_roi: bool
+
+
+# v0.17 — per-DraftSegment audio gain.
+class SegmentVolumePatch(BaseModel):
+    """PATCH /drafts/{id}/segments/{seg_id}/volume — body.
+
+    ``voice_volume`` is bounded to 0.0–1.5 (1.0 = original gain). The
+    backend clamps anyway; the upper bound stops the user accidentally
+    asking for inaudible distortion. ``bgm_volume`` follows the same
+    range; ``None`` (or omitted) keeps the auto-duck curve.
+    """
+
+    voice_volume: float | None = Field(default=None, ge=0.0, le=1.5)
+    bgm_volume: float | None = Field(default=None, ge=0.0, le=1.5)
+
+
+class SegmentVolumeOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    voice_volume: float
+    bgm_volume: float | None
 
 
 class AssetAnalysisItem(BaseModel):

@@ -203,6 +203,40 @@ async def _set_stage_state(draft_id: int, stage: str, value: str) -> None:
         await session.commit()
 
 
+async def _load_segment_volumes(draft_id: int) -> list[bgm_mixer.SegmentVolume]:
+    """Pull per-DraftSegment voice/bgm volume overrides for the mixer.
+
+    Times are in *output timeline* seconds (matches what SRT cues use).
+    Returns an empty list when the draft has no segments yet, e.g. the
+    pre-render path before _persist_plan ran.
+    """
+    async with async_session_maker() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(DraftSegment)
+                    .where(DraftSegment.draft_id == draft_id)
+                    .order_by(DraftSegment.order)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    out: list[bgm_mixer.SegmentVolume] = []
+    for r in rows:
+        out.append(
+            bgm_mixer.SegmentVolume(
+                start_s=(r.on_timeline_start_ms or 0) / 1000.0,
+                end_s=(r.on_timeline_end_ms or 0) / 1000.0,
+                voice_volume=float(getattr(r, "voice_volume", 1.0) or 1.0),
+                bgm_volume=(
+                    float(r.bgm_volume) if getattr(r, "bgm_volume", None) is not None else None
+                ),
+            )
+        )
+    return out
+
+
 async def _snapshot_draft_bgm_path(
     draft_id: int, project_bgm_path: str | None
 ) -> str | None:
@@ -292,6 +326,8 @@ async def _gather_render_inputs(
     dict[int, Path],
     dict[int, AssetTranscript],
     dict[int, dict[str, Any]],
+    dict[int, int | None],
+    dict[int, dict[str, Any]],
 ]:
     async with async_session_maker() as session:
         project = await session.get(Project, project_id)
@@ -303,17 +339,24 @@ async def _gather_render_inputs(
             .all()
         )
         asset_paths = {a.id: Path(a.file_path) for a in assets}
-        # v0.16 — collect tracking_json so the renderer can drive auto-
-        # reframe. Assets that haven't run the tracking step yet (None /
-        # empty / no frames) are simply omitted from the dict; the
-        # renderer falls back to the static aspect crop for those.
+        # v0.16 — tracking_json. v0.17 added per-asset ``tracked_object_index``
+        # + ``custom_roi_json`` so the user can pick a non-dominant
+        # object (or draw a custom ROI) on the analysis page.
         # ``getattr(..., None)`` keeps this resilient if the column is
         # missing on a degraded host — the planner / cut stage still
         # ships, just without auto-reframe.
         tracking_by_asset: dict[int, dict[str, Any]] = {}
+        tracking_target_by_asset: dict[int, int | None] = {}
+        custom_roi_by_asset: dict[int, dict[str, Any]] = {}
         for a in assets:
+            tracked_idx = getattr(a, "tracked_object_index", None)
+            if tracked_idx is not None:
+                tracking_target_by_asset[a.id] = int(tracked_idx)
+            custom = getattr(a, "custom_roi_json", None)
+            if isinstance(custom, dict) and custom.get("frames"):
+                custom_roi_by_asset[a.id] = dict(custom)
             blob = getattr(a, "tracking_json", None)
-            if isinstance(blob, dict) and blob.get("frames"):
+            if isinstance(blob, dict) and (blob.get("frames") or blob.get("tracks")):
                 tracking_by_asset[a.id] = dict(blob)
         tx_rows = (
             (
@@ -325,7 +368,14 @@ async def _gather_render_inputs(
             .all()
         )
         transcripts = {t.asset_id: t for t in tx_rows}
-        return project, asset_paths, transcripts, tracking_by_asset
+        return (
+            project,
+            asset_paths,
+            transcripts,
+            tracking_by_asset,
+            tracking_target_by_asset,
+            custom_roi_by_asset,
+        )
 
 
 # ---------- Plan stage ----------
@@ -559,9 +609,14 @@ async def run_render(
     # ``subtitles_enabled``: when False the user explicitly opted out
     # of burned subtitles, so skip both SRT generation and the burn
     # stage entirely.
-    project, asset_paths, transcripts, tracking_by_asset = await _gather_render_inputs(
-        project_id
-    )
+    (
+        project,
+        asset_paths,
+        transcripts,
+        tracking_by_asset,
+        tracking_target_by_asset,
+        custom_roi_by_asset,
+    ) = await _gather_render_inputs(project_id)
     if not subtitles_enabled:
         srt_text = ""
         logger.info("draft %d: subtitles disabled by request", handle.draft_id)
@@ -669,6 +724,8 @@ async def run_render(
             stabilize=stabilize,
             transitions_enabled=transitions_enabled,
             tracking_by_asset=tracking_by_asset if auto_reframe_enabled else None,
+            tracking_target_by_asset=tracking_target_by_asset if auto_reframe_enabled else None,
+            custom_roi_by_asset=custom_roi_by_asset if auto_reframe_enabled else None,
             on_progress=_sync_progress,
         )
     except Exception as exc:  # noqa: BLE001 — record + mark failed.
@@ -701,6 +758,13 @@ async def run_render(
     # silently swaps the soundtrack on older drafts.
     await update_state(EditStep.BGM.value, "running")
     bgm_source_path = await _snapshot_draft_bgm_path(handle.draft_id, project.bgm_path)
+    # v0.17 — pull per-segment voice/bgm gain overrides off the draft's
+    # DraftSegments so the mixer can apply them. ``segments`` is empty
+    # when nothing's been overridden; mixer treats that as a no-op.
+    segment_volumes = await _load_segment_volumes(handle.draft_id)
+    has_voice_overrides = any(
+        sv.voice_volume != 1.0 or sv.bgm_volume is not None for sv in segment_volumes
+    )
     if bgm_source_path:
         try:
             tmp_mixed = scratch_dir / f"draft_{handle.draft_id}_bgm.mp4"
@@ -710,12 +774,36 @@ async def run_render(
                 Path(bgm_source_path),
                 srt_path if srt_text else None,
                 tmp_mixed,
+                segments=segment_volumes if has_voice_overrides else None,
             )
             os.replace(tmp_mixed, output_path)
             await update_state(EditStep.BGM.value, "done")
         except bgm_mixer.BgmMixError as exc:
             logger.warning(
                 "bgm mix failed for draft %d, keeping subtitled mp4: %s",
+                handle.draft_id,
+                exc,
+            )
+            await _set_stage_state(
+                handle.draft_id, EditStep.BGM.value, f"failed:{type(exc).__name__}"
+            )
+            summary["stages"][EditStep.BGM.value] = f"failed:{type(exc).__name__}"
+    elif has_voice_overrides:
+        # No BGM but the user set per-segment voice gain — apply gain
+        # via a voice-only re-encode so the override actually lands.
+        try:
+            tmp_voice = scratch_dir / f"draft_{handle.draft_id}_voice.mp4"
+            await asyncio.to_thread(
+                bgm_mixer.apply_voice_volume,
+                output_path,
+                tmp_voice,
+                segment_volumes,
+            )
+            os.replace(tmp_voice, output_path)
+            await update_state(EditStep.BGM.value, "done")
+        except bgm_mixer.BgmMixError as exc:
+            logger.warning(
+                "voice-volume re-encode failed for draft %d: %s",
                 handle.draft_id,
                 exc,
             )

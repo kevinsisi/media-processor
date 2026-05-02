@@ -243,3 +243,68 @@
   word-break: break-word;
   overflow-wrap: anywhere;
 }
+
+/* v0.17 — per-segment audio gain sliders */
+
+.dt-cell__volumes {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.dt-cell__volume-row {
+  display: grid;
+  grid-template-columns: 60px 1fr 56px 24px;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.dt-cell__volume-label {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.dt-cell__volume-slider {
+  width: 100%;
+  cursor: pointer;
+  accent-color: #ffd166;
+}
+
+.dt-cell__volume-readout {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.65);
+  text-align: right;
+}
+
+.dt-cell__volume-reset {
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.85);
+  border-radius: 6px;
+  font-size: 0.7rem;
+  width: 24px;
+  height: 24px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.dt-cell__volume-reset:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.dt-cell__volume-hint {
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.5);
+  margin: 0;
+}

@@ -7,6 +7,7 @@ import type {
   TranscriptSegmentIn,
   TranscriptSegmentOut,
 } from "../api/types";
+import AssetTrackingTarget from "../components/AssetTrackingTarget";
 import { useAssetPolling } from "../hooks/useAssetPolling";
 import {
   ANALYSIS_STEP_LABELS,
@@ -459,6 +460,13 @@ function AssetCard({ asset, onAnalyze, selected, onToggleSelect }: AssetCardProp
               : "追蹤：無主體"}
           </span>
         </div>
+      )}
+
+      {asset.tracking_summary && (
+        <AssetTrackingTarget
+          assetId={asset.id}
+          thumbnailUrl={asset.thumbnail_urls[0] ?? null}
+        />
       )}
 
       <CoverageCard summary={asset.coverage_summary} />

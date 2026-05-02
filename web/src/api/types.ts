@@ -141,6 +141,22 @@ export interface DraftSegmentOut {
   transition: string | null;
   source_kind: CutSourceKind | null;
   plan_reason: string | null;
+  // v0.17 — per-segment audio gain. ``voice_volume`` defaults to 1.0
+  // (original gain); ``bgm_volume`` is null = auto-ducking curve.
+  voice_volume?: number;
+  bgm_volume?: number | null;
+}
+
+// v0.17 — per-segment volume PATCH.
+export interface SegmentVolumePatch {
+  voice_volume?: number;
+  bgm_volume?: number | null;
+}
+
+export interface SegmentVolumeOut {
+  id: number;
+  voice_volume: number;
+  bgm_volume: number | null;
 }
 
 export interface DraftDetail extends DraftSummary {
@@ -381,6 +397,51 @@ export interface TrackingSummaryOut {
   confidence: number;
   frame_count: number;
   sampled_frames: number;
+}
+
+// v0.17 — per-class object tracks for the picker UI on the analysis page.
+export interface TrackingTrackOut {
+  object_index: number;
+  cls_name: string;
+  confidence: number;
+  area_score: number;
+  frame_count: number;
+  // [t_ms, x, y, w, h] tuples downsampled from the full per-frame track.
+  sample_frames: number[][];
+}
+
+export interface TrackingDetailOut {
+  src_w: number;
+  src_h: number;
+  fps: number;
+  sampled_frames: number;
+  subject_class: string;
+  confidence: number;
+  tracks: TrackingTrackOut[];
+  // null = auto (dominant track). >= 0 = picked object_index.
+  // -1 = custom_roi, -2 = fixed framing, -3 = no auto-reframe.
+  tracked_object_index: number | null;
+  has_custom_roi: boolean;
+}
+
+export type TrackingMode = "auto" | "object" | "custom" | "fixed" | "none";
+
+export interface TrackingTargetRequest {
+  mode: TrackingMode;
+  object_index?: number | null;
+  custom_roi?: {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    source_t_ms?: number;
+  } | null;
+}
+
+export interface TrackingTargetResponse {
+  asset_id: number;
+  tracked_object_index: number | null;
+  has_custom_roi: boolean;
 }
 
 export interface ThumbnailUrl {

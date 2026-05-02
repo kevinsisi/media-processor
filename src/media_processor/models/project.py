@@ -125,14 +125,34 @@ class Asset(Base):
         default=AssetStatus.PENDING.value,
     )
     analysis_steps_json: Mapped[Any] = mapped_column(JSON, nullable=True)
-    # v0.16 — YOLOv8 per-frame bounding boxes for the dominant subject.
-    # Shape: {"subject_class": "car", "confidence": 0.92,
-    #         "src_w": 1920, "src_h": 1080, "fps": 5.0,
-    #         "frames": [{"t_ms": 0, "x": 870, "y": 420, "w": 180, "h": 240}, …]}
+    # v0.16 — YOLOv8 per-frame bounding boxes. v0.17 widened from a single
+    # dominant track to a multi-track structure so the user can pick a
+    # specific object on the analysis page.
+    # Shape:
+    #   {"subject_class": "car", "confidence": 0.92,
+    #    "src_w": 1920, "src_h": 1080, "fps": 5.0,
+    #    "tracks": [{"object_index": 0, "cls_name": "car", "confidence": 0.92,
+    #                "area_score": 0.42,
+    #                "frames": [{"t_ms": 0, "x": 870, "y": 420, "w": 180, "h": 240}, …]},
+    #               …],
+    #    "frames": [...]}  # legacy: dominant track frames, kept for compat
     # ``None`` means the tracking step hasn't run (or saw no detections).
     # Read by services.auto_reframe to compute per-frame crop windows
     # so the renderer can keep the subject centered in 9:16 output.
     tracking_json: Mapped[Any] = mapped_column(JSON, nullable=True)
+    # v0.17 — user override for which tracked object the renderer should
+    # follow. ``None`` = auto (largest by area, the historic default).
+    # ``>= 0`` = the ``object_index`` inside ``tracking_json["tracks"]``.
+    # ``-1`` = use ``custom_roi_json`` (CSRT-tracked user-drawn ROI).
+    # ``-2`` = fixed framing — no auto-reframe, static centered crop.
+    # ``-3`` = no auto-reframe and no fallback (original aspect crop).
+    tracked_object_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # v0.17 — CSRT-tracked custom ROI when ``tracked_object_index == -1``.
+    # Same per-frame bbox shape as one entry in ``tracking_json["tracks"]``;
+    # we store it on its own column so a re-run of YOLO can't clobber it.
+    # Shape: {"src_w": 1920, "src_h": 1080, "fps": 5.0,
+    #         "frames": [{"t_ms": 0, "x": 870, "y": 420, "w": 180, "h": 240}, …]}
+    custom_roi_json: Mapped[Any] = mapped_column(JSON, nullable=True)
 
     project: Mapped[Project] = relationship("Project", back_populates="assets")
     tags: Mapped[list[AssetTag]] = relationship(

@@ -280,6 +280,8 @@ def _cut_segment(
     *,
     tracking: dict[str, Any] | None = None,
     sendcmd_dir: Path | None = None,
+    tracking_object_index: int | None = None,
+    custom_roi: dict[str, Any] | None = None,
 ) -> None:
     """Cut + scale-and-crop one segment to a uniform intermediate mp4.
 
@@ -301,13 +303,27 @@ def _cut_segment(
     duration_s = max(0.001, (cut.asset_end_ms - cut.asset_start_ms) / 1000.0)
 
     vf_chain = aspect_filter(target_aspect)
-    if tracking and sendcmd_dir is not None:
-        crop_path = auto_reframe.compute_crop_path(
-            tracking,
-            target_aspect=target_aspect,
-            asset_start_ms=cut.asset_start_ms,
-            asset_end_ms=cut.asset_end_ms,
-        )
+    # v0.17 — auto-reframe input picks between three sources:
+    #   custom_roi  → user-drawn ROI tracked through CSRT
+    #   tracking + tracking_object_index  → user-picked YOLO track
+    #   tracking only → dominant YOLO track (historic default)
+    crop_path = None
+    if sendcmd_dir is not None:
+        if custom_roi:
+            crop_path = auto_reframe.compute_crop_path_from_custom_roi(
+                custom_roi,
+                target_aspect=target_aspect,
+                asset_start_ms=cut.asset_start_ms,
+                asset_end_ms=cut.asset_end_ms,
+            )
+        elif tracking:
+            crop_path = auto_reframe.compute_crop_path(
+                tracking,
+                target_aspect=target_aspect,
+                asset_start_ms=cut.asset_start_ms,
+                asset_end_ms=cut.asset_end_ms,
+                object_index=tracking_object_index,
+            )
         if crop_path is not None:
             sendcmd_path = sendcmd_dir / f"reframe_seg_{cut.order:04d}.txt"
             auto_reframe.write_sendcmd_file(crop_path, sendcmd_path)
@@ -366,6 +382,8 @@ def cut_segments(
     *,
     on_progress: Callable[[int, int], None] | None = None,
     tracking_by_asset: dict[int, dict[str, Any]] | None = None,
+    tracking_target_by_asset: dict[int, int | None] | None = None,
+    custom_roi_by_asset: dict[int, dict[str, Any]] | None = None,
 ) -> list[Path]:
     """Cut every segment in the plan; return the intermediate paths in order.
 
@@ -375,11 +393,18 @@ def cut_segments(
     or a missing key means the segment falls back to the static
     aspect crop. The renderer caller decides whether the user opted
     in to auto-reframe; this layer only reacts to the dict it gets.
+
+    ``tracking_target_by_asset`` (v0.17) maps ``asset_id`` →
+    ``object_index`` for the chosen track inside ``tracking``. Special
+    sentinels: ``-1`` = use ``custom_roi_by_asset[asset_id]``;
+    ``-2``/``-3`` = no auto-reframe (caller is expected to omit
+    ``tracking_by_asset`` for those, but we double-check here too).
     """
     _require_ffmpeg()
     intermediate_dir.mkdir(parents=True, exist_ok=True)
     sendcmd_dir = intermediate_dir / "reframe"
-    if tracking_by_asset:
+    has_any_reframe = bool(tracking_by_asset) or bool(custom_roi_by_asset)
+    if has_any_reframe:
         sendcmd_dir.mkdir(parents=True, exist_ok=True)
     out_paths: list[Path] = []
     total = len(plan.segments)
@@ -389,13 +414,22 @@ def cut_segments(
             raise VideoRenderError(f"segment {cut.order}: asset {cut.asset_id} source missing")
         out = intermediate_dir / f"seg_{cut.order:04d}.mp4"
         track = (tracking_by_asset or {}).get(cut.asset_id)
+        target_idx = (tracking_target_by_asset or {}).get(cut.asset_id)
+        custom_roi = (custom_roi_by_asset or {}).get(cut.asset_id)
+        # Sentinels disable auto-reframe entirely; defensively clear
+        # the inputs so the chain falls back to the static aspect crop.
+        if target_idx in (-2, -3):
+            track = None
+            custom_roi = None
         _cut_segment(
             Path(src),
             cut,
             out,
             target_aspect,
             tracking=track,
-            sendcmd_dir=sendcmd_dir if tracking_by_asset else None,
+            sendcmd_dir=sendcmd_dir if has_any_reframe else None,
+            tracking_object_index=target_idx if (target_idx is not None and target_idx >= 0) else None,
+            custom_roi=custom_roi if target_idx == -1 else None,
         )
         out_paths.append(out)
         if on_progress is not None:
@@ -817,6 +851,8 @@ def render(
     stabilize: bool = True,
     transitions_enabled: bool = True,
     tracking_by_asset: dict[int, dict[str, Any]] | None = None,
+    tracking_target_by_asset: dict[int, int | None] | None = None,
+    custom_roi_by_asset: dict[int, dict[str, Any]] | None = None,
     on_progress: Callable[[str, int, int], None] | None = None,
 ) -> RenderResult:
     """Run the render stages end-to-end.
@@ -859,6 +895,8 @@ def render(
         target_aspect,
         on_progress=_seg_progress,
         tracking_by_asset=tracking_by_asset,
+        tracking_target_by_asset=tracking_target_by_asset,
+        custom_roi_by_asset=custom_roi_by_asset,
     )
 
     # Stage 1.5 — optional digital stabilization. Replaces each

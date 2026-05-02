@@ -25,6 +25,8 @@ from media_processor.api.schemas import (
     DraftPatchResponse,
     DraftReorderRequest,
     DraftSegmentOut,
+    SegmentVolumeOut,
+    SegmentVolumePatch,
     SubtitleCueOut,
     SubtitleCuePatch,
 )
@@ -167,6 +169,10 @@ def serialise_draft_detail(draft: Draft) -> DraftDetail:
                 transition=s.transition,
                 source_kind=s.source_kind,
                 plan_reason=s.plan_reason,
+                voice_volume=float(getattr(s, "voice_volume", 1.0) or 1.0),
+                bgm_volume=(
+                    float(s.bgm_volume) if getattr(s, "bgm_volume", None) is not None else None
+                ),
             )
             for s in sorted(draft.segments, key=lambda x: x.order)
         ],
@@ -545,6 +551,53 @@ async def rebuild_subtitles(
     )
     await session.refresh(draft, attribute_names=["segments"])
     return serialise_draft_detail(draft)
+
+
+# ---------- v0.17 — per-segment voice / BGM volume ----------
+
+
+@router.patch(
+    "/{draft_id}/segments/{segment_id}/volume",
+    response_model=SegmentVolumeOut,
+)
+async def patch_draft_segment_volume(
+    draft_id: int,
+    segment_id: int,
+    payload: SegmentVolumePatch,
+    session: SessionDep,
+) -> SegmentVolumeOut:
+    """Set per-segment voice / BGM volume.
+
+    The patch is partial — only the supplied fields are written, so the
+    UI can let the user adjust voice and BGM independently. The render
+    pipeline picks these up on the next render (the user usually
+    follows up with 重新剪輯). We don't auto-trigger a render here so
+    the user can adjust multiple sliders before committing.
+    """
+    seg = await session.get(DraftSegment, segment_id)
+    if seg is None or seg.draft_id != draft_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="draft segment not found",
+        )
+    if payload.voice_volume is not None:
+        seg.voice_volume = float(payload.voice_volume)
+    if payload.bgm_volume is not None:
+        seg.bgm_volume = float(payload.bgm_volume)
+    # When the client sends ``bgm_volume: null`` Pydantic decodes that
+    # as None, indistinguishable from "field omitted". The HTTP body
+    # ``null`` semantics mean "reset to auto-duck"; we honour that by
+    # explicitly clearing the column when the field is in the JSON.
+    body_keys = set(payload.model_fields_set)
+    if "bgm_volume" in body_keys and payload.bgm_volume is None:
+        seg.bgm_volume = None
+    await session.commit()
+    await session.refresh(seg)
+    return SegmentVolumeOut(
+        id=seg.id,
+        voice_volume=float(seg.voice_volume),
+        bgm_volume=float(seg.bgm_volume) if seg.bgm_volume is not None else None,
+    )
 
 
 # ---------- M7.3 — export at chosen aspect / resolution ----------

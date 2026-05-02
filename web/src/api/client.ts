@@ -34,11 +34,16 @@ import type {
   ScriptCoverageOut,
   ScriptOut,
   ScriptUpsert,
+  SegmentVolumeOut,
+  SegmentVolumePatch,
   SettingsOut,
   SubtitleCueOut,
   SubtitleCuePatch,
   SyncFromManagerIn,
   SyncFromManagerOut,
+  TrackingDetailOut,
+  TrackingTargetRequest,
+  TrackingTargetResponse,
   TranscriptOut,
   TranscriptUpsert,
   UploadCompleteOut,
@@ -255,6 +260,50 @@ export class ApiClient {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
+  }
+
+  // ----- v0.17 — tracking-target picker -----
+
+  async fetchAssetTracking(
+    assetId: number,
+  ): Promise<TrackingDetailOut | null> {
+    try {
+      return await this.get<TrackingDetailOut>(`/assets/${assetId}/tracking`);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) return null;
+      throw err;
+    }
+  }
+
+  patchAssetTrackingTarget(
+    assetId: number,
+    payload: TrackingTargetRequest,
+  ): Promise<TrackingTargetResponse> {
+    return this.request<TrackingTargetResponse>(
+      `/assets/${assetId}/tracking-target`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  // ----- v0.17 — per-segment voice / BGM volume -----
+
+  patchDraftSegmentVolume(
+    draftId: number,
+    segmentId: number,
+    payload: SegmentVolumePatch,
+  ): Promise<SegmentVolumeOut> {
+    return this.request<SegmentVolumeOut>(
+      `/drafts/${draftId}/segments/${segmentId}/volume`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      },
+    );
   }
 
   // ----- M5.2 — per-version comment thread -----

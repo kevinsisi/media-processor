@@ -2,9 +2,14 @@
 
 Per asset we sample at ``TRACKING_SAMPLE_FPS`` (5 Hz default), run a
 single forward pass of YOLOv8n (nano variant, ~6 MB, ~6 ms per frame
-on an RTX 2070), pick the dominant subject class across the clip, and
-store the per-frame bounding box of that subject in
-``Asset.tracking_json``.
+on an RTX 2070).
+
+v0.17 widened the output: instead of returning only the dominant
+subject's per-frame bbox, we now group every detection into per-class
+"tracks" so the user can pick a non-dominant object on the analysis
+page (e.g. follow the dog instead of the bigger person). The legacy
+``frames`` / ``subject_class`` fields stay populated with the largest
+track so older data + the auto-reframe default behaviour keep working.
 
 The renderer's auto-reframe stage reads the same JSON and uses Kalman-
 smoothed centers to drive a dynamic crop, keeping the subject centered
@@ -21,7 +26,6 @@ from __future__ import annotations
 
 import logging
 import os
-from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -51,8 +55,12 @@ TRACKING_MODEL_DIR: Path = Path(
 
 # COCO class names we treat as "the subject" of a video. Order matters
 # for tiebreaks: when two classes are detected with similar frequency
-# the earlier entry wins. Tuned for short-form video content.
-SUBJECT_CLASS_PRIORITY: tuple[str, ...] = (
+# the earlier entry wins. v0.17 expanded from the short whitelist to
+# the full COCO-80 vocabulary so the user can pick from anything YOLO
+# saw (the analysis page exposes every detected class as a chip; the
+# default dominant-track selection still prefers the historical
+# "subject" classes via SUBJECT_CLASS_PRIORITY_HEAD below).
+SUBJECT_CLASS_PRIORITY_HEAD: tuple[str, ...] = (
     "person",
     "car",
     "truck",
@@ -64,6 +72,23 @@ SUBJECT_CLASS_PRIORITY: tuple[str, ...] = (
     "horse",
     "skateboard",
 )
+COCO80_CLASSES: tuple[str, ...] = (
+    "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train",
+    "truck", "boat", "traffic light", "fire hydrant", "stop sign",
+    "parking meter", "bench", "bird", "cat", "dog", "horse", "sheep",
+    "cow", "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella",
+    "handbag", "tie", "suitcase", "frisbee", "skis", "snowboard",
+    "sports ball", "kite", "baseball bat", "baseball glove", "skateboard",
+    "surfboard", "tennis racket", "bottle", "wine glass", "cup", "fork",
+    "knife", "spoon", "bowl", "banana", "apple", "sandwich", "orange",
+    "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair",
+    "couch", "potted plant", "bed", "dining table", "toilet", "tv",
+    "laptop", "mouse", "remote", "keyboard", "cell phone", "microwave",
+    "oven", "toaster", "sink", "refrigerator", "book", "clock", "vase",
+    "scissors", "teddy bear", "hair drier", "toothbrush",
+)
+# Back-compat alias — kept so nothing imports SUBJECT_CLASS_PRIORITY.
+SUBJECT_CLASS_PRIORITY: tuple[str, ...] = SUBJECT_CLASS_PRIORITY_HEAD
 
 
 class TrackingError(RuntimeError):
@@ -88,6 +113,23 @@ class Detection:
 
 
 @dataclass(frozen=True)
+class Track:
+    """v0.17 — one tracked object across the asset.
+
+    ``object_index`` is the stable id we expose to the user so they can
+    pick "follow this dog" via the API. ``area_score`` is the mean
+    bbox area / (src_w * src_h) — used for sorting tracks so the
+    largest subject lands at the top of the picker UI.
+    """
+
+    object_index: int
+    cls_name: str
+    confidence: float
+    area_score: float
+    frames: tuple[Detection, ...] = field(default_factory=tuple)
+
+
+@dataclass(frozen=True)
 class TrackingResult:
     subject_class: str
     confidence: float  # mean confidence across kept frames
@@ -96,6 +138,10 @@ class TrackingResult:
     fps: float
     frames: tuple[Detection, ...] = field(default_factory=tuple)
     sampled_frames: int = 0
+    # v0.17 — per-class tracks. The first entry is always the dominant
+    # one (matches ``frames``/``subject_class``); the rest are sorted
+    # by area_score descending.
+    tracks: tuple[Track, ...] = field(default_factory=tuple)
 
 
 def _is_fake() -> bool:
@@ -106,7 +152,7 @@ def _fake_result(src_w: int = 1920, src_h: int = 1080, duration_ms: int = 5_000)
     """Deterministic stub — a centered 'car' bbox sweeping left→right."""
     n = max(1, int(duration_ms * TRACKING_SAMPLE_FPS / 1000))
     bbox_w, bbox_h = src_w // 4, src_h // 2
-    frames = []
+    frames: list[Detection] = []
     for i in range(n):
         progress = i / max(1, n - 1)
         cx = int(src_w * 0.25 + (src_w * 0.5) * progress)
@@ -122,6 +168,13 @@ def _fake_result(src_w: int = 1920, src_h: int = 1080, duration_ms: int = 5_000)
                 h=bbox_h,
             )
         )
+    track = Track(
+        object_index=0,
+        cls_name="car",
+        confidence=0.85,
+        area_score=(bbox_w * bbox_h) / (src_w * src_h),
+        frames=tuple(frames),
+    )
     return TrackingResult(
         subject_class="car",
         confidence=0.85,
@@ -130,6 +183,7 @@ def _fake_result(src_w: int = 1920, src_h: int = 1080, duration_ms: int = 5_000)
         fps=TRACKING_SAMPLE_FPS,
         frames=tuple(frames),
         sampled_frames=n,
+        tracks=(track,),
     )
 
 
@@ -212,6 +266,10 @@ def detect(
     src_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
     interval_ms = int(1000 / TRACKING_SAMPLE_FPS)
+    # v0.17 — keep ALL detections regardless of class so the user can
+    # pick a non-dominant object on the analysis page. We still bias
+    # the dominant-track selection toward SUBJECT_CLASS_PRIORITY_HEAD
+    # below so the historical default behaviour is preserved.
     detections: list[Detection] = []
     sampled = 0
 
@@ -223,8 +281,6 @@ def detect(
             if not ok or frame is None:
                 break
             sampled += 1
-            # ultralytics returns a list of Results, one per image. We
-            # passed a single frame so results[0] is what we want.
             results = model.predict(
                 frame,
                 verbose=False,
@@ -239,35 +295,31 @@ def detect(
             if boxes is None or len(boxes) == 0:
                 ts += interval_ms
                 continue
-            # Pick the highest-confidence detection on this frame whose
-            # class is in our subject whitelist. This avoids tracking a
-            # background object (e.g. a "tv" in a Lambo interior shot).
-            best: tuple[float, int, str] | None = None  # (conf, idx, name)
+            # Per class, keep only the highest-confidence box on this
+            # frame so a class that appears twice in one frame doesn't
+            # split into two competing per-class tracks downstream.
+            best_per_class: dict[str, tuple[float, int]] = {}
             for i in range(len(boxes)):
                 cls_id = int(boxes.cls[i].item())
                 conf = float(boxes.conf[i].item())
                 cls_name = names.get(cls_id, str(cls_id))
-                if cls_name not in SUBJECT_CLASS_PRIORITY:
-                    continue
-                if best is None or conf > best[0]:
-                    best = (conf, i, cls_name)
-            if best is None:
-                ts += interval_ms
-                continue
-            conf, idx, cls_name = best
-            xyxy = boxes.xyxy[idx].tolist()  # [x1, y1, x2, y2]
-            x1, y1, x2, y2 = (int(v) for v in xyxy)
-            detections.append(
-                Detection(
-                    t_ms=ts,
-                    cls_name=cls_name,
-                    confidence=conf,
-                    x=max(0, x1),
-                    y=max(0, y1),
-                    w=max(1, x2 - x1),
-                    h=max(1, y2 - y1),
+                prior = best_per_class.get(cls_name)
+                if prior is None or conf > prior[0]:
+                    best_per_class[cls_name] = (conf, i)
+            for cls_name, (conf, idx) in best_per_class.items():
+                xyxy = boxes.xyxy[idx].tolist()
+                x1, y1, x2, y2 = (int(v) for v in xyxy)
+                detections.append(
+                    Detection(
+                        t_ms=ts,
+                        cls_name=cls_name,
+                        confidence=conf,
+                        x=max(0, x1),
+                        y=max(0, y1),
+                        w=max(1, x2 - x1),
+                        h=max(1, y2 - y1),
+                    )
                 )
-            )
             ts += interval_ms
     finally:
         cap.release()
@@ -275,7 +327,7 @@ def detect(
     if not detections:
         # No subject seen at all. Still return a non-None result so the
         # analysis pipeline can mark the step "done"; tracking_json will
-        # carry an empty ``frames`` array.
+        # carry an empty ``frames`` / ``tracks`` array.
         return TrackingResult(
             subject_class="",
             confidence=0.0,
@@ -284,34 +336,88 @@ def detect(
             fps=TRACKING_SAMPLE_FPS,
             frames=(),
             sampled_frames=sampled,
+            tracks=(),
         )
 
-    # Pick the dominant class by total appearances; tie-break by the
-    # ``SUBJECT_CLASS_PRIORITY`` order so person beats car when their
-    # counts are equal.
-    counts: Counter[str] = Counter(d.cls_name for d in detections)
-    sorted_priority = {name: i for i, name in enumerate(SUBJECT_CLASS_PRIORITY)}
-    dominant = sorted(
-        counts.items(),
-        key=lambda kv: (-kv[1], sorted_priority.get(kv[0], 999)),
-    )[0][0]
-
-    kept = [d for d in detections if d.cls_name == dominant]
-    mean_conf = sum(d.confidence for d in kept) / max(1, len(kept))
+    # Group detections per class → one Track per class. ``area_score``
+    # is the mean (bbox area / source area) across kept frames; we
+    # sort tracks by it descending so the largest object lands first
+    # (matches "the obvious subject" in most clips).
+    by_class: dict[str, list[Detection]] = {}
+    for d in detections:
+        by_class.setdefault(d.cls_name, []).append(d)
+    src_area = max(1, src_w * src_h)
+    tracks_unsorted: list[Track] = []
+    for cls_name, dets in by_class.items():
+        mean_conf = sum(d.confidence for d in dets) / max(1, len(dets))
+        mean_area = sum(d.w * d.h for d in dets) / max(1, len(dets))
+        tracks_unsorted.append(
+            Track(
+                object_index=0,  # reassigned after sort
+                cls_name=cls_name,
+                confidence=mean_conf,
+                area_score=mean_area / src_area,
+                frames=tuple(dets),
+            )
+        )
+    # Sort: priority-head classes first (preserves the M9.1 default
+    # selection), then by area_score desc, then class name. Reassign
+    # object_index 0..N-1 so callers can use it as a stable picker key.
+    head_order = {name: i for i, name in enumerate(SUBJECT_CLASS_PRIORITY_HEAD)}
+    tracks_sorted = sorted(
+        tracks_unsorted,
+        key=lambda t: (
+            head_order.get(t.cls_name, 999),
+            -t.area_score,
+            t.cls_name,
+        ),
+    )
+    tracks: list[Track] = []
+    for i, t in enumerate(tracks_sorted):
+        tracks.append(
+            Track(
+                object_index=i,
+                cls_name=t.cls_name,
+                confidence=t.confidence,
+                area_score=t.area_score,
+                frames=t.frames,
+            )
+        )
+    dominant = tracks[0]
 
     return TrackingResult(
-        subject_class=dominant,
-        confidence=mean_conf,
+        subject_class=dominant.cls_name,
+        confidence=dominant.confidence,
         src_w=src_w,
         src_h=src_h,
         fps=TRACKING_SAMPLE_FPS,
-        frames=tuple(kept),
+        frames=dominant.frames,
         sampled_frames=sampled,
+        tracks=tuple(tracks),
     )
 
 
+def _serialise_frames(frames: tuple[Detection, ...]) -> list[dict[str, Any]]:
+    return [
+        {
+            "t_ms": d.t_ms,
+            "x": d.x,
+            "y": d.y,
+            "w": d.w,
+            "h": d.h,
+            "conf": round(d.confidence, 3),
+        }
+        for d in frames
+    ]
+
+
 def serialise(result: TrackingResult) -> dict[str, Any]:
-    """JSON-friendly dict suitable for ``Asset.tracking_json``."""
+    """JSON-friendly dict suitable for ``Asset.tracking_json``.
+
+    v0.17: emits the new ``tracks`` array alongside the legacy
+    ``subject_class`` / ``frames`` fields so older readers
+    (auto_reframe pre-v0.17) keep working.
+    """
     return {
         "subject_class": result.subject_class,
         "confidence": round(result.confidence, 3),
@@ -319,29 +425,192 @@ def serialise(result: TrackingResult) -> dict[str, Any]:
         "src_h": result.src_h,
         "fps": result.fps,
         "sampled_frames": result.sampled_frames,
-        "frames": [
+        "frames": _serialise_frames(result.frames),
+        "tracks": [
             {
-                "t_ms": d.t_ms,
-                "x": d.x,
-                "y": d.y,
-                "w": d.w,
-                "h": d.h,
-                "conf": round(d.confidence, 3),
+                "object_index": t.object_index,
+                "cls_name": t.cls_name,
+                "confidence": round(t.confidence, 3),
+                "area_score": round(t.area_score, 4),
+                "frames": _serialise_frames(t.frames),
             }
-            for d in result.frames
+            for t in result.tracks
         ],
     }
 
 
+# ---------- v0.17 — custom ROI tracking ----------
+
+
+def _fake_custom_roi_result(
+    *,
+    src_w: int,
+    src_h: int,
+    duration_ms: int,
+    init_x: int,
+    init_y: int,
+    init_w: int,
+    init_h: int,
+) -> dict[str, Any]:
+    """Deterministic stub for the FAKE path — emits the supplied ROI
+    as a static bbox at the sample fps. Sufficient for CI / non-OpenCV
+    dev boxes to exercise the persistence + render path."""
+    n = max(1, int(duration_ms * TRACKING_SAMPLE_FPS / 1000))
+    interval_ms = int(1000 / TRACKING_SAMPLE_FPS)
+    frames = [
+        {
+            "t_ms": i * interval_ms,
+            "x": init_x,
+            "y": init_y,
+            "w": init_w,
+            "h": init_h,
+            "conf": 1.0,
+        }
+        for i in range(n)
+    ]
+    return {
+        "src_w": src_w,
+        "src_h": src_h,
+        "fps": TRACKING_SAMPLE_FPS,
+        "init_t_ms": 0,
+        "init": {"x": init_x, "y": init_y, "w": init_w, "h": init_h},
+        "frames": frames,
+        "sampled_frames": n,
+    }
+
+
+def track_custom_roi(
+    media_path: Path,
+    *,
+    init_x: int,
+    init_y: int,
+    init_w: int,
+    init_h: int,
+    init_t_ms: int = 0,
+    duration_ms: int | None = None,
+) -> dict[str, Any]:
+    """Run an OpenCV CSRT tracker from ``init_t_ms`` onwards.
+
+    Returns a JSON-friendly dict suitable for ``Asset.custom_roi_json``:
+    ``{src_w, src_h, fps, init_t_ms, init: {x,y,w,h}, frames: [...], sampled_frames}``.
+
+    The tracker samples at ``TRACKING_SAMPLE_FPS`` to match the YOLO
+    cadence so auto_reframe's Kalman filter sees the same per-second
+    measurement density. If CSRT loses the subject mid-clip we fall
+    back to the last known bbox for the remainder rather than emitting
+    a gap (auto_reframe interpolates straight through anyway).
+    """
+    if _is_fake():
+        return _fake_custom_roi_result(
+            src_w=1920,
+            src_h=1080,
+            duration_ms=duration_ms or 5_000,
+            init_x=init_x,
+            init_y=init_y,
+            init_w=init_w,
+            init_h=init_h,
+        )
+
+    try:
+        import cv2  # type: ignore[import-not-found]
+    except ImportError as exc:  # pragma: no cover
+        raise TrackingUnavailableError(f"opencv missing: {exc}") from exc
+
+    cap = cv2.VideoCapture(str(media_path))
+    if not cap.isOpened():
+        raise TrackingError(f"OpenCV could not open {media_path}")
+    src_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    src_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    duration_ms = duration_ms or int(
+        cap.get(cv2.CAP_PROP_FRAME_COUNT) / max(1.0, cap.get(cv2.CAP_PROP_FPS) or 1.0) * 1000
+    )
+
+    init_x = max(0, min(src_w - 1, init_x))
+    init_y = max(0, min(src_h - 1, init_y))
+    init_w = max(2, min(src_w - init_x, init_w))
+    init_h = max(2, min(src_h - init_y, init_h))
+
+    interval_ms = int(1000 / TRACKING_SAMPLE_FPS)
+    frames: list[dict[str, Any]] = []
+    sampled = 0
+
+    try:
+        # OpenCV 4.5+ exposes legacy.TrackerCSRT_create on the legacy
+        # module; older builds expose TrackerCSRT_create at the top level.
+        creator = getattr(getattr(cv2, "legacy", cv2), "TrackerCSRT_create", None)
+        if creator is None:
+            creator = getattr(cv2, "TrackerCSRT_create", None)
+        if creator is None:
+            raise TrackingUnavailableError(
+                "OpenCV build has no CSRT tracker (need opencv-contrib-python)"
+            )
+
+        cap.set(cv2.CAP_PROP_POS_MSEC, init_t_ms)
+        ok, frame = cap.read()
+        if not ok or frame is None:
+            raise TrackingError(
+                f"could not seek to init_t_ms={init_t_ms} in {media_path}"
+            )
+        tracker = creator()
+        tracker.init(frame, (init_x, init_y, init_w, init_h))
+        last_x, last_y, last_w, last_h = init_x, init_y, init_w, init_h
+        frames.append({
+            "t_ms": int(init_t_ms),
+            "x": last_x, "y": last_y, "w": last_w, "h": last_h,
+            "conf": 1.0,
+        })
+        sampled += 1
+
+        ts = init_t_ms + interval_ms
+        while ts < duration_ms:
+            cap.set(cv2.CAP_PROP_POS_MSEC, ts)
+            ok, frame = cap.read()
+            if not ok or frame is None:
+                break
+            sampled += 1
+            ok2, bbox = tracker.update(frame)
+            if ok2:
+                bx, by, bw, bh = bbox
+                last_x = max(0, int(bx))
+                last_y = max(0, int(by))
+                last_w = max(1, int(bw))
+                last_h = max(1, int(bh))
+                conf = 1.0
+            else:
+                conf = 0.0
+            frames.append({
+                "t_ms": int(ts),
+                "x": last_x, "y": last_y, "w": last_w, "h": last_h,
+                "conf": conf,
+            })
+            ts += interval_ms
+    finally:
+        cap.release()
+
+    return {
+        "src_w": src_w,
+        "src_h": src_h,
+        "fps": TRACKING_SAMPLE_FPS,
+        "init_t_ms": int(init_t_ms),
+        "init": {"x": init_x, "y": init_y, "w": init_w, "h": init_h},
+        "frames": frames,
+        "sampled_frames": sampled,
+    }
+
+
 __all__ = [
+    "COCO80_CLASSES",
     "SUBJECT_CLASS_PRIORITY",
+    "SUBJECT_CLASS_PRIORITY_HEAD",
     "TRACKING_MIN_CONFIDENCE",
     "TRACKING_MODEL",
     "TRACKING_SAMPLE_FPS",
     "Detection",
+    "Track",
     "TrackingError",
     "TrackingResult",
     "TrackingUnavailableError",
     "detect",
     "serialise",
+    "track_custom_roi",
 ]

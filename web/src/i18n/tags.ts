@@ -34,24 +34,109 @@ export const ANALYSIS_STEP_LABELS: Record<string, string> = {
 };
 
 // v0.16 — YOLO/COCO subject class names → Chinese labels for the
-// tracking summary chip on the analysis page. Anything not in the map
-// falls through to ``labelForTrackingSubject`` returning the raw token.
+// tracking summary chip on the analysis page. v0.17 expanded to the
+// full COCO-80 vocabulary so the picker UI can localise every class
+// the detector might emit. Unknown tokens fall through to the raw
+// English string via ``labelForTrackingSubject``.
 export const TRACKING_SUBJECT_LABELS: Record<string, string> = {
   person: "人物",
-  car: "汽車",
-  truck: "卡車",
-  bus: "公車",
-  motorcycle: "機車",
   bicycle: "腳踏車",
-  dog: "狗",
+  car: "汽車",
+  motorcycle: "機車",
+  airplane: "飛機",
+  bus: "公車",
+  train: "火車",
+  truck: "卡車",
+  boat: "船",
+  "traffic light": "紅綠燈",
+  "fire hydrant": "消防栓",
+  "stop sign": "停止標誌",
+  "parking meter": "停車計時器",
+  bench: "長椅",
+  bird: "鳥",
   cat: "貓",
+  dog: "狗",
   horse: "馬",
+  sheep: "羊",
+  cow: "牛",
+  elephant: "大象",
+  bear: "熊",
+  zebra: "斑馬",
+  giraffe: "長頸鹿",
+  backpack: "背包",
+  umbrella: "雨傘",
+  handbag: "手提包",
+  tie: "領帶",
+  suitcase: "行李箱",
+  frisbee: "飛盤",
+  skis: "滑雪板",
+  snowboard: "單板滑雪",
+  "sports ball": "球",
+  kite: "風箏",
+  "baseball bat": "球棒",
+  "baseball glove": "棒球手套",
   skateboard: "滑板",
+  surfboard: "衝浪板",
+  "tennis racket": "網球拍",
+  bottle: "瓶子",
+  "wine glass": "酒杯",
+  cup: "杯子",
+  fork: "叉子",
+  knife: "刀",
+  spoon: "湯匙",
+  bowl: "碗",
+  banana: "香蕉",
+  apple: "蘋果",
+  sandwich: "三明治",
+  orange: "橘子",
+  broccoli: "花椰菜",
+  carrot: "胡蘿蔔",
+  "hot dog": "熱狗",
+  pizza: "披薩",
+  donut: "甜甜圈",
+  cake: "蛋糕",
+  chair: "椅子",
+  couch: "沙發",
+  "potted plant": "盆栽",
+  bed: "床",
+  "dining table": "餐桌",
+  toilet: "馬桶",
+  tv: "電視",
+  laptop: "筆電",
+  mouse: "滑鼠",
+  remote: "遙控器",
+  keyboard: "鍵盤",
+  "cell phone": "手機",
+  microwave: "微波爐",
+  oven: "烤箱",
+  toaster: "烤麵包機",
+  sink: "水槽",
+  refrigerator: "冰箱",
+  book: "書",
+  clock: "時鐘",
+  vase: "花瓶",
+  scissors: "剪刀",
+  "teddy bear": "玩偶",
+  "hair drier": "吹風機",
+  toothbrush: "牙刷",
 };
 
 export function labelForTrackingSubject(name: string | null | undefined): string {
   if (!name) return "";
   return TRACKING_SUBJECT_LABELS[name] ?? name;
+}
+
+// v0.17 — tracking-target picker modes.
+export const TRACKING_MODE_LABELS: Record<string, string> = {
+  auto: "自動",
+  object: "指定物件",
+  custom: "自訂區域",
+  fixed: "固定構圖",
+  none: "不追蹤",
+};
+
+export function labelForTrackingMode(mode: string): string {
+  return TRACKING_MODE_LABELS[mode] ?? mode;
 }
 
 // Phase 8.1 — face emotion classes returned by services/emotion.py.

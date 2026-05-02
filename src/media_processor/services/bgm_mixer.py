@@ -6,6 +6,13 @@ and floats back to ``BGM_VOLUME_BASE`` between cues. Voice-presence
 ranges come from the SRT cues the subtitle stage already produced —
 no separate VAD pass.
 
+v0.17 added optional per-segment overrides: callers can supply a list
+of ``SegmentVolume(start_s, end_s, voice_volume, bgm_volume)`` tuples
+and the filter chain will apply those gain expressions inside each
+segment's timeline window. ``voice_volume`` scales the source audio;
+``bgm_volume`` overrides the auto-ducking expression for that window
+(``None`` = let the duck curve run inside the segment as usual).
+
 The mix is its own ffmpeg pass after subtitle burn-in so the orchestrator
 can mark a ``bgm`` progress step (and so a BGM failure leaves the
 subtitled mp4 in place as a usable fallback).
@@ -17,9 +24,27 @@ import logging
 import os
 import shutil
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class SegmentVolume:
+    """v0.17 — per-segment audio gain overrides.
+
+    Times are in *output* (rendered timeline) seconds, matching what
+    SRT cues use. ``voice_volume`` scales ``[0:a]`` in this window;
+    ``bgm_volume`` overrides the auto-duck expression on ``[1:a]``.
+    ``None`` for ``bgm_volume`` means "let the auto duck continue
+    inside this window" (useful when only voice volume changes).
+    """
+
+    start_s: float
+    end_s: float
+    voice_volume: float = 1.0
+    bgm_volume: float | None = None
 
 # Step-function ducking curve. 0.55 is loud-but-not-clashing for a
 # speaking voice mixed at original gain; 0.20 still keeps the BGM
@@ -81,17 +106,70 @@ def _build_duck_expression(cues: list[tuple[float, float]]) -> str:
     return f"if({terms},{BGM_VOLUME_DUCKED},{BGM_VOLUME_BASE})"
 
 
+def _build_voice_volume_expr(segments: list[SegmentVolume]) -> str:
+    """Stepped ffmpeg ``volume`` expression for the voice track.
+
+    Returns ``"1.0"`` when no segment overrides exist (mixer is a no-op).
+    Otherwise builds nested ``if(between(t,…),v_i,…)`` so each segment
+    window applies its own gain; gaps between segments fall through to
+    1.0 (original gain).
+    """
+    if not segments:
+        return "1.0"
+    expr = "1.0"
+    for seg in reversed(segments):
+        if seg.voice_volume == 1.0:
+            continue
+        expr = (
+            f"if(between(t,{seg.start_s:.3f},{seg.end_s:.3f}),"
+            f"{seg.voice_volume:.3f},{expr})"
+        )
+    return expr
+
+
+def _build_bgm_volume_expr(
+    cues: list[tuple[float, float]],
+    segments: list[SegmentVolume],
+) -> str:
+    """Compose the BGM gain expression with optional per-segment overrides.
+
+    Outside any overriding segment the auto duck curve from
+    :func:`_build_duck_expression` rules. Inside a segment whose
+    ``bgm_volume`` is set the override pins the gain; segments with
+    ``bgm_volume=None`` keep the auto duck.
+    """
+    duck = _build_duck_expression(cues)
+    overrides = [s for s in segments if s.bgm_volume is not None]
+    if not overrides:
+        return duck
+    expr = duck
+    for seg in reversed(overrides):
+        # Mypy needs the assert; logically guarded by the filter above.
+        assert seg.bgm_volume is not None
+        expr = (
+            f"if(between(t,{seg.start_s:.3f},{seg.end_s:.3f}),"
+            f"{seg.bgm_volume:.3f},{expr})"
+        )
+    return expr
+
+
 def mix_bgm(
     video_path: Path,
     bgm_path: Path,
     srt_path: Path | None,
     output_path: Path,
+    *,
+    segments: list[SegmentVolume] | None = None,
 ) -> None:
     """Re-encode ``video_path``'s audio with BGM mixed in under voice ducking.
 
     Video stream is copied (no re-encode). Audio gets re-encoded as AAC
     since we're chaining a filter. ``-shortest`` clips BGM to the video's
     duration so a 4-minute song over a 60-s reel doesn't tail out.
+
+    ``segments`` (v0.17) optionally adds per-segment voice / BGM gain
+    overrides. ``None`` (or empty list) keeps the M6.4 behaviour: voice
+    plays at original gain, BGM follows the auto-duck curve.
     """
     if shutil.which("ffmpeg") is None and not _is_fake():
         raise BgmMixError("ffmpeg not on PATH")
@@ -107,7 +185,9 @@ def mix_bgm(
         except OSError as exc:
             raise BgmMixError(f"bgm: cannot read SRT at {srt_path}: {exc}") from exc
 
-    expr = _build_duck_expression(cues)
+    seg_list: list[SegmentVolume] = list(segments or [])
+    voice_expr = _build_voice_volume_expr(seg_list)
+    bgm_expr = _build_bgm_volume_expr(cues, seg_list)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     cmd = [
         "ffmpeg",
@@ -121,8 +201,9 @@ def mix_bgm(
         str(bgm_path),
         "-filter_complex",
         (
-            f"[1:a]volume=eval=frame:volume='{expr}'[bgm];"
-            f"[0:a][bgm]amix=inputs=2:duration=first:dropout_transition=2[aout]"
+            f"[0:a]volume=eval=frame:volume='{voice_expr}'[voice];"
+            f"[1:a]volume=eval=frame:volume='{bgm_expr}'[bgm];"
+            f"[voice][bgm]amix=inputs=2:duration=first:dropout_transition=2[aout]"
         ),
         "-map",
         "0:v",
@@ -156,10 +237,74 @@ def mix_bgm(
     logger.info("bgm mix: %d voice cues, output=%s", len(cues), output_path)
 
 
+def apply_voice_volume(
+    video_path: Path,
+    output_path: Path,
+    segments: list[SegmentVolume],
+) -> None:
+    """Re-encode the audio track applying per-segment voice gain.
+
+    Used when the project has no BGM but the user set per-segment voice
+    overrides — keeps the audio chain consistent without forcing a BGM
+    file. No-op (file copy) when no segment carries a non-default
+    ``voice_volume``.
+    """
+    if shutil.which("ffmpeg") is None and not _is_fake():
+        raise BgmMixError("ffmpeg not on PATH")
+    if not video_path.is_file() and not _is_fake():
+        raise BgmMixError(f"voice-mix: video missing at {video_path}")
+
+    expr = _build_voice_volume_expr(segments)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if expr == "1.0":
+        # Nothing to do — caller can skip; we still produce the output
+        # path for consistency by copying the file.
+        if _is_fake():
+            output_path.write_bytes(b"")
+            return
+        import shutil as _shutil
+        _shutil.copyfile(video_path, output_path)
+        return
+
+    cmd = [
+        "ffmpeg",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-i",
+        str(video_path),
+        "-filter:a",
+        f"volume=eval=frame:volume='{expr}'",
+        "-c:v",
+        "copy",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "192k",
+        "-movflags",
+        "+faststart",
+        str(output_path),
+    ]
+    if _is_fake():
+        output_path.write_bytes(b"")
+        return
+    try:
+        subprocess.run(cmd, check=True, timeout=BGM_MIX_TIMEOUT_S, capture_output=True)
+    except subprocess.TimeoutExpired as exc:
+        raise BgmMixError(f"voice-mix timed out after {BGM_MIX_TIMEOUT_S}s") from exc
+    except subprocess.CalledProcessError as exc:
+        stderr = exc.stderr.decode("utf-8", errors="replace") if exc.stderr else ""
+        raise BgmMixError(f"voice-mix ffmpeg failed: {stderr[:500]}") from exc
+
+
 __all__ = [
     "BGM_MIX_TIMEOUT_S",
     "BGM_VOLUME_BASE",
     "BGM_VOLUME_DUCKED",
     "BgmMixError",
+    "SegmentVolume",
+    "apply_voice_volume",
     "mix_bgm",
 ]

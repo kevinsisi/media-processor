@@ -195,6 +195,26 @@ def _interpolate(
     return out
 
 
+def _frames_for_object(
+    tracking: dict[str, Any], object_index: int | None
+) -> list[dict[str, Any]]:
+    """Pick the right per-frame bbox list out of ``tracking_json``.
+
+    ``object_index = None`` (auto) returns the legacy ``frames`` field
+    which is also the dominant track. ``>= 0`` returns the matching
+    entry from ``tracking["tracks"]`` so the user can follow a non-
+    dominant subject. Falls back to ``frames`` when the requested
+    track id is missing (e.g. tracking was re-run with different
+    detections after the user's pick).
+    """
+    if object_index is None or object_index < 0:
+        return list(tracking.get("frames") or [])
+    for tk in tracking.get("tracks") or []:
+        if isinstance(tk, dict) and int(tk.get("object_index", -1)) == object_index:
+            return list(tk.get("frames") or [])
+    return list(tracking.get("frames") or [])
+
+
 def compute_crop_path(
     tracking: dict[str, Any] | None,
     *,
@@ -203,6 +223,7 @@ def compute_crop_path(
     asset_end_ms: int,
     src_w: int | None = None,
     src_h: int | None = None,
+    object_index: int | None = None,
 ) -> CropPath | None:
     """Build a Kalman-smoothed dynamic crop for the cut span.
 
@@ -211,6 +232,10 @@ def compute_crop_path(
     falls back to a static centered crop. Otherwise the returned
     ``CropPath`` carries one ``(t, x, y)`` point per output frame in
     the cut's local timeline (t starts at 0 at the cut's start).
+
+    ``object_index`` (v0.17) selects which track to follow inside a
+    multi-track ``tracking`` dict. ``None`` keeps the historic
+    behaviour (follow the dominant track via ``frames``).
     """
     if not tracking:
         return None
@@ -230,7 +255,7 @@ def compute_crop_path(
     # translate around the subject. The earlier "bail when full-frame"
     # guard is no longer needed.
 
-    frames = tracking.get("frames") or []
+    frames = _frames_for_object(tracking, object_index)
     # Only frames inside the cut's [asset_start_ms, asset_end_ms) window
     # are useful. Tracking is sampled at ~5 Hz so a short cut might see
     # only 2-3 detections — Kalman handles that fine.
@@ -299,6 +324,40 @@ def compute_crop_path(
     )
 
 
+def compute_crop_path_from_custom_roi(
+    custom_roi: dict[str, Any] | None,
+    *,
+    target_aspect: str,
+    asset_start_ms: int,
+    asset_end_ms: int,
+    src_w: int | None = None,
+    src_h: int | None = None,
+) -> CropPath | None:
+    """Same as :func:`compute_crop_path` but using a CSRT-tracked ROI.
+
+    ``custom_roi`` is ``Asset.custom_roi_json`` — same per-frame bbox
+    shape as a single track entry, plus ``init`` / ``init_t_ms``
+    metadata. We adapt to the existing crop-path code by wrapping it
+    as a single-track tracking dict.
+    """
+    if not custom_roi:
+        return None
+    wrapped = {
+        "src_w": custom_roi.get("src_w"),
+        "src_h": custom_roi.get("src_h"),
+        "fps": custom_roi.get("fps"),
+        "frames": custom_roi.get("frames") or [],
+    }
+    return compute_crop_path(
+        wrapped,
+        target_aspect=target_aspect,
+        asset_start_ms=asset_start_ms,
+        asset_end_ms=asset_end_ms,
+        src_w=src_w,
+        src_h=src_h,
+    )
+
+
 def write_sendcmd_file(path: CropPath, out_path: Path) -> Path:
     """Serialise a :class:`CropPath` to an ffmpeg sendcmd commands file.
 
@@ -353,5 +412,6 @@ __all__ = [
     "CropPath",
     "build_filter_chain",
     "compute_crop_path",
+    "compute_crop_path_from_custom_roi",
     "write_sendcmd_file",
 ]
