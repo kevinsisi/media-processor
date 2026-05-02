@@ -11,6 +11,7 @@ Every other M5 service operates on the validated ``CutPlan`` dataclass.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -37,6 +38,20 @@ logger = logging.getLogger(__name__)
 # response whose schema_version disagrees so a future change is a
 # noisy parse failure rather than silent drift.
 SCHEMA_VERSION = "m5.cut-plan.v1"
+
+# Per-asset score response schema — separate from the CutPlan output
+# schema since they're independent contracts. The planner now fans out
+# one call per asset and assembles the CutPlan locally.
+ASSET_SCORE_SCHEMA_VERSION = "m5.asset-score.v1"
+
+# Assembly knobs. Anything below MIN_KEEP_SCORE or position="skip" is
+# dropped. Spans wider than MAX_SPAN_MS / narrower than MIN_SPAN_MS get
+# clamped before going into the cut plan.
+MIN_KEEP_SCORE: int = 30
+MIN_SPAN_MS: int = 1500
+MAX_SPAN_MS: int = 6000
+_VALID_POSITIONS = {"opening", "middle", "closing", "skip"}
+_POSITION_ORDER = ("opening", "middle", "closing")
 
 # Prompt-budget caps so very long shoots don't blow the context window.
 MAX_TRANSCRIPT_SEGMENTS_VERBATIM = 60
@@ -210,74 +225,51 @@ MIN_SEGMENT_DURATION_S = 1.5
 MAX_SEGMENT_DURATION_S = 6.0
 
 
-_PROMPT_TEMPLATE = (
-    "你是一位影片剪輯導演，正在為以下專案挑選最終剪輯使用的片段。\n\n"
-    "專案資訊：\n"
-    "- 名稱：{project_name}\n"
-    "- 風格 profile：{profile_name}\n"
-    "- 目標長度：約 {target_duration_ms} ms（容許 -10% / +20%）\n"
-    "- 輸出比例：{target_aspect_ratio}\n"
-    "- 可用素材數：{asset_count} 段（總時長約 {total_source_ms} ms）\n"
-    "- 至少使用 {min_assets_used} 段不同素材（{min_coverage_pct}% 覆蓋率）\n"
-    "- 至少產出 {min_segments} 個片段\n\n"
-    "腳本（若有）：\n{script_body}\n\n"
-    "可用素材（每段含逐字稿、場景、運鏡、腳本覆蓋）：\n\n"
-    "{asset_blocks}\n"
-    "請挑選並排序成一個剪輯計畫，遵守以下規則：\n"
-    "1. 不要過度保守。目標是說一個完整的小故事，不只是抓 2-3 段最像腳本的片段。\n"
-    "2. 結構：以「scripted」段組成敘事骨架（依腳本順序），以「improv」段加入"
-    "情緒、視覺亮點、運鏡轉場。整支片約 {improv_pct}% 為 improv，"
-    "{scripted_pct}% 為 scripted。\n"
-    "3. 素材覆蓋：必須使用 ≥ {min_assets_used} 段不同 asset_id（共 {asset_count} 段）；"
-    "不要把 80% 的鏡頭都來自同一段素材。\n"
-    "4. 場景／運鏡多樣性：避免同一場景標籤或同一運鏡連續超過 2 段；"
-    "穿插 pan / tilt / handheld / static 變化讓畫面有節奏。\n"
-    "5. 片段長度：每段 {min_seg_s}–{max_seg_s} 秒，總長 ≈ 目標長度。\n"
-    "6. 每段須完整落在素材內 (start_ms < end_ms ≤ asset duration)。\n"
-    "7. 即使腳本很短或腳本覆蓋率低，也要產出完整剪輯 — 缺腳本就以 improv 為主。\n\n"
-    "嚴格輸出 JSON，schema：\n"
+_ASSET_SCORE_PROMPT = (
+    "你是影片剪輯助手，正在評估「一段」素材是否適合放進最終剪輯。\n"
+    "你只需要看這段素材本身——其他素材會由其他助手獨立評估，最後由系統合併。\n\n"
+    "整支片要傳達的腳本：\n{script_body}\n\n"
+    "這段素材：\n"
+    "- asset_id: {asset_id}\n"
+    "- 時長: {duration_s:.1f} 秒\n"
+    "- 場景標籤: {scene_tags}\n"
+    "- 運鏡: {motion}\n"
+    "- 逐字稿:\n{transcript}\n"
+    "- 腳本對應: {coverage}\n\n"
+    "請評估：\n"
+    " 1. score (0-100)：這段對最終剪輯的相關度與品質\n"
+    " 2. position：這段適合放在 opening / middle / closing；"
+    "若品質太低或與腳本完全無關回 skip\n"
+    " 3. best_span_ms：這段「最值得用」的 1.5–6 秒時間範圍 "
+    "[start_ms, end_ms]，必須在 [0, {duration_ms}] 之內\n"
+    " 4. source_kind：scripted（照腳本講的部分）或 improv（自然發揮 / 情緒亮點）\n\n"
+    "嚴格輸出 JSON：\n"
     "{{\n"
-    f'  "schema_version": "{SCHEMA_VERSION}",\n'
-    '  "notes": "<剪輯思路 1–3 句，說明你怎麼分配 scripted vs improv 與覆蓋哪些素材>",\n'
-    '  "segments": [\n'
-    "    {{\n"
-    '      "asset_id": <int>,\n'
-    '      "start_ms": <int>,\n'
-    '      "end_ms": <int>,\n'
-    '      "source_kind": "scripted" | "improv",\n'
-    '      "reason": "<為何挑這段>"\n'
-    "    }}\n"
-    "  ]\n"
+    f'  "schema_version": "{ASSET_SCORE_SCHEMA_VERSION}",\n'
+    '  "score": <0-100>,\n'
+    '  "position": "opening" | "middle" | "closing" | "skip",\n'
+    '  "best_span_ms": [<start_ms>, <end_ms>],\n'
+    '  "source_kind": "scripted" | "improv",\n'
+    '  "reason": "<一句話原因>"\n'
     "}}\n"
 )
 
 
-def _build_prompt(
-    project: Project,
+def _build_asset_prompt(
+    asset: Asset,
+    transcript: AssetTranscript | None,
+    coverage: ScriptCoverage | None,
     script_body: str,
-    target_duration_ms: int,
-    asset_blocks: list[str],
-    *,
-    asset_count: int,
-    total_source_ms: int,
 ) -> str:
-    min_assets_used = max(1, int(round(asset_count * MIN_ASSET_COVERAGE_RATIO)))
-    return _PROMPT_TEMPLATE.format(
-        project_name=project.name,
-        profile_name=project.profile_name,
-        target_duration_ms=target_duration_ms,
-        target_aspect_ratio=project.target_aspect_ratio,
+    return _ASSET_SCORE_PROMPT.format(
         script_body=script_body.strip() or "（無腳本）",
-        asset_blocks="\n".join(asset_blocks) or "（無素材）",
-        asset_count=asset_count,
-        total_source_ms=total_source_ms,
-        min_assets_used=min_assets_used,
-        min_coverage_pct=int(round(MIN_ASSET_COVERAGE_RATIO * 100)),
-        min_segments=MIN_SEGMENTS_FALLBACK,
-        improv_pct=int(round(TARGET_IMPROV_SHARE * 100)),
-        scripted_pct=int(round((1 - TARGET_IMPROV_SHARE) * 100)),
-        min_seg_s=MIN_SEGMENT_DURATION_S,
-        max_seg_s=MAX_SEGMENT_DURATION_S,
+        asset_id=asset.id,
+        duration_s=asset.duration_ms / 1000,
+        duration_ms=int(asset.duration_ms),
+        scene_tags=_format_scene_tags(asset),
+        motion=_format_motion(asset),
+        transcript=_format_transcript(transcript),
+        coverage=_format_coverage(coverage),
     )
 
 
@@ -291,70 +283,152 @@ def _strip_fence(text: str) -> str:
     return text
 
 
-def _validate_plan(
+@dataclass(frozen=True)
+class _AssetScore:
+    """One asset's per-asset Gemini verdict before local assembly."""
+
+    asset_id: int
+    score: int
+    position: str  # "opening" | "middle" | "closing" | "skip"
+    best_span_ms: tuple[int, int]
+    source_kind: str
+    reason: str
+
+
+def _parse_asset_score(
     payload: dict[str, Any],
     *,
-    asset_bounds: dict[int, int],
-) -> tuple[list[CutPlanSegment], str]:
-    """Validate Gemini's response shape; return (segments, notes)."""
+    asset_id: int,
+    asset_duration_ms: int,
+) -> _AssetScore:
+    """Validate one per-asset Gemini response. Raises EditPlanInvalidError."""
     candidates = payload.get("candidates")
     if not isinstance(candidates, list) or not candidates:
-        raise EditPlanInvalidError("response missing candidates")
+        raise EditPlanInvalidError(f"asset {asset_id}: response missing candidates")
     parts = candidates[0].get("content", {}).get("parts", [])
     if not isinstance(parts, list) or not parts:
-        raise EditPlanInvalidError("candidate missing content.parts")
+        raise EditPlanInvalidError(f"asset {asset_id}: missing content.parts")
     text = parts[0].get("text", "")
     if not isinstance(text, str) or not text.strip():
-        raise EditPlanInvalidError("candidate text empty")
-    cleaned = _strip_fence(text)
+        raise EditPlanInvalidError(f"asset {asset_id}: candidate text empty")
     try:
-        data = json.loads(cleaned)
+        data = json.loads(_strip_fence(text))
     except json.JSONDecodeError as exc:
-        raise EditPlanInvalidError(f"JSON parse failed: {exc}; text={text[:200]}") from exc
-
+        raise EditPlanInvalidError(
+            f"asset {asset_id}: JSON parse failed: {exc}; text={text[:200]}"
+        ) from exc
     if not isinstance(data, dict):
-        raise EditPlanInvalidError("top-level JSON is not an object")
-    if data.get("schema_version") != SCHEMA_VERSION:
-        raise EditPlanInvalidError(f"schema_version mismatch: got {data.get('schema_version')!r}")
-    raw_segments = data.get("segments")
-    if not isinstance(raw_segments, list) or not raw_segments:
-        raise EditPlanInvalidError("segments empty or wrong type")
-
-    out: list[CutPlanSegment] = []
-    for order, entry in enumerate(raw_segments):
-        if not isinstance(entry, dict):
-            continue
-        try:
-            asset_id = int(entry["asset_id"])
-            start_ms = int(entry["start_ms"])
-            end_ms = int(entry["end_ms"])
-        except (KeyError, TypeError, ValueError):
-            continue
-        kind = str(entry.get("source_kind", "")).strip()
-        reason = str(entry.get("reason", "")).strip()
-        if kind not in _VALID_SOURCE_KINDS:
-            continue
-        if start_ms < 0 or end_ms <= start_ms:
-            continue
-        bound = asset_bounds.get(asset_id)
-        if bound is None or end_ms > bound:
-            continue
-        out.append(
-            CutPlanSegment(
-                order=order,
-                asset_id=asset_id,
-                asset_start_ms=start_ms,
-                asset_end_ms=end_ms,
-                source_kind=kind,
-                reason=reason or "(no reason given)",
-            )
+        raise EditPlanInvalidError(f"asset {asset_id}: top-level JSON not object")
+    if data.get("schema_version") != ASSET_SCORE_SCHEMA_VERSION:
+        raise EditPlanInvalidError(
+            f"asset {asset_id}: schema_version mismatch: {data.get('schema_version')!r}"
         )
 
-    if not out:
-        raise EditPlanInvalidError("no valid segments after validation")
+    try:
+        score = int(data["score"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise EditPlanInvalidError(f"asset {asset_id}: score missing/invalid") from exc
+    score = max(0, min(100, score))
 
-    notes = str(data.get("notes", "")).strip()
-    return out, notes
+    position = str(data.get("position", "")).strip().lower()
+    if position not in _VALID_POSITIONS:
+        raise EditPlanInvalidError(
+            f"asset {asset_id}: position must be one of {_VALID_POSITIONS}, got {position!r}"
+        )
+
+    span_raw = data.get("best_span_ms")
+    if not isinstance(span_raw, list | tuple) or len(span_raw) != 2:
+        raise EditPlanInvalidError(f"asset {asset_id}: best_span_ms must be [start, end]")
+    try:
+        start_ms = int(span_raw[0])
+        end_ms = int(span_raw[1])
+    except (TypeError, ValueError) as exc:
+        raise EditPlanInvalidError(f"asset {asset_id}: span values not int") from exc
+    # Clamp into [0, duration] and shrink to MAX_SPAN_MS keeping the start.
+    start_ms = max(0, min(start_ms, asset_duration_ms - 1))
+    end_ms = max(start_ms + MIN_SPAN_MS, min(end_ms, asset_duration_ms))
+    if end_ms - start_ms > MAX_SPAN_MS:
+        end_ms = start_ms + MAX_SPAN_MS
+    if end_ms > asset_duration_ms:
+        # Asset shorter than MIN_SPAN_MS — skip downstream by force-position=skip
+        # would be cleaner, but for now return the whole asset and let assembly
+        # decide.
+        end_ms = asset_duration_ms
+        start_ms = max(0, end_ms - MIN_SPAN_MS)
+
+    kind = str(data.get("source_kind", "")).strip().lower()
+    if kind not in _VALID_SOURCE_KINDS:
+        raise EditPlanInvalidError(
+            f"asset {asset_id}: source_kind must be in {_VALID_SOURCE_KINDS}, got {kind!r}"
+        )
+
+    reason = str(data.get("reason", "")).strip() or "(no reason)"
+    return _AssetScore(
+        asset_id=asset_id,
+        score=score,
+        position=position,
+        best_span_ms=(start_ms, end_ms),
+        source_kind=kind,
+        reason=reason,
+    )
+
+
+def _assemble_plan(
+    scores: list[_AssetScore],
+    target_duration_ms: int,
+) -> list[CutPlanSegment]:
+    """Local cut-plan assembly from scored assets — no Gemini call.
+
+    Drops position=="skip" or score < MIN_KEEP_SCORE, then walks the
+    position buckets in opening → middle → closing order, taking each
+    bucket's highest-score-first. Stops once accumulated duration ≈
+    target (allow up to +20% over). Result preserves narrative ordering
+    by position and gives priority to higher-scored picks within bucket.
+    """
+    usable = [s for s in scores if s.position != "skip" and s.score >= MIN_KEEP_SCORE]
+    if not usable:
+        # Loosen: if everything got skipped or scored low, take the best 4
+        # non-skip ones so we still produce a draft (orchestrator can re-roll).
+        non_skip = sorted(
+            (s for s in scores if s.position != "skip"),
+            key=lambda x: -x.score,
+        )
+        usable = non_skip[:4]
+    if not usable:
+        return []
+
+    by_pos: dict[str, list[_AssetScore]] = {p: [] for p in _POSITION_ORDER}
+    for s in usable:
+        by_pos[s.position].append(s)
+    for k in by_pos:
+        by_pos[k].sort(key=lambda x: -x.score)
+
+    chosen: list[_AssetScore] = []
+    accumulated = 0
+    max_target = int(target_duration_ms * 1.2)
+    for bucket in _POSITION_ORDER:
+        for s in by_pos[bucket]:
+            span_dur = s.best_span_ms[1] - s.best_span_ms[0]
+            if accumulated + span_dur > max_target and chosen:
+                continue
+            chosen.append(s)
+            accumulated += span_dur
+            if accumulated >= target_duration_ms:
+                break
+        if accumulated >= target_duration_ms:
+            break
+
+    return [
+        CutPlanSegment(
+            order=i,
+            asset_id=s.asset_id,
+            asset_start_ms=s.best_span_ms[0],
+            asset_end_ms=s.best_span_ms[1],
+            source_kind=s.source_kind,
+            reason=s.reason,
+        )
+        for i, s in enumerate(chosen)
+    ]
 
 
 # ---------- DB loading ----------
@@ -431,6 +505,83 @@ async def _load_project_context(session: AsyncSession, project_id: int) -> _Proj
 # ---------- Public entry points ----------
 
 
+async def _score_one_asset(
+    asset: Asset,
+    transcript: AssetTranscript | None,
+    coverage: ScriptCoverage | None,
+    script_body: str,
+    *,
+    api_keys: tuple[str, ...],
+    key_offset: int,
+    model: str,
+    base_url: str,
+    timeout_s: float,
+    client: httpx.AsyncClient,
+) -> _AssetScore:
+    """Single-asset Gemini call with key rotation on 429 / 5xx / transport.
+
+    Walks the key pool starting from ``key_offset`` so concurrent fanout
+    calls naturally start with different keys (and rotate through the
+    whole pool on retry). Raises ``EditPlanQuotaError`` if every key
+    exhausts; raises ``EditPlanInvalidError`` if a 200 came back with an
+    unparseable body.
+    """
+    prompt = _build_asset_prompt(asset, transcript, coverage, script_body)
+    body = {
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "temperature": 0.3,
+            "responseMimeType": "application/json",
+        },
+    }
+    last_status = 0
+    last_invalid: EditPlanInvalidError | None = None
+    for i in range(len(api_keys)):
+        key = api_keys[(key_offset + i) % len(api_keys)]
+        url = f"{base_url}/models/{model}:generateContent?key={key}"
+        try:
+            response = await client.post(url, json=body)
+        except httpx.HTTPError as exc:
+            logger.warning(
+                "edit-planner asset=%d transport error; rotating key: %r",
+                asset.id,
+                exc,
+            )
+            continue
+        last_status = response.status_code
+        if response.status_code == 429 or 500 <= response.status_code < 600:
+            logger.warning(
+                "edit-planner asset=%d status=%d; rotating key",
+                asset.id,
+                response.status_code,
+            )
+            continue
+        if response.status_code >= 400:
+            raise EditPlanError(
+                f"edit-planner asset {asset.id} call failed: "
+                f"status={response.status_code} body={response.text[:200]}"
+            )
+        try:
+            return _parse_asset_score(
+                response.json(),
+                asset_id=asset.id,
+                asset_duration_ms=int(asset.duration_ms),
+            )
+        except EditPlanInvalidError as exc:
+            last_invalid = exc
+            logger.warning(
+                "edit-planner asset=%d JSON invalid (%s); rotating key",
+                asset.id,
+                exc,
+            )
+            continue
+    if last_invalid is not None:
+        raise last_invalid
+    raise EditPlanQuotaError(
+        f"asset {asset.id}: all {len(api_keys)} keys exhausted; last_status={last_status}"
+    )
+
+
 async def plan(
     project_id: int,
     session: AsyncSession,
@@ -441,79 +592,96 @@ async def plan(
     timeout_s: float,
     target_duration_ms: int = DEFAULT_TARGET_DURATION_MS,
 ) -> CutPlan:
-    """Build a CutPlan for the project. Raises on quota / invalid / empty."""
+    """Build a CutPlan via per-asset parallel Gemini calls + local assembly.
+
+    Sends one small prompt per asset (transcript + script + tags + coverage
+    → score / position / best span / source_kind), fanned out concurrently
+    over httpx.AsyncClient with key rotation. Each call is independent, so
+    one slow / failed asset does not poison the batch — it just gets
+    excluded from the assembled plan. The caller falls back to
+    :func:`heuristic_fallback` if every asset call fails.
+    """
     if not api_keys:
         raise EditPlanError("no API keys configured for edit planner")
 
     ctx = await _load_project_context(session, project_id)
-    asset_blocks = [
-        _format_asset_block(
-            asset,
-            ctx.transcripts.get(asset.id),
-            ctx.coverage.get(asset.id),
-        )
-        for asset in ctx.assets
-    ]
-    total_source_ms = sum(int(a.duration_ms) for a in ctx.assets)
-    prompt = _build_prompt(
-        ctx.project,
-        ctx.script_body,
-        target_duration_ms,
-        asset_blocks,
-        asset_count=len(ctx.assets),
-        total_source_ms=total_source_ms,
-    )
-    body = {
-        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-        "generationConfig": {
-            "temperature": 0.3,
-            "responseMimeType": "application/json",
-        },
-    }
+    if not ctx.assets:
+        raise EditPlanEmptyError("no assets to score")
 
-    last_status = 0
-    last_invalid: EditPlanInvalidError | None = None
     async with httpx.AsyncClient(timeout=timeout_s) as client:
-        for key in api_keys:
-            url = f"{base_url}/models/{model}:generateContent?key={key}"
-            try:
-                response = await client.post(url, json=body)
-            except httpx.HTTPError as exc:
-                logger.warning("edit-planner transport error; rotating key: %r", exc)
-                continue
-            last_status = response.status_code
-            if response.status_code == 429 or 500 <= response.status_code < 600:
-                logger.warning(
-                    "edit-planner status=%d; rotating to next key",
-                    response.status_code,
-                )
-                continue
-            if response.status_code >= 400:
-                raise EditPlanError(
-                    "edit-planner call failed: "
-                    f"status={response.status_code} body={response.text[:200]}"
-                )
-            try:
-                segments, notes = _validate_plan(response.json(), asset_bounds=ctx.asset_bounds)
-            except EditPlanInvalidError as exc:
-                last_invalid = exc
-                logger.warning("edit-planner JSON invalid (%s); rotating key", exc)
-                continue
-            return CutPlan(
-                schema_version=SCHEMA_VERSION,
-                target_duration_ms=target_duration_ms,
-                target_aspect_ratio=ctx.project.target_aspect_ratio,
-                profile_name=ctx.project.profile_name,
-                segments=tuple(segments),
-                notes=notes,
-                used_fallback=False,
-                fallback_reason=None,
+        tasks = [
+            _score_one_asset(
+                asset,
+                ctx.transcripts.get(asset.id),
+                ctx.coverage.get(asset.id),
+                ctx.script_body,
+                api_keys=api_keys,
+                key_offset=i,  # stagger so concurrent calls hit different keys
+                model=model,
+                base_url=base_url,
+                timeout_s=timeout_s,
+                client=client,
             )
+            for i, asset in enumerate(ctx.assets)
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    if last_invalid is not None:
-        raise last_invalid
-    raise EditPlanQuotaError(
-        f"all {len(api_keys)} edit-planner keys exhausted; last_status={last_status}"
+    scores: list[_AssetScore] = []
+    quota_failures = 0
+    invalid_failures = 0
+    other_failures = 0
+    last_invalid: EditPlanInvalidError | None = None
+    for r in results:
+        if isinstance(r, _AssetScore):
+            scores.append(r)
+        elif isinstance(r, EditPlanQuotaError):
+            quota_failures += 1
+        elif isinstance(r, EditPlanInvalidError):
+            invalid_failures += 1
+            last_invalid = r
+        elif isinstance(r, Exception):
+            other_failures += 1
+            logger.warning("edit-planner per-asset task crashed: %r", r)
+
+    if not scores:
+        # No asset got scored at all — surface the dominant failure mode so
+        # the orchestrator's fallback log makes sense.
+        if quota_failures and quota_failures >= invalid_failures:
+            raise EditPlanQuotaError(
+                f"all {len(results)} per-asset calls quota-exhausted across "
+                f"{len(api_keys)} keys"
+            )
+        if last_invalid is not None:
+            raise last_invalid
+        raise EditPlanError(
+            f"all {len(results)} per-asset calls failed "
+            f"(quota={quota_failures}, invalid={invalid_failures}, other={other_failures})"
+        )
+
+    cut_segments = _assemble_plan(scores, target_duration_ms)
+    if not cut_segments:
+        raise EditPlanInvalidError(
+            f"assembly produced no segments from {len(scores)} scored assets "
+            f"(all skipped or below threshold)"
+        )
+
+    notes = (
+        f"per-asset fanout: {len(scores)}/{len(results)} assets scored "
+        f"(quota_fails={quota_failures}, invalid={invalid_failures}); "
+        f"chose {len(cut_segments)} cuts totalling "
+        f"{sum(s.asset_end_ms - s.asset_start_ms for s in cut_segments)}ms"
+    )
+    logger.info("edit-planner: %s", notes)
+
+    return CutPlan(
+        schema_version=SCHEMA_VERSION,
+        target_duration_ms=target_duration_ms,
+        target_aspect_ratio=ctx.project.target_aspect_ratio,
+        profile_name=ctx.project.profile_name,
+        segments=tuple(cut_segments),
+        notes=notes,
+        used_fallback=False,
+        fallback_reason=None,
     )
 
 
@@ -619,6 +787,7 @@ def serialise_plan(plan_obj: CutPlan) -> dict[str, Any]:
 
 
 __all__ = [
+    "ASSET_SCORE_SCHEMA_VERSION",
     "DEFAULT_TARGET_DURATION_MS",
     "SCHEMA_VERSION",
     "CutPlan",

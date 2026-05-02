@@ -25,6 +25,7 @@ from media_processor.models import (
 )
 from media_processor.services import edit_planner
 from media_processor.services.edit_planner import (
+    ASSET_SCORE_SCHEMA_VERSION,
     SCHEMA_VERSION,
     EditPlanInvalidError,
     EditPlanQuotaError,
@@ -93,29 +94,18 @@ def _mock_transport(handler):  # type: ignore[no-untyped-def]
 
 @pytest.mark.asyncio
 async def test_plan_happy_path(session: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
-    plan_payload = {
-        "schema_version": SCHEMA_VERSION,
-        "notes": "tight cut",
-        "segments": [
-            {
-                "asset_id": 1,
-                "start_ms": 0,
-                "end_ms": 2_000,
-                "source_kind": "scripted",
-                "reason": "matches line 1",
-            },
-            {
-                "asset_id": 1,
-                "start_ms": 4_000,
-                "end_ms": 6_000,
-                "source_kind": "improv",
-                "reason": "good closeup",
-            },
-        ],
+    # New shape: one Gemini call per asset, each returns a per-asset score.
+    asset_score_payload = {
+        "schema_version": ASSET_SCORE_SCHEMA_VERSION,
+        "score": 80,
+        "position": "opening",
+        "best_span_ms": [0, 4000],
+        "source_kind": "scripted",
+        "reason": "matches line 1",
     }
 
     def handler(request: httpx.Request) -> httpx.Response:
-        return _build_response(plan_payload)
+        return _build_response(asset_score_payload)
 
     transport = _mock_transport(handler)
 
@@ -137,10 +127,15 @@ async def test_plan_happy_path(session: AsyncSession, monkeypatch: pytest.Monkey
         target_duration_ms=20_000,
     )
     assert plan.schema_version == SCHEMA_VERSION
-    assert len(plan.segments) == 2
-    assert plan.segments[0].source_kind == "scripted"
+    assert len(plan.segments) == 1  # fixture seeds one asset → one cut
+    seg = plan.segments[0]
+    assert seg.asset_id == 1
+    assert seg.asset_start_ms == 0
+    assert seg.asset_end_ms == 4000
+    assert seg.source_kind == "scripted"
     assert plan.target_duration_ms == 20_000
-    assert plan.notes == "tight cut"
+    # Notes are now synthesised locally summarising the fanout.
+    assert "per-asset fanout" in plan.notes
 
 
 @pytest.mark.asyncio
@@ -149,7 +144,10 @@ async def test_plan_invalid_schema_raises(
 ) -> None:
     bad_payload = {
         "schema_version": "wrong",
-        "segments": [{"asset_id": 1, "start_ms": 0, "end_ms": 1, "source_kind": "improv"}],
+        "score": 50,
+        "position": "middle",
+        "best_span_ms": [0, 1000],
+        "source_kind": "improv",
     }
 
     def handler(request: httpx.Request) -> httpx.Response:
