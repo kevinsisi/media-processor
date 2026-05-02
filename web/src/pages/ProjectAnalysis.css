@@ -337,6 +337,16 @@
   color: var(--status-down, #b34b3a);
 }
 
+/* Skipped is not a failure — render in a muted neutral so users read
+   it as "this step was intentionally not run" rather than an error. */
+.step-chip--skipped {
+  border-color: var(--border, #444);
+  opacity: 0.85;
+}
+.step-chip--skipped .step-chip__state {
+  color: var(--text-muted, #888);
+}
+
 /* ---- Scene chips ---- */
 
 .scene-tag-row {

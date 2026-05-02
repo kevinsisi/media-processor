@@ -399,13 +399,32 @@ async def _run_coverage(session: AsyncSession, asset: Asset) -> str:
         await session.execute(select(AssetTranscript).where(AssetTranscript.asset_id == asset.id))
     ).scalar_one_or_none()
     if transcript is None or not transcript.segments_json:
-        raise script_coverage.ScriptCoverageError("transcript missing for coverage")
+        # No transcript at all (STT produced zero segments — silent
+        # clip, b-roll without dialogue, etc.). Coverage has nothing to
+        # compare against, so skip rather than fail. Same UX path as
+        # the no-script case.
+        logger.info(
+            "asset %d: skipping coverage (no transcript segments)",
+            asset.id,
+        )
+        return "skipped:no-transcript"
 
     script_row = (
         await session.execute(select(Script).where(Script.project_id == asset.project_id))
     ).scalar_one_or_none()
     if script_row is None or not (script_row.body or "").strip():
-        raise script_coverage.ScriptCoverageMissingScriptError("project script empty")
+        # Projects without a script are a legitimate workflow (improv-only
+        # shoots, b-roll batches). Treat coverage as skipped rather than
+        # failed so the asset's overall analysis status can still settle
+        # to ``analyzed`` and the UI shows a calm "略過（無腳本）" pill
+        # instead of a red error chip. ``_finalise_status`` only checks
+        # for the ``failed:`` prefix so ``skipped:`` flows naturally.
+        logger.info(
+            "asset %d: skipping coverage (project %d has no script)",
+            asset.id,
+            asset.project_id,
+        )
+        return "skipped:no-script"
 
     segments_in = [
         script_coverage.TranscriptSegmentInput(

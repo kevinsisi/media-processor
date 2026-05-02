@@ -57,6 +57,17 @@
   text-align: center;
 }
 
+/* Smaller, dimmer line for the auto-analysis explainer that sits under
+   the primary "select files" hint. Reads as a footnote so it doesn't
+   compete with the primary call to action. */
+.upload-drop__hint--meta {
+  font-size: var(--t-xs, 0.75rem);
+  color: var(--text-muted, #888);
+  max-width: 540px;
+  line-height: 1.5;
+  margin-top: var(--space-1, 4px);
+}
+
 .upload-drop__input {
   display: none;
 }

@@ -122,6 +122,15 @@ export const FAILURE_REASON_LABELS: Record<string, string> = {
   "model-error": "模型錯誤",
 };
 
+// Skip-reason labels. Steps that legitimately can't run (e.g. coverage
+// against a project with no script) report ``skipped:{reason}`` rather
+// than ``failed:{reason}`` so the UI can render a calm chip instead of
+// a red error pill.
+export const SKIP_REASON_LABELS: Record<string, string> = {
+  "no-script": "略過（無腳本）",
+  "no-transcript": "略過（無語音）",
+};
+
 export function labelForStepState(value: string | undefined): string {
   if (!value) return "等待";
   if (value.startsWith("failed:")) {
@@ -133,6 +142,10 @@ export function labelForStepState(value: string | undefined): string {
       }
     }
     return "失敗";
+  }
+  if (value.startsWith("skipped:")) {
+    const reason = value.slice("skipped:".length);
+    return SKIP_REASON_LABELS[reason] ?? "略過";
   }
   return STEP_STATE_LABELS[value] ?? value;
 }

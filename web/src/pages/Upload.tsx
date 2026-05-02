@@ -323,6 +323,9 @@ export default function Upload() {
           <p className="upload-drop__hint">
             點擊下方按鈕選取影片，可一次選多個檔案
           </p>
+          <p className="upload-drop__hint upload-drop__hint--meta">
+            上傳完成後會自動進行 AI 分析（語音轉錄、場景、運鏡、情緒、腳本對應）。可在「進入素材分析」查看每支影片的進度，分析完成後即可剪輯。
+          </p>
           <input
             ref={fileInputRef}
             type="file"
@@ -368,7 +371,7 @@ export default function Upload() {
                   {row.state === "queued" && "佇列中"}
                   {row.state === "uploading" &&
                     `上傳中 ${formatPct(row.uploadedBytes, row.totalBytes)}`}
-                  {row.state === "complete" && "已完成"}
+                  {row.state === "complete" && "已完成 · 自動分析中"}
                   {row.state === "error" && `失敗：${row.errorMessage ?? ""}`}
                 </span>
                 {row.state === "error" && (

@@ -43,6 +43,7 @@ function formatPercent(ratio: number): string {
 function classifyStepState(value: string | undefined): string {
   if (!value) return "pending";
   if (value.startsWith("failed:")) return "failed";
+  if (value.startsWith("skipped:")) return "skipped";
   return value;
 }
 
