@@ -58,6 +58,20 @@
   font-size: var(--t-sm);
 }
 
+/* Red CTA used by 停止剪輯 — destructive action that aborts an in-flight
+   render. Inherits .cta sizing from global.css. */
+.cta--danger {
+  background: var(--status-down, #b34b3a);
+  color: #fff;
+  border-color: transparent;
+}
+.cta--danger:hover:not(:disabled) {
+  background: #c75641;
+}
+.cta--danger:disabled {
+  opacity: 0.55;
+}
+
 .edit-hint {
   margin-top: var(--space-3);
   padding: var(--space-2) var(--space-3);

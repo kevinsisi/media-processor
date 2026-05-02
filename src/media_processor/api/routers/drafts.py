@@ -30,6 +30,7 @@ from media_processor.models import (
     DraftComment,
     DraftSegment,
 )
+from media_processor.models.enums import DraftStatus
 from media_processor.profile.loader import ProfileSpec
 from media_processor.services.llm_patcher import (
     DraftSegmentSummary,
@@ -37,6 +38,7 @@ from media_processor.services.llm_patcher import (
     LLMPatchError,
     apply_patch,
 )
+from media_processor.services.queue import cancel_draft_render
 
 router = APIRouter(prefix="/drafts", tags=["drafts"])
 
@@ -265,6 +267,49 @@ async def _build_segment_summaries(
             )
         )
     return summaries
+
+
+# ---------- M5.2 — cancel an in-flight render ----------
+
+
+# Marker we stash in Draft.prompt_feedback when the user hits 停止剪輯 so
+# the existing failed-card UI surfaces the reason without a new enum value
+# (a real CANCELLED status would need an alembic migration of the CHECK
+# constraint — left as a follow-up).
+CANCELLED_FEEDBACK = "已被使用者取消"
+
+
+@router.post("/{draft_id}/cancel", response_model=DraftDetail)
+async def cancel_draft(
+    draft_id: int,
+    session: SessionDep,
+) -> DraftDetail:
+    """Stop the running render for ``draft_id`` and mark the draft failed.
+
+    Locates the RQ job in the editing queue by matching ``kwargs[draft_id]``
+    so the api never has to pre-store the job id on the draft. Pending jobs
+    are dropped from the queue; running jobs get a stop signal so the
+    work-horse kills its ffmpeg subprocess. Always flips the draft to
+    ``failed`` with a marker in ``prompt_feedback`` regardless of whether
+    a live job was found, so a stale "processing" row can also be cleaned up.
+    """
+    stmt = select(Draft).where(Draft.id == draft_id).options(selectinload(Draft.segments))
+    draft = (await session.execute(stmt)).scalar_one_or_none()
+    if draft is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="draft not found")
+    if draft.status not in (DraftStatus.PENDING.value, DraftStatus.PROCESSING.value):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"draft is {draft.status}, nothing to cancel",
+        )
+
+    cancel_draft_render(draft_id)
+
+    draft.status = DraftStatus.FAILED.value
+    draft.prompt_feedback = CANCELLED_FEEDBACK
+    await session.commit()
+    await session.refresh(draft)
+    return serialise_draft_detail(draft)
 
 
 # ---------- M5.2 — comment thread ----------

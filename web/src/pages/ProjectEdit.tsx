@@ -419,6 +419,8 @@ export default function ProjectEdit() {
   const [seedError, setSeedError] = useState<string | null>(null);
   const [triggering, setTriggering] = useState<boolean>(false);
   const [triggerError, setTriggerError] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState<boolean>(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
   const [durationSec, setDurationSec] = useState<number>(DEFAULT_DURATION_S);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -516,6 +518,23 @@ export default function ProjectEdit() {
     },
     [validProjectId, durationSec, refreshDrafts],
   );
+
+  const handleCancel = useCallback(async () => {
+    if (selectedDraftId === null) return;
+    if (!window.confirm("確定要停止這次剪輯？已跑的時間會丟掉。")) return;
+    setCancelling(true);
+    setCancelError(null);
+    try {
+      await apiClient.cancelDraftRender(selectedDraftId);
+      void refreshDrafts().catch(() => {});
+    } catch (err) {
+      setCancelError(
+        err instanceof Error ? err.message : String(err ?? "unknown error"),
+      );
+    } finally {
+      setCancelling(false);
+    }
+  }, [selectedDraftId, refreshDrafts]);
 
   const status = draft?.status ?? null;
   // True both for the first-ever trigger (draft is null) and for a force-retry
@@ -631,6 +650,21 @@ export default function ProjectEdit() {
           {draft.cut_plan?.used_fallback && (
             <p className="edit-hint">
               已切換為備用規劃（{draft.cut_plan.fallback_reason || "未知原因"}）。
+            </p>
+          )}
+          <div className="edit-card__actions">
+            <button
+              type="button"
+              className="cta cta--danger"
+              onClick={() => void handleCancel()}
+              disabled={cancelling}
+            >
+              {cancelling ? "停止中…" : "停止剪輯"}
+            </button>
+          </div>
+          {cancelError && (
+            <p className="edit-error" role="alert">
+              停止失敗：{cancelError}
             </p>
           )}
         </section>

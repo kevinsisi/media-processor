@@ -13,6 +13,10 @@ from typing import Any
 
 from redis import Redis
 from rq import Queue
+from rq.command import send_stop_job_command
+from rq.exceptions import InvalidJobOperation, NoSuchJobError
+from rq.job import Job
+from rq.registry import StartedJobRegistry
 
 from media_processor.api.config import settings
 from media_processor.workers import ANALYSIS_QUEUE, EDITING_QUEUE
@@ -92,3 +96,51 @@ def enqueue_project_edit(
         job.id,
     )
     return job.id
+
+
+def cancel_draft_render(draft_id: int) -> bool:
+    """Find the editing job rendering ``draft_id`` and cancel/stop it.
+
+    Looks in both the queue (not yet picked up) and the StartedJobRegistry
+    (worker is running it). For pending jobs we call ``Job.cancel`` so RQ
+    drops it; for running jobs we additionally
+    ``send_stop_job_command`` so the worker raises StopRequested in the
+    work-horse, killing the in-flight ffmpeg subprocess.
+
+    Returns True if any matching job was found, False otherwise. Does not
+    touch the Draft row — the caller updates DB state.
+    """
+    redis = _redis()
+    found = False
+
+    # Pending: still in the queue, never picked up.
+    queue = Queue(EDITING_QUEUE, connection=redis)
+    for job_id in queue.get_job_ids():
+        try:
+            job = Job.fetch(job_id, connection=redis)
+        except NoSuchJobError:
+            continue
+        if job.kwargs.get("draft_id") == draft_id:
+            try:
+                job.cancel()
+            except InvalidJobOperation:
+                pass
+            logger.info("cancelled queued render_draft job %s for draft_id=%d", job_id, draft_id)
+            found = True
+
+    # Running: the work-horse is mid-render.
+    registry = StartedJobRegistry(EDITING_QUEUE, connection=redis)
+    for job_id in registry.get_job_ids():
+        try:
+            job = Job.fetch(job_id, connection=redis)
+        except NoSuchJobError:
+            continue
+        if job.kwargs.get("draft_id") == draft_id:
+            try:
+                send_stop_job_command(redis, job_id)
+            except (InvalidJobOperation, NoSuchJobError):
+                pass
+            logger.info("sent stop signal to running render_draft job %s for draft_id=%d", job_id, draft_id)
+            found = True
+
+    return found

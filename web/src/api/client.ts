@@ -223,6 +223,12 @@ export class ApiClient {
     });
   }
 
+  cancelDraftRender(draftId: number): Promise<DraftDetail> {
+    return this.request<DraftDetail>(`/drafts/${draftId}/cancel`, {
+      method: "POST",
+    });
+  }
+
   // ----- Settings — LLM key pool -----
 
   fetchSettings(): Promise<SettingsOut> {
