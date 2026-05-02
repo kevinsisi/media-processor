@@ -353,7 +353,9 @@ class ScriptCoverageOut(BaseModel):
 class AnalyzeRequest(BaseModel):
     """Body for POST /assets/{id}/analyze — both fields optional."""
 
-    steps: list[Literal["stt", "scene", "motion", "coverage"]] | None = None
+    steps: (
+        list[Literal["stt", "scene", "motion", "emotion", "tracking", "coverage"]] | None
+    ) = None
     force: bool = False
 
 

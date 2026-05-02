@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 # The set of canonical step names the orchestrator accepts. The worker
 # rejects unknown names before any work runs (see analysis-pipeline REQ-1).
-VALID_STEPS = ("stt", "scene", "motion", "emotion", "coverage")
+VALID_STEPS = ("stt", "scene", "motion", "emotion", "tracking", "coverage")
 
 
 def analyze_asset(
