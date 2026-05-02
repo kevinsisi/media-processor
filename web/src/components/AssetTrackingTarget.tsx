@@ -50,6 +50,24 @@ function pickRepresentativeFrame(track: TrackingTrackOut): number[] | null {
   return track.sample_frames[mid];
 }
 
+// Pre-v0.17 tracking_json had no `tracks` array. The backend synthesises
+// a single track at object_index=0 from the legacy top-level `frames`,
+// so we render exactly one bbox here. If `cls_name` is also empty
+// (legacy subject_class was sometimes blank), fall back to a generic
+// label rather than rendering an empty pill.
+function displayTrackName(track: TrackingTrackOut): string {
+  const labelled = labelForTrackingSubject(track.cls_name);
+  if (labelled) return labelled;
+  return "追蹤主體";
+}
+
+function isLegacyTracking(detail: TrackingDetailOut): boolean {
+  return (
+    detail.tracks.length === 1 &&
+    (!detail.tracks[0].cls_name || detail.tracks[0].area_score === 0)
+  );
+}
+
 export default function AssetTrackingTarget({
   assetId,
   thumbnailUrl,
@@ -367,10 +385,10 @@ export default function AssetTrackingTarget({
                 ev.stopPropagation();
                 handleObjectPick(track.object_index);
               }}
-              title={labelForTrackingSubject(track.cls_name)}
+              title={displayTrackName(track)}
             >
               <span className="tracking-target__bbox-label">
-                {labelForTrackingSubject(track.cls_name)}（
+                {displayTrackName(track)}（
                 {Math.round(track.confidence * 100)}%）
               </span>
             </button>
@@ -400,7 +418,7 @@ export default function AssetTrackingTarget({
                 onClick={() => handleObjectPick(track.object_index)}
               >
                 <span className="tracking-target__list-btn-name">
-                  {labelForTrackingSubject(track.cls_name)}
+                  {displayTrackName(track)}
                 </span>
                 <span className="tracking-target__list-btn-meta mono">
                   {Math.round(track.confidence * 100)}% · {track.frame_count} 幀
@@ -419,6 +437,11 @@ export default function AssetTrackingTarget({
       {detail.tracks.length === 0 && (
         <p className="tracking-target__hint">
           這段素材沒有偵測到可追蹤主體；可改用「自訂區域」或「固定構圖」。
+        </p>
+      )}
+      {detail.tracks.length > 0 && isLegacyTracking(detail) && (
+        <p className="tracking-target__hint">
+          這是 v0.17 之前的舊追蹤資料（單主體），重新跑追蹤分析可取得多物件選擇。
         </p>
       )}
     </div>
