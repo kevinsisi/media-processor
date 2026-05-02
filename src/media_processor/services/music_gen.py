@@ -196,6 +196,24 @@ def generate(
 
     max_new_tokens = duration_s * DEFAULT_TOKENS_PER_SECOND
 
+    # v0.15.3 — force the LM to actually fill ``max_new_tokens`` by
+    # setting ``min_new_tokens`` to the same value, AND by banning the
+    # PAD token from the sampling distribution. Symptoms before this
+    # change: 30 s wav files whose first ~1 s contained music followed
+    # by 29 s of silence. Root cause was the LM hitting EOS very early
+    # (``pad_token_id=2048`` doubles as EOS for MusicGen-small) — the
+    # remainder of the codebook stream was filled with PAD tokens that
+    # the audio decoder turns into silence. Banning PAD via
+    # ``bad_words_ids`` keeps the sampler away from that token entirely,
+    # and ``min_new_tokens`` removes the early-stop path so the model
+    # commits to the full duration.
+    pad_token_id: int | None = None
+    try:
+        pad_token_id = int(model.generation_config.pad_token_id)  # type: ignore[union-attr]
+    except (AttributeError, TypeError, ValueError):
+        pad_token_id = None
+    bad_words_ids = [[pad_token_id]] if pad_token_id is not None else None
+
     # v0.15.2 — three-attempt sampling chain. The previous greedy
     # fallback was a foot-gun: ``do_sample=False`` produced byte-
     # identical degenerate output across every prompt (MD5-identical
@@ -217,11 +235,14 @@ def generate(
         dict(do_sample=True, guidance_scale=3.0, temperature=1.0, top_k=250),
         # Loose prompt adherence; combats NaN by halving the unguided
         # contribution.
-        dict(do_sample=True, guidance_scale=1.5, temperature=1.0, top_k=100, top_p=0.95),
+        dict(do_sample=True, guidance_scale=1.5, temperature=1.0, top_k=250),
         # No CFG — sampler sees only the guided forward pass, which
         # never NaN'd in our soak. Bonus: slightly faster (one forward
-        # per token instead of two).
-        dict(do_sample=True, guidance_scale=1.0, temperature=1.0, top_k=50, top_p=0.95),
+        # per token instead of two). top_k=250 keeps the distribution
+        # broad enough that the LM doesn't collapse into low-energy
+        # decoder regions (top_k=50 + top_p=0.95 produced 1 s of music
+        # then silence on this hardware).
+        dict(do_sample=True, guidance_scale=1.0, temperature=1.0, top_k=250),
     ]
 
     audio_values: object | None = None
@@ -232,6 +253,8 @@ def generate(
                 audio_values = model.generate(  # type: ignore[union-attr]
                     **inputs,
                     max_new_tokens=max_new_tokens,
+                    min_new_tokens=max_new_tokens,
+                    bad_words_ids=bad_words_ids,
                     **params,
                 )
             if attempt_idx > 1:
@@ -278,6 +301,21 @@ def generate(
     # Clamp + scale to int16 PCM.
     audio_np = np.clip(audio_np, -1.0, 1.0)
     pcm = (audio_np * 32767.0).astype(np.int16)
+
+    # v0.15.3 — silence sanity check. If the LM emitted PAD-equivalent
+    # tokens for most of the sequence the decoder produces near-silent
+    # audio; we log a warning so future regressions surface in worker
+    # logs without the operator having to manually preview each track.
+    # Threshold tuned to ``mean(|x|) > 0.005`` (≈ -46 dBFS) which is
+    # well above noise floor but well below typical music levels.
+    audible_mean = float(np.mean(np.abs(audio_np)))
+    if audible_mean < 0.005:
+        logger.warning(
+            "MusicGen output looks near-silent (mean |x| = %.4f); the LM "
+            "may have hit pad/EOS early — check min_new_tokens + "
+            "bad_words_ids wiring",
+            audible_mean,
+        )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with wave.open(str(output_path), "wb") as wf:
