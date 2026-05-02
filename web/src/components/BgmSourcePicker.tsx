@@ -267,10 +267,7 @@ export default function BgmSourcePicker({
           )}
           {library && library.length === 0 && (
             <p className="bgm-picker__hint mono">
-              音樂庫目前是空的。請執行
-              <span className="mono"> scripts/seed_music_library.py </span>
-              預生成 5 首風格樣本，或直接把音檔放到
-              <span className="mono"> ${"{BGM_DIR}"}/_library/</span>。
+              音樂庫正在準備中，第一批風格樣本即將上線。請改用「AI 生成配樂」或「上傳自己的音樂」。
             </p>
           )}
           {library && library.length > 0 && (

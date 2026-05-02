@@ -104,7 +104,12 @@ def _load_pipeline(model_id: str) -> tuple[object, object]:
 
     try:
         processor = AutoProcessor.from_pretrained(model_id)
-        model = MusicgenForConditionalGeneration.from_pretrained(model_id)
+        # Pin fp32 from the load. The default fp32 weights match the
+        # numerical stability the multinomial sampler needs; fp16 /
+        # bf16 routes overflow into NaN on small consumer GPUs.
+        model = MusicgenForConditionalGeneration.from_pretrained(
+            model_id, torch_dtype=torch.float32
+        )
     except Exception as exc:  # noqa: BLE001 — surface as unavailable.
         raise MusicGenUnavailableError(
             f"failed to load MusicGen model {model_id!r}: {exc}"
@@ -166,24 +171,63 @@ def generate(
     import torch  # type: ignore[import-not-found]
 
     processor, model = _load_pipeline(model_id)
+    # Force fp32 for the language-model + audio decoder. MusicGen-small
+    # is small enough that fp32 fits in 2 GB of VRAM, and fp16 / autocast
+    # paths produce ``probability tensor contains either inf, nan``
+    # during the multinomial sampling step on Ampere / Turing cards
+    # (RTX 2070 hits this consistently). fp32 sidesteps it entirely.
+    try:
+        model = model.to(torch.float32)  # type: ignore[union-attr]
+    except Exception:  # noqa: BLE001
+        pass
     device = next(model.parameters()).device  # type: ignore[union-attr]
 
+    # padding=True yields the attention_mask the generate loop needs
+    # to ignore PAD tokens during cross-attention. Skipping it makes
+    # MusicGen attend to PAD positions, which is what feeds NaN logits
+    # into multinomial sampling for prompts shorter than the EOS token.
     inputs = processor(  # type: ignore[operator]
         text=[prompt],
         padding=True,
         return_tensors="pt",
-    ).to(device)
+    )
+    # Move every tensor entry to the model's device explicitly.
+    inputs = {k: v.to(device) for k, v in inputs.items() if hasattr(v, "to")}
 
     max_new_tokens = duration_s * DEFAULT_TOKENS_PER_SECOND
+
+    def _sample_safely() -> object:
+        """Run generate with sampling; on NaN/Inf in logits fall back to
+        greedy decoding so the user still gets *something* listenable
+        instead of a hard failure."""
+        try:
+            with torch.no_grad():
+                return model.generate(  # type: ignore[union-attr]
+                    **inputs,
+                    do_sample=True,
+                    guidance_scale=GUIDANCE_SCALE,
+                    temperature=TEMPERATURE,
+                    top_k=250,
+                    max_new_tokens=max_new_tokens,
+                )
+        except RuntimeError as exc:
+            msg = str(exc).lower()
+            if "inf" in msg or "nan" in msg or "probability" in msg:
+                logger.warning(
+                    "MusicGen sampling produced NaN/Inf logits; "
+                    "falling back to greedy decoding (less variety)",
+                )
+                with torch.no_grad():
+                    return model.generate(  # type: ignore[union-attr]
+                        **inputs,
+                        do_sample=False,
+                        guidance_scale=GUIDANCE_SCALE,
+                        max_new_tokens=max_new_tokens,
+                    )
+            raise
+
     try:
-        with torch.no_grad():
-            audio_values = model.generate(  # type: ignore[union-attr]
-                **inputs,
-                do_sample=True,
-                guidance_scale=GUIDANCE_SCALE,
-                temperature=TEMPERATURE,
-                max_new_tokens=max_new_tokens,
-            )
+        audio_values = _sample_safely()
     except Exception as exc:  # noqa: BLE001 — surface to caller.
         raise MusicGenError(f"MusicGen inference failed: {exc}") from exc
 
