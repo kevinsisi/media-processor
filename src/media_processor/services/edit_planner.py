@@ -816,17 +816,33 @@ def _assemble_plan(
         if accumulated >= target_duration_ms:
             break
 
-    # Pass 2 — duration top-up. The bucket walk above used to stop with
-    # whatever it had after one bucket-per-cut walk, which is how a 60 s
-    # request would render at ~30 s. Now we keep pulling from any
-    # remaining candidates (regardless of bucket) until we either reach
-    # the target or genuinely have nothing left that isn't a dup.
+    # Pass 2 — duration top-up from the high-quality pool. The bucket
+    # walk above used to stop with whatever it had after one
+    # bucket-per-cut walk, which is how a 60 s request would render at
+    # ~30 s. Now we keep pulling from any remaining usable candidate
+    # (regardless of bucket) until we either reach the target or
+    # genuinely have nothing left that isn't a dup.
     if accumulated < target_duration_ms:
         leftovers: list[_AssetScore] = []
         for bucket in _POSITION_ORDER:
             leftovers.extend(by_pos[bucket])
         while leftovers and accumulated < target_duration_ms:
             cand = _argmax_pick(leftovers, chosen=chosen, position_pref=None)
+            if cand is None:
+                break
+            _try_consume(cand)
+
+    # Pass 3 — last-resort top-up from the rejected pool (position=skip
+    # or score<MIN_KEEP_SCORE). Operator asked for a specific duration;
+    # honour it even at the cost of some weaker clips, as long as they
+    # aren't content-duplicates of what's already chosen. This is the
+    # "不能提前停" guarantee — don't bail just because the high-quality
+    # pool is exhausted.
+    if accumulated < target_duration_ms:
+        chosen_ids = {id(c) for c in chosen}
+        rejected_pool = [s for s in scores if id(s) not in chosen_ids]
+        while rejected_pool and accumulated < target_duration_ms:
+            cand = _argmax_pick(rejected_pool, chosen=chosen, position_pref=None)
             if cand is None:
                 break
             _try_consume(cand)
