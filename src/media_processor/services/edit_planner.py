@@ -15,7 +15,7 @@ import asyncio
 import json
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 import httpx
@@ -52,6 +52,16 @@ MIN_SPAN_MS: int = 1500
 MAX_SPAN_MS: int = 6000
 _VALID_POSITIONS = {"opening", "middle", "closing", "skip"}
 _POSITION_ORDER = ("opening", "middle", "closing")
+
+# Motion classification used by the rhythm-aware picker in _assemble_plan.
+# Pan/tilt/handheld are camera movement; static is locked-off. The picker
+# prefers dynamic at opening and static at closing, and gives an
+# alternation bonus so two same-motion cuts don't sit back-to-back.
+DYNAMIC_MOTIONS: frozenset[str] = frozenset({"pan", "tilt", "handheld"})
+STATIC_MOTIONS: frozenset[str] = frozenset({"static"})
+_MOTION_DEFAULT = "static"  # if asset has no motion tags, treat as static
+_MOTION_ALTERNATION_BONUS = 10  # boost for differing from prev cut's motion
+_MOTION_POSITION_BONUS = 15  # boost for matching opening=dynamic / closing=static
 
 # Prompt-budget caps so very long shoots don't blow the context window.
 MAX_TRANSCRIPT_SEGMENTS_VERBATIM = 60
@@ -285,7 +295,14 @@ def _strip_fence(text: str) -> str:
 
 @dataclass(frozen=True)
 class _AssetScore:
-    """One asset's per-asset Gemini verdict before local assembly."""
+    """One asset's per-asset Gemini verdict before local assembly.
+
+    ``dominant_motion`` is filled in by :func:`_score_one_asset` after the
+    Gemini parse — it's the motion tag (pan / tilt / handheld / static)
+    whose time_ranges_ms most overlap the picked ``best_span_ms``. The
+    assembler uses it for rhythm-aware ordering (no two same-motion cuts
+    in a row, dynamic at opening, static at closing).
+    """
 
     asset_id: int
     score: int
@@ -293,6 +310,37 @@ class _AssetScore:
     best_span_ms: tuple[int, int]
     source_kind: str
     reason: str
+    dominant_motion: str = _MOTION_DEFAULT
+
+
+def _dominant_motion_for_span(asset: Asset, span_ms: tuple[int, int]) -> str:
+    """Pick the motion tag whose time_ranges_ms most overlap ``span_ms``.
+
+    Falls back to ``_MOTION_DEFAULT`` if the asset has no motion tags or
+    none of them overlap. Used to attach motion context to an
+    ``_AssetScore`` for downstream rhythm-aware ordering.
+    """
+    span_start, span_end = span_ms
+    if span_end <= span_start:
+        return _MOTION_DEFAULT
+    best_overlap_ms = 0
+    best_tag = _MOTION_DEFAULT
+    for tag in asset.tags:
+        if tag.tag_type != "motion":
+            continue
+        for r in tag.time_ranges_ms or []:
+            if not isinstance(r, list | tuple) or len(r) != 2:
+                continue
+            try:
+                r_start = int(r[0])
+                r_end = int(r[1])
+            except (TypeError, ValueError):
+                continue
+            overlap = max(0, min(r_end, span_end) - max(r_start, span_start))
+            if overlap > best_overlap_ms:
+                best_overlap_ms = overlap
+                best_tag = tag.tag_name
+    return best_tag
 
 
 def _parse_asset_score(
@@ -373,17 +421,55 @@ def _parse_asset_score(
     )
 
 
+def _bucket_motion_preference(bucket: str) -> str | None:
+    """Per-bucket preferred motion class for the rhythm-aware picker.
+
+    Opening favours dynamic shots so the reel doesn't open flat; closing
+    favours a settled static frame. Middle is neutral so the picker is
+    free to optimise alternation only.
+    """
+    if bucket == "opening":
+        return "dynamic"
+    if bucket == "closing":
+        return "static"
+    return None
+
+
+def _rhythm_score(
+    candidate: _AssetScore,
+    *,
+    prev_motion: str | None,
+    position_preference: str | None,
+) -> int:
+    """Effective score after motion-alternation and position bonuses.
+
+    Soft constraints — bonuses just shift ranking. If only same-motion
+    candidates remain, the picker still returns one (no hard rejection).
+    """
+    score = candidate.score
+    if prev_motion is not None and candidate.dominant_motion != prev_motion:
+        score += _MOTION_ALTERNATION_BONUS
+    if position_preference == "dynamic" and candidate.dominant_motion in DYNAMIC_MOTIONS:
+        score += _MOTION_POSITION_BONUS
+    elif position_preference == "static" and candidate.dominant_motion in STATIC_MOTIONS:
+        score += _MOTION_POSITION_BONUS
+    return score
+
+
 def _assemble_plan(
     scores: list[_AssetScore],
     target_duration_ms: int,
 ) -> list[CutPlanSegment]:
-    """Local cut-plan assembly from scored assets — no Gemini call.
+    """Local cut-plan assembly with rhythm-aware motion ordering.
 
-    Drops position=="skip" or score < MIN_KEEP_SCORE, then walks the
-    position buckets in opening → middle → closing order, taking each
-    bucket's highest-score-first. Stops once accumulated duration ≈
-    target (allow up to +20% over). Result preserves narrative ordering
-    by position and gives priority to higher-scored picks within bucket.
+    Drops ``position=="skip"`` or ``score < MIN_KEEP_SCORE``, then walks
+    opening → middle → closing buckets. Within each bucket, the next
+    pick is the candidate with the highest *rhythm-adjusted* score —
+    base Gemini score plus a bonus for differing from the previous
+    chosen cut's dominant motion (so static→pan→static reads better
+    than static→static→static), plus a bucket-position bonus
+    (opening=dynamic, closing=static). Stops once accumulated duration
+    ≈ target (allow up to +20% over).
     """
     usable = [s for s in scores if s.position != "skip" and s.score >= MIN_KEEP_SCORE]
     if not usable:
@@ -400,14 +486,29 @@ def _assemble_plan(
     by_pos: dict[str, list[_AssetScore]] = {p: [] for p in _POSITION_ORDER}
     for s in usable:
         by_pos[s.position].append(s)
-    for k in by_pos:
-        by_pos[k].sort(key=lambda x: -x.score)
 
     chosen: list[_AssetScore] = []
     accumulated = 0
     max_target = int(target_duration_ms * 1.2)
     for bucket in _POSITION_ORDER:
-        for s in by_pos[bucket]:
+        candidates = list(by_pos[bucket])
+        position_pref = _bucket_motion_preference(bucket)
+        while candidates:
+            prev_motion = chosen[-1].dominant_motion if chosen else None
+            # Argmax by rhythm-adjusted score; ties broken by base score then
+            # by current list order (stable enough for deterministic builds).
+            best_idx = max(
+                range(len(candidates)),
+                key=lambda i: (
+                    _rhythm_score(
+                        candidates[i],
+                        prev_motion=prev_motion,
+                        position_preference=position_pref,
+                    ),
+                    candidates[i].score,
+                ),
+            )
+            s = candidates.pop(best_idx)
             span_dur = s.best_span_ms[1] - s.best_span_ms[0]
             if accumulated + span_dur > max_target and chosen:
                 continue
@@ -562,10 +663,15 @@ async def _score_one_asset(
                 f"status={response.status_code} body={response.text[:200]}"
             )
         try:
-            return _parse_asset_score(
+            parsed = _parse_asset_score(
                 response.json(),
                 asset_id=asset.id,
                 asset_duration_ms=int(asset.duration_ms),
+            )
+            # Attach motion context for the rhythm-aware assembler.
+            return replace(
+                parsed,
+                dominant_motion=_dominant_motion_for_span(asset, parsed.best_span_ms),
             )
         except EditPlanInvalidError as exc:
             last_invalid = exc
