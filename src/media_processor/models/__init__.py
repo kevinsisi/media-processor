@@ -38,6 +38,7 @@ from media_processor.models.profile import Profile
 from media_processor.models.project import Asset, AssetSegment, AssetTag, Project
 from media_processor.models.review import Review
 from media_processor.models.script import Script
+from media_processor.models.subtitle_cue import SubtitleCueRow
 from media_processor.models.transcript import AssetTranscript
 from media_processor.models.upload_session import UploadSession
 
@@ -75,6 +76,7 @@ __all__ = [
     "ReviewAction",
     "Script",
     "ScriptCoverage",
+    "SubtitleCueRow",
     "TargetAspectRatio",
     "UploadKind",
     "UploadSession",

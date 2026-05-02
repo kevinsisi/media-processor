@@ -139,6 +139,9 @@ class DraftSummary(BaseModel):
 class DraftSegmentOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
+    # M7.1 — surface the row id so the timeline-reorder API can take a
+    # permutation of the existing segment ids without the UI guessing.
+    id: int
     order: int
     asset_segment_id: int | None = None
     asset_id: int | None = None
@@ -198,6 +201,50 @@ class DraftCommentCreate(BaseModel):
 
     author: str = Field(..., min_length=1, max_length=64)
     body: str = Field(..., min_length=1, max_length=4000)
+
+
+# ---------- M7 — manual control schemas ----------
+
+
+class DraftReorderRequest(BaseModel):
+    """Body for PATCH /drafts/{id}/order — full new order as a permutation
+    of the existing DraftSegment ids."""
+
+    orders: list[int] = Field(..., min_length=1, max_length=200)
+
+
+class SubtitleCueOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    idx: int
+    start_ms: int
+    end_ms: int
+    text: str
+    updated_at: datetime
+
+
+class SubtitleCuePatch(BaseModel):
+    """Body for PATCH /drafts/{id}/subtitles/{idx}. Timing is immutable —
+    we only let the user fix the text."""
+
+    text: str = Field(..., min_length=1, max_length=400)
+
+
+class DraftExportRequest(BaseModel):
+    """Body for POST /drafts/{id}/export."""
+
+    aspect: Literal["9:16", "4:5", "1:1"]
+    height: int = Field(..., ge=480, le=2160)
+
+
+class DraftExportResponse(BaseModel):
+    """Returned by POST /drafts/{id}/export."""
+
+    draft_id: int
+    aspect: str
+    height: int
+    job_id: str
+    output_filename: str
 
 
 class AssetTagOut(BaseModel):

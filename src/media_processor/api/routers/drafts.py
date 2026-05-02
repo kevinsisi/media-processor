@@ -19,9 +19,14 @@ from media_processor.api.schemas import (
     DraftCommentCreate,
     DraftCommentOut,
     DraftDetail,
+    DraftExportRequest,
+    DraftExportResponse,
     DraftPatchRequest,
     DraftPatchResponse,
+    DraftReorderRequest,
     DraftSegmentOut,
+    SubtitleCueOut,
+    SubtitleCuePatch,
 )
 from media_processor.models import (
     AssetSegment,
@@ -29,16 +34,22 @@ from media_processor.models import (
     Draft,
     DraftComment,
     DraftSegment,
+    SubtitleCueRow,
 )
 from media_processor.models.enums import DraftStatus
 from media_processor.profile.loader import ProfileSpec
+from media_processor.services import exports
 from media_processor.services.llm_patcher import (
     DraftSegmentSummary,
     LLMPatcher,
     LLMPatchError,
     apply_patch,
 )
-from media_processor.services.queue import cancel_draft_render
+from media_processor.services.queue import (
+    cancel_draft_render,
+    enqueue_draft_export,
+    enqueue_project_edit,
+)
 
 router = APIRouter(prefix="/drafts", tags=["drafts"])
 
@@ -145,6 +156,7 @@ def serialise_draft_detail(draft: Draft) -> DraftDetail:
         prompt_feedback=draft.prompt_feedback,
         segments=[
             DraftSegmentOut(
+                id=s.id,
                 order=s.order,
                 asset_segment_id=s.asset_segment_id,
                 asset_id=s.asset_id,
@@ -358,6 +370,206 @@ async def create_draft_comment(
     await session.commit()
     await session.refresh(comment)
     return DraftCommentOut.model_validate(comment)
+
+
+# ---------- M7.1 — timeline reorder ----------
+
+
+@router.patch("/{draft_id}/order", response_model=DraftDetail)
+async def reorder_draft_segments(
+    draft_id: int,
+    payload: DraftReorderRequest,
+    session: SessionDep,
+) -> DraftDetail:
+    """Reorder a draft's cut segments and enqueue a re-render.
+
+    The ``orders`` field is the new sequence of ``DraftSegment.id`` values
+    — must be a strict permutation of the draft's current segments.
+    On success the rows are renumbered (``order`` + ``on_timeline_*_ms``
+    cursors), ``cut_plan_json`` is regenerated to match, and a
+    skip-plan render job is enqueued so the new ordering is rendered
+    without re-running Gemini.
+    """
+    stmt = select(Draft).where(Draft.id == draft_id).options(selectinload(Draft.segments))
+    draft = (await session.execute(stmt)).scalar_one_or_none()
+    if draft is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="draft not found")
+
+    existing_ids = {seg.id for seg in draft.segments}
+    requested_ids = list(payload.orders)
+    if len(requested_ids) != len(existing_ids) or set(requested_ids) != existing_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="orders must be a permutation of the existing draft segment ids",
+        )
+
+    by_id = {seg.id: seg for seg in draft.segments}
+    cursor_ms = 0
+    new_plan_segments: list[dict[str, Any]] = []
+    for new_order, seg_id in enumerate(requested_ids):
+        seg = by_id[seg_id]
+        duration = max(1, (seg.asset_end_ms or 0) - (seg.asset_start_ms or 0))
+        seg.order = new_order
+        seg.on_timeline_start_ms = cursor_ms
+        seg.on_timeline_end_ms = cursor_ms + duration
+        cursor_ms += duration
+        if seg.asset_id is not None and seg.asset_start_ms is not None and seg.asset_end_ms is not None:
+            new_plan_segments.append(
+                {
+                    "order": new_order,
+                    "asset_id": int(seg.asset_id),
+                    "asset_start_ms": int(seg.asset_start_ms),
+                    "asset_end_ms": int(seg.asset_end_ms),
+                    "source_kind": str(seg.source_kind or "scripted"),
+                    "reason": str(seg.plan_reason or ""),
+                    "transition_to_next": str(seg.transition or "dissolve"),
+                }
+            )
+
+    # Update the stored cut_plan_json so a downstream skip-plan render
+    # can reload the same shape without losing metadata. Fields outside
+    # ``segments`` are preserved.
+    blob: dict[str, Any] = dict(draft.cut_plan_json or {})
+    blob["segments"] = new_plan_segments
+    draft.cut_plan_json = blob
+
+    draft.status = DraftStatus.PENDING.value
+    draft.progress_steps_json = {}
+    draft.prompt_feedback = None
+    await session.commit()
+
+    enqueue_project_edit(
+        draft.project_id,
+        draft_id=draft.id,
+        force=True,
+        skip_plan=True,
+    )
+
+    await session.refresh(draft, attribute_names=["segments"])
+    return serialise_draft_detail(draft)
+
+
+# ---------- M7.2 — subtitle inline edit ----------
+
+
+@router.get("/{draft_id}/subtitles", response_model=list[SubtitleCueOut])
+async def list_subtitles(
+    draft_id: int,
+    session: SessionDep,
+) -> list[SubtitleCueOut]:
+    if (await session.get(Draft, draft_id)) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="draft not found")
+    rows = (
+        (
+            await session.execute(
+                select(SubtitleCueRow)
+                .where(SubtitleCueRow.draft_id == draft_id)
+                .order_by(SubtitleCueRow.idx)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return [SubtitleCueOut.model_validate(r) for r in rows]
+
+
+@router.patch("/{draft_id}/subtitles/{idx}", response_model=SubtitleCueOut)
+async def patch_subtitle(
+    draft_id: int,
+    idx: int,
+    payload: SubtitleCuePatch,
+    session: SessionDep,
+) -> SubtitleCueOut:
+    """Update one cue's text. Timing stays locked to whatever the burn-in
+    stage produced — fixing timing would mean re-cutting the source."""
+    cue = (
+        await session.execute(
+            select(SubtitleCueRow)
+            .where(SubtitleCueRow.draft_id == draft_id)
+            .where(SubtitleCueRow.idx == idx)
+        )
+    ).scalar_one_or_none()
+    if cue is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="subtitle cue not found")
+    cue.text = payload.text
+    await session.commit()
+    await session.refresh(cue)
+    return SubtitleCueOut.model_validate(cue)
+
+
+@router.post("/{draft_id}/rebuild-subtitles", response_model=DraftDetail)
+async def rebuild_subtitles(
+    draft_id: int,
+    session: SessionDep,
+) -> DraftDetail:
+    """Re-burn subtitles using the current ``subtitle_cues`` rows. Skips
+    the plan + cut + concat stages — only the SRT-from-DB and burn-in
+    stages run, plus the BGM stage at the end if a track is set."""
+    stmt = select(Draft).where(Draft.id == draft_id).options(selectinload(Draft.segments))
+    draft = (await session.execute(stmt)).scalar_one_or_none()
+    if draft is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="draft not found")
+    if not draft.cut_plan_json:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="draft has no plan to re-render against",
+        )
+    draft.status = DraftStatus.PENDING.value
+    draft.progress_steps_json = {}
+    draft.prompt_feedback = None
+    await session.commit()
+
+    enqueue_project_edit(
+        draft.project_id,
+        draft_id=draft.id,
+        force=True,
+        skip_plan=True,
+        subtitles_from_db=True,
+    )
+    await session.refresh(draft, attribute_names=["segments"])
+    return serialise_draft_detail(draft)
+
+
+# ---------- M7.3 — export at chosen aspect / resolution ----------
+
+
+@router.post("/{draft_id}/export", response_model=DraftExportResponse)
+async def export_draft(
+    draft_id: int,
+    payload: DraftExportRequest,
+    session: SessionDep,
+) -> DraftExportResponse:
+    """Enqueue a derivative export for the given aspect / height.
+
+    The original ``v{N}.mp4`` is preserved; the export lands at
+    ``v{N}-{aspect}-{height}p.mp4`` next to it. Multiple exports for the
+    same draft co-exist."""
+    draft = await session.get(Draft, draft_id)
+    if draft is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="draft not found")
+    if not draft.mp4_preview_path:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="draft has no rendered mp4 yet — wait for the initial render",
+        )
+    if payload.aspect not in exports.VALID_ASPECTS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"aspect must be one of {exports.VALID_ASPECTS}",
+        )
+    job_id = enqueue_draft_export(
+        draft.id,
+        aspect=payload.aspect,
+        height=payload.height,
+    )
+    output_filename = exports.derive_filename(draft.version, payload.aspect, payload.height)
+    return DraftExportResponse(
+        draft_id=draft.id,
+        aspect=payload.aspect,
+        height=payload.height,
+        job_id=job_id,
+        output_filename=output_filename,
+    )
 
 
 __all__ = [

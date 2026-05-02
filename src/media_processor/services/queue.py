@@ -27,6 +27,8 @@ JOB_TIMEOUT_SECONDS = 60 * 60 * 2  # 2 h ceiling for the whole pipeline.
 EDIT_JOB_TIMEOUT_SECONDS = 60 * 60  # 1 h ceiling for the M5 render pipeline.
 ANALYZE_ASSET_FN = "media_processor.workers.analysis_jobs.analyze_asset"
 RENDER_DRAFT_FN = "media_processor.workers.edit_jobs.render_draft"
+EXPORT_DRAFT_FN = "media_processor.workers.edit_jobs.export_draft"
+EXPORT_JOB_TIMEOUT_SECONDS = 60 * 30  # 30 min — single ffmpeg pass
 
 
 def _redis() -> Redis:
@@ -65,12 +67,21 @@ def enqueue_project_edit(
     draft_id: int,
     force: bool = False,
     target_duration_ms: int | None = None,
+    skip_plan: bool = False,
+    subtitles_from_db: bool = False,
 ) -> str:
     """Schedule ``render_draft(project_id, draft_id=…, force=…, target_duration_ms=…)``.
 
     The API endpoint creates the Draft row up-front (so the response can carry
     a real draft id and the UI can start polling immediately) and hands the id
     to the worker — the worker no longer creates its own row.
+
+    M7 added two flags:
+      * ``skip_plan`` — re-use the stored ``cut_plan_json`` instead of running
+        the Gemini planner. Used for the timeline-reorder re-render path.
+      * ``subtitles_from_db`` — load subtitles from ``subtitle_cues`` rows
+        instead of regenerating from transcripts. Used for the manual-edit
+        re-burn path. ``skip_plan`` is generally also set when this is true.
 
     Returns the RQ job id. Like :func:`enqueue_asset_analysis`, the job target
     is referenced by string so the api container never imports the worker
@@ -82,17 +93,51 @@ def enqueue_project_edit(
     job_kwargs: dict[str, Any] = {"draft_id": draft_id, "force": force}
     if target_duration_ms is not None:
         job_kwargs["target_duration_ms"] = target_duration_ms
+    if skip_plan:
+        job_kwargs["skip_plan"] = True
+    if subtitles_from_db:
+        job_kwargs["subtitles_from_db"] = True
     job = queue.enqueue(
         RENDER_DRAFT_FN,
         args=(project_id,),
         kwargs=job_kwargs,
     )
     logger.info(
-        "enqueued render_draft(project_id=%d, draft_id=%d, force=%s, target_duration_ms=%s) as job %s",
+        "enqueued render_draft(project_id=%d, draft_id=%d, force=%s, skip_plan=%s, subtitles_from_db=%s, target_duration_ms=%s) as job %s",
         project_id,
         draft_id,
         force,
+        skip_plan,
+        subtitles_from_db,
         target_duration_ms,
+        job.id,
+    )
+    return job.id
+
+
+def enqueue_draft_export(
+    draft_id: int,
+    *,
+    aspect: str,
+    height: int,
+) -> str:
+    """Schedule ``export_draft(draft_id, aspect, height)`` on the editing queue.
+
+    The export is a pure-ffmpeg derivative of the existing v{N}.mp4; no DB
+    state changes beyond writing a record of the export to logs. The
+    output filename convention lives in ``services.exports.derive_filename``.
+    """
+    queue = Queue(EDITING_QUEUE, connection=_redis(), default_timeout=EXPORT_JOB_TIMEOUT_SECONDS)
+    job = queue.enqueue(
+        EXPORT_DRAFT_FN,
+        args=(draft_id,),
+        kwargs={"aspect": aspect, "height": height},
+    )
+    logger.info(
+        "enqueued export_draft(draft_id=%d, aspect=%s, height=%d) as job %s",
+        draft_id,
+        aspect,
+        height,
         job.id,
     )
     return job.id

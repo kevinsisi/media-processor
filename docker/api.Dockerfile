@@ -41,4 +41,8 @@ ENV PYTHONPATH=/app/src
 
 EXPOSE 8000
 
-CMD ["uvicorn", "media_processor.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# M7 — apply pending alembic migrations on every api boot. Removes the
+# need to remember `docker exec api alembic upgrade head` after a deploy
+# that ships a new migration. The api container is the canonical
+# migration runner; worker stays stateless.
+CMD ["sh", "-c", "alembic upgrade head && uvicorn media_processor.api.main:app --host 0.0.0.0 --port 8000"]

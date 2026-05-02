@@ -14,6 +14,9 @@ import type {
   DraftComment,
   DraftCommentCreate,
   DraftDetail,
+  DraftExportRequest,
+  DraftExportResponse,
+  DraftReorderRequest,
   DraftSummary,
   EditTriggerRequest,
   EditTriggerResponse,
@@ -29,6 +32,8 @@ import type {
   ScriptOut,
   ScriptUpsert,
   SettingsOut,
+  SubtitleCueOut,
+  SubtitleCuePatch,
   SyncFromManagerIn,
   SyncFromManagerOut,
   TranscriptOut,
@@ -226,6 +231,55 @@ export class ApiClient {
   cancelDraftRender(draftId: number): Promise<DraftDetail> {
     return this.request<DraftDetail>(`/drafts/${draftId}/cancel`, {
       method: "POST",
+    });
+  }
+
+  // ----- M7 — manual control -----
+
+  reorderDraftSegments(
+    draftId: number,
+    payload: DraftReorderRequest,
+  ): Promise<DraftDetail> {
+    return this.request<DraftDetail>(`/drafts/${draftId}/order`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  }
+
+  fetchDraftSubtitles(draftId: number): Promise<SubtitleCueOut[]> {
+    return this.get<SubtitleCueOut[]>(`/drafts/${draftId}/subtitles`);
+  }
+
+  patchDraftSubtitle(
+    draftId: number,
+    idx: number,
+    payload: SubtitleCuePatch,
+  ): Promise<SubtitleCueOut> {
+    return this.request<SubtitleCueOut>(
+      `/drafts/${draftId}/subtitles/${idx}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  rebuildDraftSubtitles(draftId: number): Promise<DraftDetail> {
+    return this.request<DraftDetail>(`/drafts/${draftId}/rebuild-subtitles`, {
+      method: "POST",
+    });
+  }
+
+  exportDraft(
+    draftId: number,
+    payload: DraftExportRequest,
+  ): Promise<DraftExportResponse> {
+    return this.request<DraftExportResponse>(`/drafts/${draftId}/export`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
     });
   }
 

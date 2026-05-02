@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from media_processor.models.draft_comment import DraftComment
     from media_processor.models.project import AssetSegment, Project
     from media_processor.models.review import Review
+    from media_processor.models.subtitle_cue import SubtitleCueRow
 
 
 def _in_list(values: tuple[str, ...]) -> str:
@@ -82,6 +83,13 @@ class Draft(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
         order_by="DraftComment.created_at",
+    )
+    subtitle_cues: Mapped[list[SubtitleCueRow]] = relationship(
+        "SubtitleCueRow",
+        back_populates="draft",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="SubtitleCueRow.idx",
     )
 
     __table_args__ = (

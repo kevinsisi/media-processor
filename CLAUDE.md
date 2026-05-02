@@ -47,6 +47,17 @@ Treat the following skill files as active workflow rules for this workspace, eve
 - Treat `skills/frontend-design/SKILL.md` as mandatory for frontend creation or redesign work
 - Treat `skills/key-pool-standard/SKILL.md` as mandatory for any AI key-pool, quota, or multi-key retry implementation
 - Treat `skills/skill-creator/SKILL.md` as the active workflow when creating, improving, or evaluating a skill
+- Treat `.claude/skills/superpowers/using-superpowers/SKILL.md` as the bootstrap rule for cross-cutting workflow skills (load this before deep code work)
+- Treat `.claude/skills/superpowers/brainstorming/SKILL.md` as mandatory before any new feature proposal or major redesign
+- Treat `.claude/skills/superpowers/writing-plans/SKILL.md` and `.claude/skills/superpowers/executing-plans/SKILL.md` as the canonical plan + execution loop for multi-step features
+- Treat `.claude/skills/superpowers/test-driven-development/SKILL.md` as the default when adding service-level Python logic with tests (orchestrator stages, planners, mixers)
+- Treat `.claude/skills/superpowers/systematic-debugging/SKILL.md` as mandatory whenever a render / Whisper / Gemini failure mode is unclear
+- Treat `.claude/skills/superpowers/verification-before-completion/SKILL.md` as mandatory before claiming any deploy / render result is correct
+- Treat `.claude/skills/superpowers/using-git-worktrees/SKILL.md` as the reference when the user explicitly asks to start a worktree
+- Treat `skills/gemini-prompts/asset-score/SKILL.md` as the canonical reference for the per-asset scoring prompt (`edit_planner._ASSET_SCORE_PROMPT`)
+- Treat `skills/gemini-prompts/scene-tag/SKILL.md` as the canonical reference for the Vision tagging prompt (`scene_tagging._VISION_PROMPT`)
+- Treat `skills/gemini-prompts/script-coverage/SKILL.md` as the canonical reference for the script-vs-transcript coverage prompt (`script_coverage._PROMPT_TEMPLATE`)
+- Treat `skills/gemini-prompts/llm-patcher/SKILL.md` as the canonical reference for the M5 profile-patch prompt (`llm_patcher._SYSTEM_PROMPT`)
 - Treat `.github/skills/openspec-explore/SKILL.md` as the active workflow when the user wants exploration without implementation
 - Treat `.github/skills/openspec-propose/SKILL.md` as the active workflow when creating a new OpenSpec change
 - Treat `.github/skills/openspec-apply-change/SKILL.md` as the active workflow when implementing an OpenSpec change
@@ -64,8 +75,10 @@ Mirror locations (`.claude/skills/`, `.gemini/skills/`, `.opencode/skills/`, `.g
 ## Project Architecture Pointers
 
 CLAUDE.md is meta-rules; concrete project state lives elsewhere. When you need to understand what's currently in the codebase, prefer in this order:
-- `openspec/changes/` — per-milestone proposals + tasks (latest: `m6-rhythm-transitions-bgm`, version 0.12.0).
+- `ROADMAP.md` — Phase 6–9 全程路線圖（已完成/規劃中），含每個 sub-task 驗收標準。新對話開頭先讀這個就能對齊大方向。
+- `openspec/changes/` — per-milestone proposals + tasks (latest: `m7-manual-control`, version 0.13.x; 上一版 `m6-rhythm-transitions-bgm`, 0.12.0).
 - The auto-memory index at `~/.claude/projects/D--GitClone--HomeProject-media-processor/memory/MEMORY.md` — non-obvious deploy / runtime quirks (Tailscale routing, GPU runtime, drafts/BGM storage, key pools, etc.).
+- `skills/gemini-prompts/` — 4 個 reusable Gemini prompt skill（asset-score / scene-tag / script-coverage / llm-patcher），改 prompt 前先看這裡。
 - The code itself — `services/edit_planner.py` for the per-asset Gemini fanout, `services/video_renderer.py` for the xfade chain + drawtext subtitle burn-in, `services/bgm_mixer.py` for the voice-ducked BGM stage.
 
 ## When To Remove Or Replace Skills

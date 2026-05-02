@@ -32,6 +32,7 @@ from media_processor.models import (
     DraftStatus,
     EditStep,
     Project,
+    SubtitleCueRow,
 )
 from media_processor.profile.loader import ProfileSpec, load_profile
 from media_processor.services import bgm_mixer, edit_planner, subtitles, video_renderer
@@ -303,6 +304,73 @@ def _try_load_profile(profile_name: str) -> ProfileSpec | None:
         return None
 
 
+async def _load_stored_plan(draft_id: int) -> CutPlan:
+    """Reconstruct the CutPlan from ``Draft.cut_plan_json`` for the M7
+    skip-plan path. Raises if the row has no stored plan — the only legit
+    caller is a re-render after a manual reorder, and that always has a
+    plan persisted."""
+    async with async_session_maker() as session:
+        draft = await session.get(Draft, draft_id)
+        if draft is None:
+            raise RuntimeError(f"draft {draft_id} not found while loading stored plan")
+        if not isinstance(draft.cut_plan_json, dict) or not draft.cut_plan_json.get("segments"):
+            raise RuntimeError(
+                f"draft {draft_id} has no stored cut_plan_json; cannot skip plan stage"
+            )
+        return edit_planner.deserialise_plan(dict(draft.cut_plan_json))
+
+
+async def _persist_subtitle_cues(draft_id: int, srt_text: str) -> None:
+    """Truncate + reload ``subtitle_cues`` for ``draft_id`` from a freshly
+    rendered SRT. Skipping the persist step keeps the M7.2 editor safe —
+    if SRT is empty the table is cleared so the UI shows "no cues" rather
+    than stale rows from a prior render."""
+    cues = subtitles.parse_srt(srt_text) if srt_text else []
+    async with async_session_maker() as session:
+        await session.execute(delete(SubtitleCueRow).where(SubtitleCueRow.draft_id == draft_id))
+        for cue in cues:
+            session.add(
+                SubtitleCueRow(
+                    draft_id=draft_id,
+                    idx=cue.sequence,
+                    start_ms=cue.timeline_start_ms,
+                    end_ms=cue.timeline_end_ms,
+                    text=cue.text,
+                )
+            )
+        await session.commit()
+
+
+async def _load_subtitle_srt_from_db(draft_id: int) -> str:
+    """Render an SRT from the user-edited ``subtitle_cues`` rows. Returns
+    empty string when the draft has no cues (treated as "no subtitles" by
+    the renderer)."""
+    async with async_session_maker() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(SubtitleCueRow)
+                    .where(SubtitleCueRow.draft_id == draft_id)
+                    .order_by(SubtitleCueRow.idx)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    if not rows:
+        return ""
+    cues = [
+        subtitles.SubtitleCue(
+            sequence=int(r.idx),
+            timeline_start_ms=int(r.start_ms),
+            timeline_end_ms=int(r.end_ms),
+            text=str(r.text),
+        )
+        for r in rows
+    ]
+    return subtitles.render_srt(cues)
+
+
 async def _plan_stage(project_id: int, target_duration_ms: int) -> CutPlan:
     """Run the Gemini planner with key-pool + fallback."""
     async with async_session_maker() as session:
@@ -352,6 +420,8 @@ async def run_render(
     draft_id: int | None = None,
     force: bool = False,
     target_duration_ms: int | None = None,
+    skip_plan: bool = False,
+    subtitles_from_db: bool = False,
 ) -> dict[str, Any]:
     """Run the full M5 pipeline for ``project_id`` and return a summary.
 
@@ -410,11 +480,20 @@ async def run_render(
             profile_target_ms, int(source_total_ms or 0), int(asset_count or 0)
         )
 
-    # Stage 1 — plan.
+    # Stage 1 — plan. M7.1 skip-plan path: re-use the stored plan instead
+    # of re-running Gemini (used after a manual timeline reorder).
     await _set_stage_state(handle.draft_id, EditStep.PLAN.value, "running")
     try:
-        plan = await _plan_stage(project_id, target_duration_ms)
-        await _persist_plan(handle, plan)
+        if skip_plan:
+            plan = await _load_stored_plan(handle.draft_id)
+            logger.info(
+                "draft %d: skipping plan stage; reusing stored cut_plan_json (%d segments)",
+                handle.draft_id,
+                len(plan.segments),
+            )
+        else:
+            plan = await _plan_stage(project_id, target_duration_ms)
+            await _persist_plan(handle, plan)
     except Exception as exc:  # noqa: BLE001 — record + abort.
         reason = _failure_reason(exc)
         logger.exception("plan stage failed for project %d", project_id)
@@ -427,8 +506,17 @@ async def run_render(
 
     # Build SRT side-output BEFORE rendering so we can pass it into
     # the burn-in stage. Subtitle generation is pure-Python and cheap.
+    # M7.2 path: when subtitles_from_db is set the user has manually
+    # edited cues — render from the DB rows instead of regenerating from
+    # transcripts (which would discard the edits).
     project, asset_paths, transcripts = await _gather_render_inputs(project_id)
-    srt_text = subtitles.build_srt(plan, transcripts)
+    if subtitles_from_db:
+        srt_text = await _load_subtitle_srt_from_db(handle.draft_id)
+        logger.info(
+            "draft %d: subtitles loaded from DB (%d chars)", handle.draft_id, len(srt_text)
+        )
+    else:
+        srt_text = subtitles.build_srt(plan, transcripts)
     output_path, srt_path = _output_paths(project_id, handle.version)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     if srt_text:
@@ -540,6 +628,20 @@ async def run_render(
             summary["stages"][EditStep.BGM.value] = f"failed:{type(exc).__name__}"
     else:
         await update_state(EditStep.BGM.value, "done")
+
+    # M7.2 — persist subtitle cues to ``subtitle_cues`` so the editor can
+    # show / patch them. We only do this on the initial generation path
+    # (subtitles_from_db=False) — when re-rendering with edited cues the
+    # rows already reflect the user's edits and re-persisting would
+    # round-trip through parse_srt unnecessarily.
+    if not subtitles_from_db:
+        try:
+            await _persist_subtitle_cues(handle.draft_id, srt_text)
+        except Exception:  # noqa: BLE001 — non-fatal; the mp4 still ships.
+            logger.exception(
+                "failed to persist subtitle cues for draft %d; mp4 unaffected",
+                handle.draft_id,
+            )
 
     await _mark_ready(
         handle.draft_id,

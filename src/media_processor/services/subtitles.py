@@ -142,6 +142,82 @@ def build_cues(
     ]
 
 
+_SRT_TC_RE = (
+    r"(?P<h>\d+):(?P<m>\d{1,2}):(?P<s>\d{1,2})[,.](?P<ms>\d{1,3})"
+)
+
+
+def _parse_timecode(token: str) -> int:
+    """Reverse of ``_format_timecode`` — accept comma OR dot millis separator."""
+    import re
+
+    m = re.fullmatch(_SRT_TC_RE, token.strip())
+    if m is None:
+        raise ValueError(f"bad SRT timecode: {token!r}")
+    return (
+        int(m["h"]) * 3_600_000
+        + int(m["m"]) * 60_000
+        + int(m["s"]) * 1_000
+        + int(m["ms"])
+    )
+
+
+def parse_srt(text: str) -> list[SubtitleCue]:
+    """Parse an SRT document back into ``SubtitleCue`` rows.
+
+    Used by the M7.2 subtitle editor: after the initial subtitles stage
+    runs, the orchestrator persists each parsed cue into ``subtitle_cues``
+    so the user can edit text inline. ``rebuild-subtitles`` then writes a
+    fresh SRT from the edited rows.
+
+    Tolerant: blank-block separators are required, but extra trailing
+    whitespace, BOM, and dot-vs-comma millis separators are accepted.
+    Cues that fail to parse are skipped rather than raising.
+    """
+    if not text:
+        return []
+    raw = text.lstrip("﻿").strip()
+    if not raw:
+        return []
+    blocks = [b.strip() for b in raw.replace("\r\n", "\n").split("\n\n") if b.strip()]
+    cues: list[SubtitleCue] = []
+    for block in blocks:
+        lines = block.split("\n")
+        # First line is sequence (digits); second line is "start --> end";
+        # remaining lines are body. Some authoring tools omit the sequence —
+        # fall back to position-based numbering.
+        if len(lines) < 2:
+            continue
+        if lines[0].strip().isdigit():
+            seq = int(lines[0].strip())
+            time_line = lines[1].strip() if len(lines) >= 2 else ""
+            body_lines = lines[2:]
+        else:
+            seq = len(cues) + 1
+            time_line = lines[0].strip()
+            body_lines = lines[1:]
+        if "-->" not in time_line:
+            continue
+        start_token, end_token = (t.strip() for t in time_line.split("-->", 1))
+        try:
+            start_ms = _parse_timecode(start_token)
+            end_ms = _parse_timecode(end_token.split()[0])
+        except ValueError:
+            continue
+        body = "\n".join(body_lines).strip()
+        if not body or end_ms <= start_ms:
+            continue
+        cues.append(
+            SubtitleCue(
+                sequence=seq,
+                timeline_start_ms=start_ms,
+                timeline_end_ms=end_ms,
+                text=body,
+            )
+        )
+    return cues
+
+
 def render_srt(cues: list[SubtitleCue]) -> str:
     """Serialise cues to an SRT document. Returns an empty string if none."""
     if not cues:
@@ -169,5 +245,6 @@ __all__ = [
     "SubtitleCue",
     "build_cues",
     "build_srt",
+    "parse_srt",
     "render_srt",
 ]

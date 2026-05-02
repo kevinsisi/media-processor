@@ -123,6 +123,8 @@ export interface DraftSummary {
 }
 
 export interface DraftSegmentOut {
+  // M7.1 — needed for the reorder API which takes a permutation of ids.
+  id: number;
   order: number;
   asset_segment_id: number | null;
   asset_id: number | null;
@@ -168,6 +170,40 @@ export interface DraftComment {
 export interface DraftCommentCreate {
   author: string;
   body: string;
+}
+
+// ----- M7 — manual control types -----
+
+export interface DraftReorderRequest {
+  // New permutation of the existing DraftSegment ids (full replacement).
+  orders: number[];
+}
+
+export interface SubtitleCueOut {
+  idx: number;
+  start_ms: number;
+  end_ms: number;
+  text: string;
+  updated_at: string;
+}
+
+export interface SubtitleCuePatch {
+  text: string;
+}
+
+export type ExportAspect = "9:16" | "4:5" | "1:1";
+
+export interface DraftExportRequest {
+  aspect: ExportAspect;
+  height: number;
+}
+
+export interface DraftExportResponse {
+  draft_id: number;
+  aspect: string;
+  height: number;
+  job_id: string;
+  output_filename: string;
 }
 
 export interface AssetTagOut {

@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ApiError, apiClient } from "../api/client";
+import DraggableTimeline from "../components/DraggableTimeline";
+import ExportSheet from "../components/ExportSheet";
+import SubtitleEditor from "../components/SubtitleEditor";
 import type { DraftComment, DraftDetail, DraftSummary } from "../api/types";
 import { useDraftPolling } from "../hooks/useDraftPolling";
 import {
   EDIT_STEP_LABELS,
-  labelForCutSource,
   labelForDraftStatus,
   labelForStepState,
 } from "../i18n/tags";
@@ -26,13 +28,6 @@ const DURATION_PRESETS_S = [30, 60, 90, 120] as const;
 const DEFAULT_DURATION_S = 60;
 const DURATION_MIN_S = 10;
 const DURATION_MAX_S = 300;
-
-function formatTimecode(ms: number): string {
-  const total = Math.max(0, Math.floor(ms / 1000));
-  const m = Math.floor(total / 60);
-  const s = total % 60;
-  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-}
 
 function classifyStepState(value: string | undefined): string {
   if (!value) return "pending";
@@ -328,76 +323,6 @@ function ProgressTracker({ steps }: ProgressTrackerProps) {
         );
       })}
     </div>
-  );
-}
-
-interface TimelineStripProps {
-  draft: DraftDetail;
-  videoRef: React.RefObject<HTMLVideoElement>;
-}
-
-function TimelineStrip({ draft, videoRef }: TimelineStripProps) {
-  const segments = draft.segments;
-  const totalMs = useMemo(
-    () =>
-      segments.length === 0
-        ? 0
-        : Math.max(...segments.map((s) => s.on_timeline_end_ms)),
-    [segments],
-  );
-  if (segments.length === 0) {
-    return (
-      <div className="timeline-strip timeline-strip--empty mono">
-        尚無片段
-      </div>
-    );
-  }
-  return (
-    <ol className="timeline-strip" aria-label="剪輯時間軸">
-      {segments.map((seg) => {
-        const cls =
-          seg.source_kind === "scripted"
-            ? "timeline-cell--scripted"
-            : "timeline-cell--improv";
-        return (
-          <li
-            key={`seg-${seg.order}`}
-            className={`timeline-cell ${cls}`}
-          >
-            <button
-              type="button"
-              className="timeline-cell__btn"
-              onClick={() => {
-                const v = videoRef.current;
-                if (!v) return;
-                v.currentTime = seg.on_timeline_start_ms / 1000;
-                void v.play().catch(() => {});
-              }}
-            >
-              <span className="timeline-cell__order mono">#{seg.order + 1}</span>
-              <span className="timeline-cell__range mono">
-                {formatTimecode(seg.on_timeline_start_ms)}
-                {" → "}
-                {formatTimecode(seg.on_timeline_end_ms)}
-              </span>
-              <span className="timeline-cell__chip">
-                {labelForCutSource(seg.source_kind)}
-              </span>
-              {seg.plan_reason && (
-                <span className="timeline-cell__reason" title={seg.plan_reason}>
-                  {seg.plan_reason}
-                </span>
-              )}
-              <span className="timeline-cell__total mono">
-                {totalMs > 0
-                  ? `${Math.round(((seg.on_timeline_end_ms - seg.on_timeline_start_ms) / totalMs) * 100)}%`
-                  : ""}
-              </span>
-            </button>
-          </li>
-        );
-      })}
-    </ol>
   );
 }
 
@@ -722,9 +647,11 @@ export default function ProjectEdit() {
               onChange={setDurationSec}
               disabled={triggering}
             />
-            <TimelineStrip
+            <DraggableTimeline
               draft={draft}
               videoRef={videoRef as React.RefObject<HTMLVideoElement>}
+              onReorderStart={() => void refreshDrafts().catch(() => {})}
+              onReorderError={(msg) => setTriggerError(msg)}
             />
             {draft.cut_plan?.notes && (
               <p className="edit-card__hint mono">「{draft.cut_plan.notes}」</p>
@@ -734,7 +661,18 @@ export default function ProjectEdit() {
                 已切換為備用規劃（{draft.cut_plan.fallback_reason || "未知原因"}）。
               </p>
             )}
+            <ExportSheet
+              draftId={draft.id}
+              draftVersion={draft.version}
+              ready
+            />
           </section>
+          <SubtitleEditor
+            draftId={draft.id}
+            locked={triggering || awaitingFirstFetch || showProcessing}
+            onRebuildStart={() => void refreshDrafts().catch(() => {})}
+            onRebuildError={(msg) => setTriggerError(msg)}
+          />
         </>
       )}
 

@@ -1,0 +1,133 @@
+.dt-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.dt-timeline--empty {
+  padding: 1.5rem;
+  text-align: center;
+  color: var(--color-text-muted, #888);
+}
+
+.dt-timeline--locked {
+  opacity: 0.6;
+}
+
+.dt-timeline__hint {
+  font-size: 0.75rem;
+  color: var(--color-text-muted, #888);
+  margin: 0;
+  letter-spacing: 0.02em;
+}
+
+.dt-timeline__list {
+  list-style: none;
+  margin: 0;
+  padding: 0.25rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.dt-cell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 0 1 calc(50% - 0.25rem);
+  min-width: 9rem;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02));
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 0.5rem 0.75rem;
+  touch-action: none;
+  user-select: none;
+}
+
+.dt-cell--scripted {
+  border-left: 3px solid #84d9c4;
+}
+
+.dt-cell--improv {
+  border-left: 3px solid #f4b942;
+}
+
+.dt-cell--dragging {
+  z-index: 10;
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.45);
+  cursor: grabbing;
+}
+
+.dt-cell__handle {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.5rem;
+  cursor: grab;
+  padding: 0.1rem 0.3rem;
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.55);
+  letter-spacing: -0.1em;
+  font-weight: 700;
+}
+
+.dt-cell__handle:active {
+  cursor: grabbing;
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.dt-cell__btn {
+  background: none;
+  border: 0;
+  color: inherit;
+  padding: 0;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font: inherit;
+}
+
+.dt-cell__order {
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.dt-cell__range {
+  font-size: 0.85rem;
+}
+
+.dt-cell__chip {
+  align-self: flex-start;
+  font-size: 0.72rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  letter-spacing: 0.04em;
+}
+
+.dt-cell--scripted .dt-cell__chip {
+  background: rgba(132, 217, 196, 0.18);
+  color: #b9f0e0;
+}
+
+.dt-cell--improv .dt-cell__chip {
+  background: rgba(244, 185, 66, 0.18);
+  color: #ffd57a;
+}
+
+.dt-cell__reason {
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.55);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dt-cell__total {
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.7);
+  align-self: flex-end;
+}

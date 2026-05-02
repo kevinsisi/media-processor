@@ -917,6 +917,40 @@ def serialise_plan(plan_obj: CutPlan) -> dict[str, Any]:
     }
 
 
+def deserialise_plan(blob: dict[str, Any]) -> CutPlan:
+    """Inverse of :func:`serialise_plan`. Used by the M7 skip-plan path so a
+    reordered plan can be reloaded from ``Draft.cut_plan_json`` without
+    re-calling Gemini.
+    """
+    raw_segments = blob.get("segments") or []
+    segments: list[CutPlanSegment] = []
+    for seg in raw_segments:
+        if not isinstance(seg, dict):
+            continue
+        segments.append(
+            CutPlanSegment(
+                order=int(seg["order"]),
+                asset_id=int(seg["asset_id"]),
+                asset_start_ms=int(seg["asset_start_ms"]),
+                asset_end_ms=int(seg["asset_end_ms"]),
+                source_kind=str(seg["source_kind"]),
+                reason=str(seg.get("reason", "")),
+                transition_to_next=str(seg.get("transition_to_next", "dissolve")),
+            )
+        )
+    segments.sort(key=lambda s: s.order)
+    return CutPlan(
+        schema_version=str(blob.get("schema_version", SCHEMA_VERSION)),
+        target_duration_ms=int(blob.get("target_duration_ms", 0)),
+        target_aspect_ratio=str(blob.get("target_aspect_ratio", "")),
+        profile_name=str(blob.get("profile_name", "")),
+        notes=str(blob.get("notes", "")),
+        used_fallback=bool(blob.get("used_fallback", False)),
+        fallback_reason=blob.get("fallback_reason"),
+        segments=tuple(segments),
+    )
+
+
 __all__ = [
     "ASSET_SCORE_SCHEMA_VERSION",
     "DEFAULT_TARGET_DURATION_MS",
@@ -927,6 +961,7 @@ __all__ = [
     "EditPlanError",
     "EditPlanInvalidError",
     "EditPlanQuotaError",
+    "deserialise_plan",
     "heuristic_fallback",
     "plan",
     "serialise_plan",

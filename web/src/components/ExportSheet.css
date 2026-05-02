@@ -1,0 +1,129 @@
+.export-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.export-sheet__trigger {
+  align-self: flex-start;
+}
+
+.export-sheet__panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+}
+
+.export-sheet__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.export-sheet__title {
+  margin: 0;
+  font-size: 1rem;
+  letter-spacing: 0.04em;
+}
+
+.export-sheet__close {
+  background: none;
+  border: 0;
+  color: inherit;
+  font-size: 1.1rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.export-sheet__close:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.export-sheet__group {
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.export-sheet__group legend {
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.6);
+  margin-bottom: 0.4rem;
+  letter-spacing: 0.04em;
+}
+
+.export-sheet__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.export-chip {
+  flex: 1 1 30%;
+  min-width: 5.5rem;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: inherit;
+  border-radius: 12px;
+  padding: 0.55rem 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  align-items: center;
+  cursor: pointer;
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+
+.export-chip:hover {
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.export-chip--active {
+  background: rgba(132, 217, 196, 0.18);
+  border-color: rgba(132, 217, 196, 0.55);
+  color: #b9f0e0;
+}
+
+.export-chip__label {
+  font-size: 1rem;
+  letter-spacing: 0.04em;
+}
+
+.export-chip__sub {
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.export-chip--active .export-chip__sub {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.export-sheet__hint {
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.55);
+  margin: 0.4rem 0 0;
+}
+
+.export-sheet__error {
+  color: #ff9a9a;
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+.export-sheet__queued {
+  font-size: 0.78rem;
+  color: rgba(132, 217, 196, 0.95);
+  margin: 0;
+}
+
+.export-sheet__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.4rem;
+}
