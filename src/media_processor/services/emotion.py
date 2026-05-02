@@ -252,6 +252,18 @@ def classify_asset(media_path: Path, duration_ms: int) -> EmotionResult:
         output_facial_transformation_matrixes=False,
     )
 
+    # MediaPipe's lib loader raises a bare OSError when a native dep is
+    # missing (e.g. libGLESv2.so.2 on a slim Ubuntu image) — translate
+    # that into the same EmotionUnavailableError the import-time guard
+    # uses so the orchestrator records ``failed:model-missing`` rather
+    # than ``failed:model-error:OSError``.
+    try:
+        landmarker_ctx = mp.tasks.vision.FaceLandmarker.create_from_options(options)
+    except OSError as exc:
+        raise EmotionUnavailableError(
+            f"MediaPipe FaceLandmarker could not load native libs: {exc}"
+        ) from exc
+
     cap = cv2.VideoCapture(str(media_path))
     if not cap.isOpened():
         raise EmotionAnalysisError(f"OpenCV could not open {media_path}")
@@ -260,7 +272,7 @@ def classify_asset(media_path: Path, duration_ms: int) -> EmotionResult:
     sampled = 0
     faces_seen = 0
     try:
-        with mp.tasks.vision.FaceLandmarker.create_from_options(options) as landmarker:
+        with landmarker_ctx as landmarker:
             ts = 0
             while ts < duration_ms:
                 cap.set(cv2.CAP_PROP_POS_MSEC, ts)

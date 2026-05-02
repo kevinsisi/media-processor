@@ -37,6 +37,12 @@ RUN apt-get update \
         build-essential libpq-dev \
         ffmpeg \
         libgl1 libglib2.0-0 \
+        libgles2-mesa libegl1 \
+        # ^^^ MediaPipe Tasks API (services/emotion.py) needs the OpenGL ES
+        # client lib (libGLESv2.so.2) at FaceLandmarker.create_from_options
+        # time even when the calculator graph is CPU-only; without these
+        # the loader raises OSError("libGLESv2.so.2: cannot open shared
+        # object file") and the emotion analysis step fails on every asset.
         fonts-noto-cjk fontconfig \
  && fc-cache -f \
  && curl -sS https://bootstrap.pypa.io/get-pip.py | python3.11 \
