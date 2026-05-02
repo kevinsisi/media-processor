@@ -404,6 +404,23 @@ async def reorder_draft_segments(
         )
 
     by_id = {seg.id: seg for seg in draft.segments}
+    # Two-phase update — the table has a UNIQUE(draft_id, order) constraint
+    # (``uq_draft_segments_order``) and SQLAlchemy autoflushes a single
+    # row update at a time. Setting the new orders in one pass collides
+    # mid-loop because each fresh assignment temporarily duplicates the
+    # order of a sibling that hasn't been updated yet (e.g. setting
+    # segment A's order to 0 while segment B still has order 0).
+    #
+    # Park every row at a guaranteed-unused negative offset first, flush
+    # so the constraint sees no duplicates, THEN write the final 0..N-1
+    # values. Negative ints aren't possible from any normal write path
+    # so the temporary state can't leak into a stuck row even if a
+    # subsequent SQL statement fails.
+    parking_offset = -1 - len(requested_ids)  # e.g. for N=12 → -13..-2
+    for tmp_idx, seg in enumerate(draft.segments):
+        seg.order = parking_offset + tmp_idx
+    await session.flush()
+
     cursor_ms = 0
     new_plan_segments: list[dict[str, Any]] = []
     for new_order, seg_id in enumerate(requested_ids):
