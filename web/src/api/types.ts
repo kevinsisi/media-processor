@@ -158,6 +158,12 @@ export interface EditTriggerRequest {
   // Default true on the backend; the UI exposes a switch so tripod /
   // gimbal projects can opt out to halve render time.
   stabilize?: boolean;
+  // v0.14.4 — toggle subtitle burn-in. False ships an mp4 without
+  // burned captions (the SRT side-output is also skipped).
+  subtitles?: boolean;
+  // v0.14.4 — toggle xfade transitions. False uses hard cuts (concat
+  // demuxer plain mux, no overlap, no xfade re-encode).
+  transitions?: boolean;
 }
 
 export interface EditTriggerResponse {

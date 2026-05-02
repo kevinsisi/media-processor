@@ -266,6 +266,8 @@ async def trigger_project_edit(
         force=payload.force,
         target_duration_ms=target_duration_ms,
         stabilize=payload.stabilize,
+        subtitles=payload.subtitles,
+        transitions=payload.transitions,
     )
     return EditTriggerResponse(
         project_id=project_id,

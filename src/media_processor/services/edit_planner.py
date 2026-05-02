@@ -26,6 +26,9 @@ from sqlalchemy.orm import selectinload
 from media_processor.models import (
     Asset,
     AssetTranscript,
+    Draft,
+    DraftComment,
+    DraftStatus,
     Project,
     Script,
     ScriptCoverage,
@@ -346,6 +349,7 @@ MAX_SEGMENT_DURATION_S = 6.0
 _ASSET_SCORE_PROMPT = (
     "你是影片剪輯助手，正在評估「一段」素材是否適合放進最終剪輯。\n"
     "你只需要看這段素材本身——其他素材會由其他助手獨立評估，最後由系統合併。\n\n"
+    "{prior_feedback_block}"
     "整支片要傳達的腳本：\n{script_body}\n\n"
     "這段素材：\n"
     "- asset_id: {asset_id}\n"
@@ -382,13 +386,32 @@ _ASSET_SCORE_PROMPT = (
 )
 
 
+def _format_prior_feedback_block(prior_feedback: str) -> str:
+    """Render the optional ``上一版回饋`` section of the per-asset prompt.
+
+    Returns an empty string when there's no prior feedback, otherwise a
+    block the model can read and weigh — e.g. "蚊子館那段太多" should
+    push the score for similar transcripts down.
+    """
+    body = (prior_feedback or "").strip()
+    if not body:
+        return ""
+    return (
+        "【上一版使用者回饋（請參考並改進；不要重複同樣的問題）】\n"
+        f"{body}\n\n"
+    )
+
+
 def _build_asset_prompt(
     asset: Asset,
     transcript: AssetTranscript | None,
     coverage: ScriptCoverage | None,
     script_body: str,
+    *,
+    prior_feedback: str = "",
 ) -> str:
     return _ASSET_SCORE_PROMPT.format(
+        prior_feedback_block=_format_prior_feedback_block(prior_feedback),
         script_body=script_body.strip() or "（無腳本）",
         asset_id=asset.id,
         duration_s=asset.duration_ms / 1000,
@@ -873,6 +896,67 @@ class _ProjectContext:
     transcripts: dict[int, AssetTranscript]
     coverage: dict[int, ScriptCoverage]
     asset_bounds: dict[int, int]
+    # v0.14.4 — concatenated user feedback from prior versions of this
+    # project's draft (latest comments + last prompt_feedback). Empty
+    # string for first-render projects. Surfaces inside the per-asset
+    # Gemini prompt so the model can adjust scoring based on what the
+    # operator told it last time.
+    prior_feedback: str = ""
+
+
+async def _load_prior_feedback(session: AsyncSession, project_id: int) -> str:
+    """Pull operator feedback from earlier draft versions of this project.
+
+    Two sources, concatenated newest-first:
+      * ``DraftComment.body`` rows from the most recent ready / approved
+        / failed draft (the version the user actually reacted to).
+      * ``Draft.prompt_feedback`` from the same draft (the structured
+        rejection note from the patch endpoint).
+
+    Returns an empty string when this is the first render for the
+    project so the planner can branch on truthiness without worrying
+    about ``None``. Capped at ~2000 chars so a long discussion thread
+    can't blow the per-asset prompt context.
+    """
+    latest = (
+        await session.execute(
+            select(Draft)
+            .where(Draft.project_id == project_id)
+            .where(Draft.status != DraftStatus.PENDING.value)
+            .where(Draft.status != DraftStatus.PROCESSING.value)
+            .order_by(Draft.version.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if latest is None:
+        return ""
+
+    parts: list[str] = []
+    if latest.prompt_feedback:
+        parts.append(f"前一版（v{latest.version}）回饋：{latest.prompt_feedback.strip()}")
+
+    comments = (
+        (
+            await session.execute(
+                select(DraftComment)
+                .where(DraftComment.draft_id == latest.id)
+                .order_by(DraftComment.created_at.desc())
+                .limit(20)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for c in comments:
+        body = (c.body or "").strip()
+        if not body:
+            continue
+        parts.append(f"留言（{c.author}）：{body}")
+
+    joined = "\n".join(parts)
+    if len(joined) > 2000:
+        joined = joined[:2000] + "…(已截斷)"
+    return joined
 
 
 async def _load_project_context(session: AsyncSession, project_id: int) -> _ProjectContext:
@@ -923,6 +1007,8 @@ async def _load_project_context(session: AsyncSession, project_id: int) -> _Proj
     )
     coverage = {c.asset_id: c for c in cov_rows}
 
+    prior_feedback = await _load_prior_feedback(session, project_id)
+
     return _ProjectContext(
         project=project,
         script_body=script_body,
@@ -930,6 +1016,7 @@ async def _load_project_context(session: AsyncSession, project_id: int) -> _Proj
         transcripts=transcripts,
         coverage=coverage,
         asset_bounds={a.id: int(a.duration_ms) for a in assets},
+        prior_feedback=prior_feedback,
     )
 
 
@@ -948,6 +1035,7 @@ async def _score_one_asset(
     base_url: str,
     timeout_s: float,
     client: httpx.AsyncClient,
+    prior_feedback: str = "",
 ) -> _AssetScore:
     """Single-asset Gemini call with key rotation on 429 / 5xx / transport.
 
@@ -957,7 +1045,9 @@ async def _score_one_asset(
     exhausts; raises ``EditPlanInvalidError`` if a 200 came back with an
     unparseable body.
     """
-    prompt = _build_asset_prompt(asset, transcript, coverage, script_body)
+    prompt = _build_asset_prompt(
+        asset, transcript, coverage, script_body, prior_feedback=prior_feedback
+    )
     body = {
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
         "generationConfig": {
@@ -1063,6 +1153,7 @@ async def plan(
                 base_url=base_url,
                 timeout_s=timeout_s,
                 client=client,
+                prior_feedback=ctx.prior_feedback,
             )
             for i, asset in enumerate(ctx.assets)
         ]

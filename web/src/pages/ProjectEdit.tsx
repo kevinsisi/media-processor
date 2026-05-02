@@ -184,7 +184,7 @@ function DraftComments({ draftId }: DraftCommentsProps) {
         <textarea
           className="draft-comments__body"
           value={body}
-          placeholder="對這個版本有什麼想法？"
+          placeholder="告訴 AI 下次怎麼改進這個版本（例：「不要轉場特效」「蚊子館重複太多」「片頭再有力一點」）。下次重新剪輯時，這裡的留言會餵給 Gemini 作為改進指引。"
           rows={3}
           maxLength={4000}
           onChange={(e) => setBody(e.currentTarget.value)}
@@ -297,13 +297,21 @@ function DurationPicker({ value, onChange, disabled }: DurationPickerProps) {
   );
 }
 
-interface StabilizeToggleProps {
+interface EditOptionToggleProps {
+  label: string;
+  hint: string;
   value: boolean;
   onChange: (next: boolean) => void;
   disabled?: boolean;
 }
 
-function StabilizeToggle({ value, onChange, disabled }: StabilizeToggleProps) {
+function EditOptionToggle({
+  label,
+  hint,
+  value,
+  onChange,
+  disabled,
+}: EditOptionToggleProps) {
   return (
     <label className="stabilize-toggle">
       <input
@@ -312,13 +320,55 @@ function StabilizeToggle({ value, onChange, disabled }: StabilizeToggleProps) {
         disabled={disabled}
         onChange={(e) => onChange(e.currentTarget.checked)}
       />
-      <span className="stabilize-toggle__label">
-        數位防抖（兩階段 vidstab）
-      </span>
-      <span className="stabilize-toggle__hint mono">
-        手機 / 手持鏡頭建議開啟；腳架或穩定器拍攝可關閉以縮短渲染時間。
-      </span>
+      <span className="stabilize-toggle__label">{label}</span>
+      <span className="stabilize-toggle__hint mono">{hint}</span>
     </label>
+  );
+}
+
+interface RenderOptionsProps {
+  stabilize: boolean;
+  setStabilize: (v: boolean) => void;
+  subtitlesOn: boolean;
+  setSubtitlesOn: (v: boolean) => void;
+  transitionsOn: boolean;
+  setTransitionsOn: (v: boolean) => void;
+  disabled?: boolean;
+}
+
+function RenderOptions({
+  stabilize,
+  setStabilize,
+  subtitlesOn,
+  setSubtitlesOn,
+  transitionsOn,
+  setTransitionsOn,
+  disabled,
+}: RenderOptionsProps) {
+  return (
+    <div className="render-options">
+      <EditOptionToggle
+        label="數位防抖（兩階段 vidstab）"
+        hint="手機 / 手持鏡頭建議開啟；腳架或穩定器拍攝可關閉以縮短渲染時間。"
+        value={stabilize}
+        onChange={setStabilize}
+        disabled={disabled}
+      />
+      <EditOptionToggle
+        label="字幕燒入"
+        hint="關閉後不產生字幕也不燒進影片。"
+        value={subtitlesOn}
+        onChange={setSubtitlesOn}
+        disabled={disabled}
+      />
+      <EditOptionToggle
+        label="轉場特效（xfade）"
+        hint="關閉後片段直接硬切（無重疊），畫面節奏更俐落。"
+        value={transitionsOn}
+        onChange={setTransitionsOn}
+        disabled={disabled}
+      />
+    </div>
   );
 }
 
@@ -402,6 +452,11 @@ export default function ProjectEdit() {
   // v0.14.3 — digital stabilization toggle. Default on; user opts out
   // for tripod / gimbal projects to halve render time.
   const [stabilize, setStabilize] = useState<boolean>(true);
+  // v0.14.4 — subtitles + transitions toggles. Both default on (matches
+  // the API defaults). User can disable to ship a captionless mp4 or
+  // hard-cut version without re-rendering the source plan.
+  const [subtitlesOn, setSubtitlesOn] = useState<boolean>(true);
+  const [transitionsOn, setTransitionsOn] = useState<boolean>(true);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
@@ -473,6 +528,8 @@ export default function ProjectEdit() {
           force,
           target_duration_seconds: target,
           stabilize,
+          subtitles: subtitlesOn,
+          transitions: transitionsOn,
         });
         // The API now creates the Draft row synchronously, so resp.draft_id
         // is always a real id. Switch the selected version to it immediately
@@ -497,7 +554,14 @@ export default function ProjectEdit() {
         setTriggering(false);
       }
     },
-    [validProjectId, durationSec, stabilize, refreshDrafts],
+    [
+      validProjectId,
+      durationSec,
+      stabilize,
+      subtitlesOn,
+      transitionsOn,
+      refreshDrafts,
+    ],
   );
 
   const handleCancel = useCallback(async () => {
@@ -598,9 +662,13 @@ export default function ProjectEdit() {
             onChange={setDurationSec}
             disabled={triggering}
           />
-          <StabilizeToggle
-            value={stabilize}
-            onChange={setStabilize}
+          <RenderOptions
+            stabilize={stabilize}
+            setStabilize={setStabilize}
+            subtitlesOn={subtitlesOn}
+            setSubtitlesOn={setSubtitlesOn}
+            transitionsOn={transitionsOn}
+            setTransitionsOn={setTransitionsOn}
             disabled={triggering}
           />
           <div className="edit-card__actions">
@@ -707,9 +775,13 @@ export default function ProjectEdit() {
               onChange={setDurationSec}
               disabled={triggering}
             />
-            <StabilizeToggle
-              value={stabilize}
-              onChange={setStabilize}
+            <RenderOptions
+              stabilize={stabilize}
+              setStabilize={setStabilize}
+              subtitlesOn={subtitlesOn}
+              setSubtitlesOn={setSubtitlesOn}
+              transitionsOn={transitionsOn}
+              setTransitionsOn={setTransitionsOn}
               disabled={triggering}
             />
             <DraggableTimeline

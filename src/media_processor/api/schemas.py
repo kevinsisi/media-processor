@@ -176,6 +176,15 @@ class EditTriggerRequest(BaseModel):
     # frontend exposes a switch so tripod / gimbal projects can opt out
     # to halve render time.
     stabilize: bool = True
+    # v0.14.4 — toggle subtitle burn-in. When false the renderer skips
+    # the drawtext stage entirely; the mp4 is delivered without burned
+    # captions (the SRT is also skipped so the file size stays lean).
+    subtitles: bool = True
+    # v0.14.4 — toggle xfade transitions between cuts. When false the
+    # renderer falls back to the concat-demuxer plain mux (hard cuts,
+    # no overlap). Useful for tight news-style edits where xfade
+    # softens the cut energy too much.
+    transitions: bool = True
 
 
 class EditTriggerResponse(BaseModel):

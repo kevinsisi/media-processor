@@ -766,6 +766,7 @@ def render(
     srt_path: Path | None,
     scratch_dir: Path,
     stabilize: bool = True,
+    transitions_enabled: bool = True,
     on_progress: Callable[[str, int, int], None] | None = None,
 ) -> RenderResult:
     """Run the render stages end-to-end.
@@ -778,6 +779,11 @@ def render(
     vidstab pipeline between cut and concat. Each per-segment
     intermediate is replaced with a stabilised version. Roughly doubles
     render time for the per-cut work but removes handheld shake.
+
+    ``transitions_enabled`` (default ``True``) enables the xfade chain
+    between adjacent cuts. When False the concat stage falls back to
+    the plain demuxer mux (hard cuts, no overlap), matching the old
+    pre-M6.3 behaviour. Useful for tight news-style edits.
     """
     _require_ffmpeg()
 
@@ -820,8 +826,20 @@ def render(
     # path automatically.
     list_path = intermediate_dir / "concat.txt"
     concat_path = intermediate_dir / "concat.mp4" if srt_path is not None else output_path
-    durations_ms = [s.asset_end_ms - s.asset_start_ms for s in plan.segments]
-    transitions = [s.transition_to_next for s in plan.segments[:-1]] if len(plan.segments) > 1 else []
+    # Hand the xfade lists to ``concat_segments`` only when the user
+    # actually asked for transitions; passing ``transitions=None`` makes
+    # the helper fall through to the plain concat-demuxer ``-c copy``
+    # path, which is hard-cut + no re-encode.
+    if transitions_enabled and len(plan.segments) > 1:
+        durations_ms: list[int] | None = [
+            s.asset_end_ms - s.asset_start_ms for s in plan.segments
+        ]
+        transitions: list[str] | None = [
+            s.transition_to_next for s in plan.segments[:-1]
+        ]
+    else:
+        durations_ms = None
+        transitions = None
     concat_segments(
         intermediates,
         concat_path,

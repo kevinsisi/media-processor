@@ -424,6 +424,8 @@ async def run_render(
     skip_plan: bool = False,
     subtitles_from_db: bool = False,
     stabilize: bool = True,
+    subtitles_enabled: bool = True,
+    transitions_enabled: bool = True,
 ) -> dict[str, Any]:
     """Run the full M5 pipeline for ``project_id`` and return a summary.
 
@@ -513,9 +515,15 @@ async def run_render(
     # the burn-in stage. Subtitle generation is pure-Python and cheap.
     # M7.2 path: when subtitles_from_db is set the user has manually
     # edited cues — render from the DB rows instead of regenerating from
-    # transcripts (which would discard the edits).
+    # transcripts (which would discard the edits). v0.14.4 added
+    # ``subtitles_enabled``: when False the user explicitly opted out
+    # of burned subtitles, so skip both SRT generation and the burn
+    # stage entirely.
     project, asset_paths, transcripts = await _gather_render_inputs(project_id)
-    if subtitles_from_db:
+    if not subtitles_enabled:
+        srt_text = ""
+        logger.info("draft %d: subtitles disabled by request", handle.draft_id)
+    elif subtitles_from_db:
         srt_text = await _load_subtitle_srt_from_db(handle.draft_id)
         logger.info(
             "draft %d: subtitles loaded from DB (%d chars)", handle.draft_id, len(srt_text)
@@ -541,7 +549,7 @@ async def run_render(
         "cut": "pending",
         "stabilize": "pending" if stabilize else "skipped",
         "concat": "pending",
-        "subtitles": "pending",
+        "subtitles": "pending" if subtitles_enabled else "skipped",
         "bgm": "pending",
     }
     if not stabilize:
@@ -550,6 +558,10 @@ async def run_render(
         # projects that opted out.
         await _set_stage_state(handle.draft_id, EditStep.STABILIZE.value, "skipped")
         summary["stages"][EditStep.STABILIZE.value] = "skipped"
+    if not subtitles_enabled:
+        # Same idea for the subtitles burn stage when the user opted out.
+        await _set_stage_state(handle.draft_id, EditStep.SUBTITLES.value, "skipped")
+        summary["stages"][EditStep.SUBTITLES.value] = "skipped"
 
     async def update_state(stage: str, value: str) -> None:
         progress_state[stage] = value
@@ -587,13 +599,20 @@ async def run_render(
             asyncio.run_coroutine_threadsafe(
                 update_state(EditStep.CONCAT.value, "done"), loop
             ).result(timeout=10)
-            asyncio.run_coroutine_threadsafe(
-                update_state(EditStep.SUBTITLES.value, "running"), loop
-            ).result(timeout=10)
+            # Only flip subtitles to running if the user actually asked
+            # for them; otherwise it's already locked at "skipped" and
+            # we leave it alone.
+            if subtitles_enabled:
+                asyncio.run_coroutine_threadsafe(
+                    update_state(EditStep.SUBTITLES.value, "running"), loop
+                ).result(timeout=10)
         elif stage == "subtitles":
-            asyncio.run_coroutine_threadsafe(
-                update_state(EditStep.SUBTITLES.value, "done"), loop
-            ).result(timeout=10)
+            # Renderer always fires this at the end, even when srt_path
+            # is None. Respect any prior "skipped" state set above.
+            if progress_state.get(EditStep.SUBTITLES.value) != "skipped":
+                asyncio.run_coroutine_threadsafe(
+                    update_state(EditStep.SUBTITLES.value, "done"), loop
+                ).result(timeout=10)
 
     try:
         result = await asyncio.to_thread(
@@ -606,6 +625,7 @@ async def run_render(
             srt_path=srt_path if srt_text else None,
             scratch_dir=scratch_dir,
             stabilize=stabilize,
+            transitions_enabled=transitions_enabled,
             on_progress=_sync_progress,
         )
     except Exception as exc:  # noqa: BLE001 — record + mark failed.
