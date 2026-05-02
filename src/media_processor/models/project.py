@@ -153,6 +153,18 @@ class Asset(Base):
     # Shape: {"src_w": 1920, "src_h": 1080, "fps": 5.0,
     #         "frames": [{"t_ms": 0, "x": 870, "y": 420, "w": 180, "h": 240}, …]}
     custom_roi_json: Mapped[Any] = mapped_column(JSON, nullable=True)
+    # v0.18 — secondary-language subtitle marker. ``None`` = no translation
+    # has been generated. ``"en"`` (current sole supported value) = the
+    # asset has been run through Whisper task="translate" and the resulting
+    # English segments are stored in ``subtitle_secondary_segments_json``.
+    subtitle_secondary_lang: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # v0.18 — translated transcript segments produced by Whisper translate.
+    # Same SRT-style shape as ``AssetTranscript.segments_json``:
+    #   [{"idx": int, "start_ms": int, "end_ms": int, "text": str}, …]
+    # Kept on Asset (not AssetTranscript) so the secondary track is
+    # independent of the primary STT row — re-running STT won't drop the
+    # translation, and re-running translation won't touch the zh-Hant.
+    subtitle_secondary_segments_json: Mapped[Any] = mapped_column(JSON, nullable=True)
 
     project: Mapped[Project] = relationship("Project", back_populates="assets")
     tags: Mapped[list[AssetTag]] = relationship(

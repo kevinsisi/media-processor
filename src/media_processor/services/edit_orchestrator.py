@@ -261,6 +261,28 @@ async def _snapshot_draft_bgm_path(
 
 async def _persist_plan(handle: _DraftHandle, plan: CutPlan) -> None:
     """Write ``Draft.cut_plan_json`` plus a row per CutPlanSegment."""
+    # Pull per-asset secondary translations once so each cut can be
+    # snapshot with its joined English text. Same getattr-with-default
+    # safety pattern as tracking_json so a degraded host (column missing)
+    # quietly skips the snapshot.
+    asset_ids = sorted({c.asset_id for c in plan.segments})
+    secondary_by_asset: dict[int, list[dict[str, Any]]] = {}
+    if asset_ids:
+        async with async_session_maker() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(Asset).where(Asset.id.in_(asset_ids))
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            for row in rows:
+                segs = getattr(row, "subtitle_secondary_segments_json", None)
+                if isinstance(segs, list) and segs:
+                    secondary_by_asset[row.id] = list(segs)
+
     async with async_session_maker() as session:
         draft = await session.get(Draft, handle.draft_id)
         if draft is None:
@@ -271,6 +293,10 @@ async def _persist_plan(handle: _DraftHandle, plan: CutPlan) -> None:
         await session.execute(delete(DraftSegment).where(DraftSegment.draft_id == handle.draft_id))
         for cut in plan.segments:
             duration = cut.asset_end_ms - cut.asset_start_ms
+            secondary_text = subtitles.secondary_text_for_cut(
+                cut,
+                secondary_by_asset.get(cut.asset_id),
+            )
             session.add(
                 DraftSegment(
                     draft_id=handle.draft_id,
@@ -282,6 +308,7 @@ async def _persist_plan(handle: _DraftHandle, plan: CutPlan) -> None:
                     on_timeline_end_ms=cursor_ms + max(1, duration),
                     source_kind=cut.source_kind,
                     plan_reason=cut.reason,
+                    subtitle_secondary_text=secondary_text,
                 )
             )
             cursor_ms += max(1, duration)
@@ -328,6 +355,7 @@ async def _gather_render_inputs(
     dict[int, dict[str, Any]],
     dict[int, int | None],
     dict[int, dict[str, Any]],
+    dict[int, list[dict[str, Any]]],
 ]:
     async with async_session_maker() as session:
         project = await session.get(Project, project_id)
@@ -348,6 +376,8 @@ async def _gather_render_inputs(
         tracking_by_asset: dict[int, dict[str, Any]] = {}
         tracking_target_by_asset: dict[int, int | None] = {}
         custom_roi_by_asset: dict[int, dict[str, Any]] = {}
+        # v0.18 — secondary-language translation segments per asset.
+        secondary_segments_by_asset: dict[int, list[dict[str, Any]]] = {}
         for a in assets:
             tracked_idx = getattr(a, "tracked_object_index", None)
             if tracked_idx is not None:
@@ -358,6 +388,9 @@ async def _gather_render_inputs(
             blob = getattr(a, "tracking_json", None)
             if isinstance(blob, dict) and (blob.get("frames") or blob.get("tracks")):
                 tracking_by_asset[a.id] = dict(blob)
+            secondary = getattr(a, "subtitle_secondary_segments_json", None)
+            if isinstance(secondary, list) and secondary:
+                secondary_segments_by_asset[a.id] = list(secondary)
         tx_rows = (
             (
                 await session.execute(
@@ -375,6 +408,7 @@ async def _gather_render_inputs(
             tracking_by_asset,
             tracking_target_by_asset,
             custom_roi_by_asset,
+            secondary_segments_by_asset,
         )
 
 
@@ -499,9 +533,14 @@ async def _plan_stage(project_id: int, target_duration_ms: int) -> CutPlan:
 # ---------- Public entry point ----------
 
 
-def _output_paths(project_id: int, version: int) -> tuple[Path, Path]:
+def _output_paths(project_id: int, version: int) -> tuple[Path, Path, Path]:
+    """Return (mp4, primary-srt, secondary-srt) paths for a draft version.
+
+    The secondary SRT is written next to the primary one with an ``_en``
+    suffix; absent on disk = no second-language subtitles for this draft.
+    """
     base = Path(settings.drafts_dir) / str(project_id)
-    return (base / f"v{version}.mp4", base / f"v{version}.srt")
+    return (base / f"v{version}.mp4", base / f"v{version}.srt", base / f"v{version}_en.srt")
 
 
 async def run_render(
@@ -616,18 +655,30 @@ async def run_render(
         tracking_by_asset,
         tracking_target_by_asset,
         custom_roi_by_asset,
+        secondary_segments_by_asset,
     ) = await _gather_render_inputs(project_id)
     if not subtitles_enabled:
         srt_text = ""
+        secondary_srt_text = ""
         logger.info("draft %d: subtitles disabled by request", handle.draft_id)
     elif subtitles_from_db:
         srt_text = await _load_subtitle_srt_from_db(handle.draft_id)
+        # subtitles_from_db re-uses the manually-edited primary cues. The
+        # secondary track has no editor today, so just regenerate from
+        # the source asset translations as on a fresh render.
+        secondary_cues = subtitles.build_secondary_cues(plan, secondary_segments_by_asset)
+        secondary_srt_text = subtitles.render_srt(secondary_cues)
         logger.info(
-            "draft %d: subtitles loaded from DB (%d chars)", handle.draft_id, len(srt_text)
+            "draft %d: subtitles loaded from DB (%d chars; secondary %d chars)",
+            handle.draft_id,
+            len(srt_text),
+            len(secondary_srt_text),
         )
     else:
         srt_text = subtitles.build_srt(plan, transcripts)
-    output_path, srt_path = _output_paths(project_id, handle.version)
+        secondary_cues = subtitles.build_secondary_cues(plan, secondary_segments_by_asset)
+        secondary_srt_text = subtitles.render_srt(secondary_cues)
+    output_path, srt_path, secondary_srt_path = _output_paths(project_id, handle.version)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     if srt_text:
         srt_path.write_text(srt_text, encoding="utf-8")
@@ -636,6 +687,10 @@ async def run_render(
         # prior render at the same version.
         if srt_path.is_file():
             srt_path.unlink()
+    if secondary_srt_text:
+        secondary_srt_path.write_text(secondary_srt_text, encoding="utf-8")
+    elif secondary_srt_path.is_file():
+        secondary_srt_path.unlink()
 
     scratch_dir = Path(settings.analysis_dir) / "edits"
     scratch_dir.mkdir(parents=True, exist_ok=True)
@@ -720,6 +775,7 @@ async def run_render(
             asset_paths=asset_paths,
             output_path=output_path,
             srt_path=srt_path if srt_text else None,
+            secondary_srt_path=secondary_srt_path if secondary_srt_text else None,
             scratch_dir=scratch_dir,
             stabilize=stabilize,
             transitions_enabled=transitions_enabled,

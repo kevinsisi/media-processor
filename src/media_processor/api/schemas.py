@@ -372,6 +372,36 @@ class AnalyzeResponse(BaseModel):
     analysis_steps: dict[str, str]
 
 
+# v0.18 — secondary-language subtitle (Whisper translate).
+SecondarySubtitleLangLiteral = Literal["en"]
+
+
+class TranslateSubtitleRequest(BaseModel):
+    """Body for POST /assets/{id}/translate-subtitle.
+
+    ``lang`` is currently constrained to ``"en"`` because Whisper's
+    translate task always outputs English. Schema literal future-proofs
+    the API for additional model variants without breaking the contract.
+    """
+
+    lang: SecondarySubtitleLangLiteral = "en"
+
+
+class TranslateSubtitleResponse(BaseModel):
+    """Returned by POST /assets/{id}/translate-subtitle (202 Accepted)."""
+
+    asset_id: int
+    job_id: str
+    lang: str
+
+
+class SecondarySubtitleSummaryOut(BaseModel):
+    """Compact secondary-subtitle info embedded in the analysis-page list."""
+
+    lang: str
+    segment_count: int
+
+
 # ----- M4 — project analysis page polling endpoint -----
 
 
@@ -525,6 +555,8 @@ class AssetAnalysisItem(BaseModel):
     emotion_tags: EmotionTagsOut | None = None
     # v0.16 — null when the tracking stage hasn't run for this asset.
     tracking_summary: TrackingSummaryOut | None = None
+    # v0.18 — null when no secondary translation has been generated yet.
+    secondary_subtitle_summary: SecondarySubtitleSummaryOut | None = None
     # Public URLs for the keyframe gallery; empty list when frames have not
     # been generated yet (the UI shows a placeholder).
     thumbnail_urls: list[str]

@@ -24,6 +24,34 @@ _INITIAL_PROMPT = "以下是繁體中文影片逐字稿。"
 _DEFAULT_LANGUAGE = "zh"
 _OUTPUT_LANGUAGE_TAG = "zh-Hant"
 
+# v0.18 — Whisper task="translate" outputs English regardless of source
+# language. Faster-whisper's translate task does not need an
+# initial_prompt; supplying one in zh-Hant biases the output back to
+# Chinese. Keep the initial_prompt empty in translate mode.
+_TRANSLATE_LANGUAGE_TAG = "en"
+_TRANSLATE_PROMPT = ""
+
+# Translate cues are bucketed against the English text length, which is
+# typically 2-3x longer than the zh-Hant equivalent — keep the same
+# ~3 s on-screen cap but allow more characters per cue so words are not
+# split mid-token.
+TRANSLATE_MAX_CHARS: int = 36
+TRANSLATE_MAX_SECONDS: float = 3.0
+
+# Canned WHISPER_FAKE translate transcript — mirrors _FAKE_SEGMENTS line
+# for line so the secondary-track happy path can be exercised in CI on
+# any non-GPU box.
+_FAKE_TRANSLATE_SEGMENTS: tuple[tuple[int, int, str], ...] = (
+    (0, 1500, "Today let me introduce this product"),
+    (1500, 3000, "Lightweight design, easy to carry"),
+    (3000, 4800, "Perfect for solo use"),
+    (4800, 6500, "The moment we open the box"),
+    (6500, 8500, "Overall it feels well-made"),
+    (8500, 10500, "Lighter than I expected"),
+    (10500, 12500, "Now let's try it for real"),
+    (12500, 15000, "And take a closer look"),
+)
+
 # Cue-shaping caps — enforced by :func:`_regroup_words` so each emitted
 # TranscriptSegment fits under the drawtext burn-in's 12-CJK-char width
 # limit and stays on screen at most 3 s. Whisper's native segments are
@@ -292,9 +320,113 @@ def transcribe(audio_path: Path | str) -> TranscriptResult:
     )
 
 
+def translate(audio_path: Path | str, *, target_lang: str = "en") -> TranscriptResult:
+    """Run Whisper task="translate" on the given media file.
+
+    Whisper's translate task always emits English regardless of source
+    language, so ``target_lang`` is currently constrained to ``"en"`` —
+    the parameter exists for forward-compat with future model variants
+    that support arbitrary targets. Passing anything else raises a
+    ``ValueError`` so callers fail loudly.
+
+    Honours ``WHISPER_FAKE=1`` the same way as :func:`transcribe`.
+    """
+    if target_lang != "en":
+        raise ValueError(
+            f"only target_lang='en' is supported; got {target_lang!r} — "
+            "Whisper task='translate' always outputs English"
+        )
+
+    model_name = os.environ.get("WHISPER_MODEL", "medium")
+    device = os.environ.get("WHISPER_DEVICE", "cuda")
+    compute_type = os.environ.get("WHISPER_COMPUTE_TYPE", "int8_float16")
+    fake = _is_fake()
+
+    if fake:
+        logger.info("WHISPER_FAKE=1 — returning canned English translation")
+        segments = tuple(
+            TranscriptSegment(idx=i, start_ms=s, end_ms=e, text=t)
+            for i, (s, e, t) in enumerate(_FAKE_TRANSLATE_SEGMENTS)
+        )
+        return TranscriptResult(
+            language=_TRANSLATE_LANGUAGE_TAG,
+            model="faster-whisper-fake-translate",
+            segments=segments,
+        )
+
+    audio_path_obj = Path(audio_path)
+    if not audio_path_obj.exists():
+        raise WhisperUnavailableError(f"audio file missing: {audio_path_obj}")
+
+    model = _load_model(model_name, device, compute_type)
+    raw_segments, info = model.transcribe(
+        str(audio_path_obj),
+        task="translate",
+        initial_prompt=_TRANSLATE_PROMPT,
+        vad_filter=True,
+        word_timestamps=True,
+    )
+
+    all_words: list = []
+    raw_segment_count = 0
+    for seg in raw_segments:
+        raw_segment_count += 1
+        seg_words = list(getattr(seg, "words", None) or [])
+        if seg_words:
+            all_words.extend(seg_words)
+        else:
+            seg_text = (seg.text or "").strip()
+            if seg_text:
+                all_words.append(
+                    _PseudoWord(
+                        start=float(seg.start or 0.0),
+                        end=float(seg.end or seg.start or 0.0),
+                        word=seg_text,
+                    )
+                )
+
+    grouped = _regroup_words(
+        all_words,
+        max_chars=TRANSLATE_MAX_CHARS,
+        max_seconds=TRANSLATE_MAX_SECONDS,
+    )
+    out: list[TranscriptSegment] = []
+    for i, (start_s, end_s, text) in enumerate(grouped):
+        # No OpenCC pass — Whisper's translate output is plain English.
+        clean = text.strip()
+        if not clean:
+            continue
+        out.append(
+            TranscriptSegment(
+                idx=i,
+                start_ms=int(round(start_s * 1000)),
+                end_ms=int(round(end_s * 1000)),
+                text=clean,
+            )
+        )
+
+    logger.info(
+        "translated %d whisper-segments → %d English cues "
+        "(detected_language=%r duration=%.1fs)",
+        raw_segment_count,
+        len(out),
+        getattr(info, "language", None),
+        getattr(info, "duration", 0.0),
+    )
+
+    return TranscriptResult(
+        language=_TRANSLATE_LANGUAGE_TAG,
+        model=f"faster-whisper-translate-{model_name}",
+        segments=tuple(out),
+    )
+
+
 __all__ = [
+    "TRANSLATE_MAX_CHARS",
+    "TRANSLATE_MAX_SECONDS",
     "TranscriptResult",
     "TranscriptSegment",
     "WhisperUnavailableError",
     "transcribe",
+    "translate",
 ]

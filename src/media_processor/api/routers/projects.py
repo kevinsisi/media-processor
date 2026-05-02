@@ -31,6 +31,7 @@ from media_processor.api.schemas import (
     SceneTagOut,
     ScriptOut,
     ScriptUpsert,
+    SecondarySubtitleSummaryOut,
     TrackingSummaryOut,
     TranscriptSummaryOut,
 )
@@ -543,6 +544,24 @@ def _tracking_summary_for(asset: Asset) -> TrackingSummaryOut | None:
     )
 
 
+def _secondary_subtitle_summary_for(asset: Asset) -> SecondarySubtitleSummaryOut | None:
+    """v0.18 — surface whether a secondary-language translation is available.
+
+    Returns ``None`` when ``Asset.subtitle_secondary_lang`` is unset
+    (the asset has not been run through Whisper translate). Otherwise
+    a small chip-friendly payload with the language code + segment
+    count so the UI can show e.g. "EN · 24 段".
+    """
+    lang = getattr(asset, "subtitle_secondary_lang", None)
+    if not lang:
+        return None
+    segments = getattr(asset, "subtitle_secondary_segments_json", None) or []
+    return SecondarySubtitleSummaryOut(
+        lang=str(lang),
+        segment_count=len(segments) if isinstance(segments, list) else 0,
+    )
+
+
 @router.get("/{project_id}/assets", response_model=ProjectAnalysisOut)
 async def list_project_assets_with_analysis(
     project_id: int,
@@ -657,6 +676,7 @@ async def list_project_assets_with_analysis(
                 motion_segments=_motion_segments_for(asset),
                 emotion_tags=_emotion_tags_for(asset),
                 tracking_summary=_tracking_summary_for(asset),
+                secondary_subtitle_summary=_secondary_subtitle_summary_for(asset),
                 thumbnail_urls=thumbnail_urls_for_asset(asset.id),
             )
         )

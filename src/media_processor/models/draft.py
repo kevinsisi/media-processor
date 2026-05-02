@@ -152,6 +152,15 @@ class DraftSegment(Base):
         Float, nullable=False, default=1.0, server_default="1.0"
     )
     bgm_volume: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # v0.18 — per-cut snapshot of the secondary-language subtitle text.
+    # Populated by the orchestrator when the source asset has
+    # ``subtitle_secondary_segments_json`` set: we clip those segments to
+    # this cut's window and join into a single line so the SubtitleEditor
+    # can show the per-cut translation without round-tripping the full
+    # transcript. ``None`` = no secondary subtitle for this cut. The
+    # renderer reads from per-cue secondary cues built off the asset
+    # column directly, not from this snapshot.
+    subtitle_secondary_text: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     draft: Mapped[Draft] = relationship("Draft", back_populates="segments")
     asset_segment: Mapped[AssetSegment | None] = relationship("AssetSegment")

@@ -30,11 +30,13 @@ from media_processor.api.schemas import (
     TranscriptOut,
     TranscriptSegmentOut,
     TranscriptUpsert,
+    TranslateSubtitleRequest,
+    TranslateSubtitleResponse,
 )
 from media_processor.models import Asset, AssetTranscript, ScriptCoverage
 from media_processor.services import object_tracking
 from media_processor.services import thumbnails as thumbnails_svc
-from media_processor.services.queue import enqueue_asset_analysis
+from media_processor.services.queue import enqueue_asset_analysis, enqueue_asset_translate
 
 # Public URL prefix the browser uses to fetch thumbnail JPEGs.
 # StaticFiles is mounted at "/media/thumbnails" in api.main, and the web
@@ -492,4 +494,37 @@ async def trigger_asset_analysis(
         job_id=job_id,
         status=asset.status,
         analysis_steps=dict(asset.analysis_steps_json or {}),
+    )
+
+
+# ----- v0.18 — secondary-language subtitle (Whisper translate) -----
+
+
+@router.post(
+    "/{asset_id}/translate-subtitle",
+    response_model=TranslateSubtitleResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def trigger_asset_subtitle_translation(
+    asset_id: int,
+    payload: TranslateSubtitleRequest,
+    session: SessionDep,
+) -> TranslateSubtitleResponse:
+    """Enqueue Whisper task='translate' for ``asset_id`` to produce a
+    secondary-language subtitle track.
+
+    Whisper's translate task always emits English, so ``payload.lang``
+    is constrained to ``"en"``. The job persists segments to
+    ``Asset.subtitle_secondary_segments_json`` and the language tag to
+    ``Asset.subtitle_secondary_lang`` once it completes; the UI polls
+    asset state to learn when the translation is ready.
+    """
+    asset = await session.get(Asset, asset_id)
+    if asset is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="asset not found")
+    job_id = enqueue_asset_translate(asset_id, lang=payload.lang)
+    return TranslateSubtitleResponse(
+        asset_id=asset_id,
+        job_id=job_id,
+        lang=payload.lang,
     )

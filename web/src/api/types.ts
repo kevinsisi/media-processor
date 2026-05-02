@@ -345,6 +345,26 @@ export interface AnalyzeResponse {
   analysis_steps: Record<string, string>;
 }
 
+// v0.18 — secondary-language subtitle (Whisper translate). ``lang`` is
+// constrained to "en" today because Whisper's translate task always
+// emits English; widen this union once additional models land.
+export type SecondarySubtitleLang = "en";
+
+export interface TranslateSubtitleRequest {
+  lang?: SecondarySubtitleLang;
+}
+
+export interface TranslateSubtitleResponse {
+  asset_id: number;
+  job_id: string;
+  lang: string;
+}
+
+export interface SecondarySubtitleSummary {
+  lang: string;
+  segment_count: number;
+}
+
 export type MotionType = "pan" | "tilt" | "zoom" | "static" | "handheld";
 
 export interface MotionSegmentOut {
@@ -387,6 +407,10 @@ export interface AssetAnalysisItem {
   // v0.16 — null when the tracking stage hasn't run; ``frame_count: 0``
   // and ``subject_class: ""`` when YOLO saw no recognised subjects.
   tracking_summary?: TrackingSummaryOut | null;
+  // v0.18 — null when no secondary translation has been generated for
+  // this asset yet. ``lang`` is the ISO code (e.g. "en"); the chip on
+  // the analysis page renders "EN · 24 段" when set.
+  secondary_subtitle_summary?: SecondarySubtitleSummary | null;
   // Public URLs (e.g. "/api/media/thumbnails/12/frame_2.jpg") for the
   // keyframe gallery; empty until ffmpeg has produced the frames.
   thumbnail_urls: string[];

@@ -51,3 +51,23 @@ def analyze_asset(
     from media_processor.services.analysis import run_pipeline
 
     return asyncio.run(run_pipeline(asset_id, steps=steps, force=force))
+
+
+def translate_asset_subtitle(asset_id: int, *, lang: str = "en") -> dict[str, Any]:
+    """RQ job — run Whisper task="translate" for a single Asset.
+
+    Persists the resulting English (today the only supported lang)
+    segments to ``Asset.subtitle_secondary_segments_json`` and the
+    language tag to ``Asset.subtitle_secondary_lang``. Existing primary
+    transcript / analysis state is untouched.
+
+    Returns a small summary dict for RQ's job-result store; the API
+    polls Asset state to learn whether the translation landed.
+    """
+    logger.info("translate_asset_subtitle: asset_id=%d lang=%s", asset_id, lang)
+
+    # Same lazy-import pattern as analyze_asset — keeps faster-whisper
+    # off the api container's import graph.
+    from media_processor.services.analysis import run_translate_subtitle
+
+    return asyncio.run(run_translate_subtitle(asset_id, lang=lang))

@@ -361,11 +361,70 @@ function ThumbnailGallery({ assetId, filename, thumbnails }: ThumbnailGalleryPro
 interface AssetCardProps {
   asset: AssetAnalysisItem;
   onAnalyze: (assetId: number, force: boolean) => void;
+  onTranslate: (assetId: number) => void;
+  translating: boolean;
   selected: boolean;
   onToggleSelect: (assetId: number, next: boolean) => void;
 }
 
-function AssetCard({ asset, onAnalyze, selected, onToggleSelect }: AssetCardProps) {
+interface SecondarySubtitleToggleProps {
+  asset: AssetAnalysisItem;
+  onTranslate: (assetId: number) => void;
+  translating: boolean;
+}
+
+// v0.18 — analysis-page chip + button for the optional second-language
+// subtitle. Disabled until the primary STT step has finished (translate
+// uses the same audio path; running both in parallel just hammers the
+// GPU). The chip appears once a translation has been generated.
+function SecondarySubtitleToggle({
+  asset,
+  onTranslate,
+  translating,
+}: SecondarySubtitleToggleProps) {
+  const sttDone = asset.analysis_steps?.stt === "done";
+  const summary = asset.secondary_subtitle_summary ?? null;
+  const buttonLabel = (() => {
+    if (translating) return "翻譯中…";
+    if (summary) return "重新翻譯英文";
+    return "產生英文字幕";
+  })();
+  const disabled = translating || !sttDone;
+  return (
+    <div className="secondary-subtitle-toggle">
+      {summary && (
+        <span
+          className="secondary-subtitle-chip mono"
+          title={`${summary.lang.toUpperCase()} ${summary.segment_count} 段`}
+        >
+          {summary.lang.toUpperCase()} · {summary.segment_count} 段
+        </span>
+      )}
+      <button
+        type="button"
+        className="cta cta--quiet"
+        onClick={() => onTranslate(asset.id)}
+        disabled={disabled}
+        title={
+          sttDone
+            ? "用 Whisper 把這個素材翻譯成英文字幕（可疊在主字幕之上）"
+            : "請先完成 STT（語音辨識），翻譯才能執行"
+        }
+      >
+        {buttonLabel}
+      </button>
+    </div>
+  );
+}
+
+function AssetCard({
+  asset,
+  onAnalyze,
+  onTranslate,
+  translating,
+  selected,
+  onToggleSelect,
+}: AssetCardProps) {
   const [expanded, setExpanded] = useState(false);
   return (
     <article className="asset-card" data-status={asset.status}>
@@ -489,6 +548,12 @@ function AssetCard({ asset, onAnalyze, selected, onToggleSelect }: AssetCardProp
 
       {expanded && <TranscriptEditor assetId={asset.id} />}
 
+      <SecondarySubtitleToggle
+        asset={asset}
+        onTranslate={onTranslate}
+        translating={translating}
+      />
+
       <footer className="asset-card__actions">
         <button
           type="button"
@@ -521,6 +586,11 @@ export default function ProjectAnalysis() {
   const [triggerError, setTriggerError] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [batchRunning, setBatchRunning] = useState(false);
+  // v0.18 — track per-asset translate-button busy state. The job runs
+  // on the worker (poll picks up the new ``secondary_subtitle_summary``
+  // when done); the local set just keeps the button disabled long
+  // enough to communicate "queued" to the user.
+  const [translatingIds, setTranslatingIds] = useState<Set<number>>(new Set());
 
   const handleAnalyze = useCallback(
     async (assetId: number, force: boolean) => {
@@ -529,6 +599,40 @@ export default function ProjectAnalysis() {
         polling.refresh();
       } catch (err) {
         setTriggerError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [polling],
+  );
+
+  const handleTranslate = useCallback(
+    async (assetId: number) => {
+      setTranslatingIds((prev) => {
+        const out = new Set(prev);
+        out.add(assetId);
+        return out;
+      });
+      try {
+        await apiClient.triggerSubtitleTranslate(assetId, { lang: "en" });
+        polling.refresh();
+      } catch (err) {
+        setTriggerError(
+          err instanceof Error
+            ? `翻譯任務觸發失敗：${err.message}`
+            : String(err),
+        );
+      } finally {
+        // The worker job runs async; clear the local busy flag after
+        // a short delay so the user sees "翻譯中…" briefly even when
+        // the queue accepts instantly. Polling will swap the button
+        // label to "重新翻譯英文" once the secondary segments land.
+        window.setTimeout(() => {
+          setTranslatingIds((prev) => {
+            if (!prev.has(assetId)) return prev;
+            const out = new Set(prev);
+            out.delete(assetId);
+            return out;
+          });
+        }, 2000);
       }
     },
     [polling],
@@ -760,6 +864,8 @@ export default function ProjectAnalysis() {
             key={asset.id}
             asset={asset}
             onAnalyze={handleAnalyze}
+            onTranslate={handleTranslate}
+            translating={translatingIds.has(asset.id)}
             selected={selectedIds.has(asset.id)}
             onToggleSelect={toggleSelect}
           />
