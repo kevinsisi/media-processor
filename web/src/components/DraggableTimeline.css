@@ -21,23 +21,27 @@
   letter-spacing: 0.02em;
 }
 
+/* v0.14.6 — full-width vertical list. Each cut is a single row that
+   shows ALL its info (no overflow ellipsis on the reason text). The
+   prior 50%-flex layout truncated reasons mid-character on phone-
+   width screens. */
 .dt-timeline__list {
   list-style: none;
   margin: 0;
   padding: 0.25rem;
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 0.5rem;
-  overflow-x: auto;
+  max-height: 70vh;
+  overflow-y: auto;
   scrollbar-width: thin;
 }
 
 .dt-cell {
   position: relative;
-  display: flex;
-  flex-direction: column;
-  flex: 0 1 calc(50% - 0.25rem);
-  min-width: 9rem;
+  display: block;
+  width: 100%;
+  min-width: 0;
   border-radius: 12px;
   touch-action: none;
   user-select: none;
@@ -46,7 +50,7 @@
 .dt-cell-inner {
   display: flex;
   flex-direction: column;
-  flex: 1 1 auto;
+  gap: 0.4rem;
   background: linear-gradient(
     180deg,
     rgba(255, 255, 255, 0.05),
@@ -54,7 +58,7 @@
   );
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 12px;
-  padding: 0.5rem 0.75rem;
+  padding: 0.65rem 2rem 0.65rem 0.85rem; /* extra right pad for handle */
   position: relative;
 }
 
@@ -77,15 +81,12 @@
 
 /* Floating clone rendered by DragOverlay. Lifts above the rest of the
    page via the portal at document root; we only need the elevated
-   shadow + grabbing cursor. ``min-width`` mirrors a typical cell so
-   the overlay's size doesn't snap on grab. */
+   shadow + grabbing cursor. ``width: 100%`` is fine because the
+   overlay container's width matches the source row exactly. */
 .dt-cell--floating {
   cursor: grabbing;
   box-shadow: 0 18px 36px rgba(0, 0, 0, 0.55);
-  transform: scale(1.02);
-  min-width: 9rem;
-  /* DragOverlay provides its own positioning; let its inline transform
-     stack on top of ours. */
+  transform: scale(1.01);
 }
 
 /* ---- Commit banner (v0.14.5 — "以此順序重新生成") ---- */
@@ -113,13 +114,15 @@
   flex-shrink: 0;
 }
 
+/* ---- Drag handle ---- */
+
 .dt-cell__handle {
   position: absolute;
-  top: 0.4rem;
-  right: 0.5rem;
+  top: 0.5rem;
+  right: 0.55rem;
   cursor: grab;
-  padding: 0.1rem 0.3rem;
-  font-size: 0.85rem;
+  padding: 0.15rem 0.4rem;
+  font-size: 1rem;
   color: rgba(255, 255, 255, 0.55);
   letter-spacing: -0.1em;
   font-weight: 700;
@@ -130,13 +133,24 @@
   color: rgba(255, 255, 255, 0.95);
 }
 
+/* ---- Card body button ---- */
+
 .dt-cell__btn {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  width: 100%;
   background: none;
   border: 0;
   color: inherit;
   padding: 0;
   text-align: left;
-  display: flex;
+  font: inherit;
+  cursor: pointer;
+}
+
+.dt-cell__btn[disabled] {
+  cursor: default;
 }
 
 /* The DragOverlay clone passes onTap=undefined, so the button gets
@@ -146,25 +160,33 @@
   cursor: grabbing;
   opacity: 1;
   color: inherit;
-  flex-direction: column;
-  gap: 0.25rem;
-  font: inherit;
+}
+
+/* ---- Top meta row: #order · time range · tag · percentage ---- */
+
+.dt-cell__top-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
 }
 
 .dt-cell__order {
-  font-size: 0.78rem;
+  font-size: 0.85rem;
   letter-spacing: 0.04em;
-  color: rgba(255, 255, 255, 0.7);
+  color: rgba(255, 255, 255, 0.85);
+  font-weight: 600;
+  min-width: 2rem;
 }
 
 .dt-cell__range {
   font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.7);
 }
 
 .dt-cell__chip {
-  align-self: flex-start;
   font-size: 0.72rem;
-  padding: 0.1rem 0.5rem;
+  padding: 0.1rem 0.55rem;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.08);
   letter-spacing: 0.04em;
@@ -180,16 +202,24 @@
   color: #ffd57a;
 }
 
-.dt-cell__reason {
-  font-size: 0.7rem;
-  color: rgba(255, 255, 255, 0.55);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.dt-cell__total {
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.7);
+  margin-left: auto; /* push to right edge of meta row */
 }
 
-.dt-cell__total {
-  font-size: 0.7rem;
-  color: rgba(255, 255, 255, 0.7);
-  align-self: flex-end;
+/* ---- Reason text — full, no truncation. Wraps freely so long
+   Gemini-written reasons remain fully readable. ``word-break``
+   matters on CJK that doesn't have spaces. ---- */
+
+.dt-cell__reason {
+  font-size: 0.82rem;
+  color: rgba(255, 255, 255, 0.78);
+  line-height: 1.55;
+  margin: 0;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }

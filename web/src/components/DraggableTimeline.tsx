@@ -14,7 +14,7 @@ import {
 import {
   SortableContext,
   arrayMove,
-  horizontalListSortingStrategy,
+  verticalListSortingStrategy,
   sortableKeyboardCoordinates,
   useSortable,
 } from "@dnd-kit/sortable";
@@ -77,19 +77,21 @@ function CellContent({ row, totalMs, onTap, handleAttrs }: CellContentProps) {
         onClick={onTap ? () => onTap(seg) : undefined}
         disabled={!onTap}
       >
-        <span className="dt-cell__order mono">#{seg.order + 1}</span>
-        <span className="dt-cell__range mono">
-          {formatTimecode(seg.on_timeline_start_ms)}
-          {" → "}
-          {formatTimecode(seg.on_timeline_end_ms)}
-        </span>
-        <span className="dt-cell__chip">{labelForCutSource(seg.source_kind)}</span>
-        {seg.plan_reason && (
-          <span className="dt-cell__reason" title={seg.plan_reason}>
-            {seg.plan_reason}
+        <div className="dt-cell__top-row">
+          <span className="dt-cell__order mono">#{seg.order + 1}</span>
+          <span className="dt-cell__range mono">
+            {formatTimecode(seg.on_timeline_start_ms)}
+            {" → "}
+            {formatTimecode(seg.on_timeline_end_ms)}
           </span>
+          <span className="dt-cell__chip">
+            {labelForCutSource(seg.source_kind)}
+          </span>
+          <span className="dt-cell__total mono">{pct}%</span>
+        </div>
+        {seg.plan_reason && (
+          <p className="dt-cell__reason">{seg.plan_reason}</p>
         )}
-        <span className="dt-cell__total mono">{pct}%</span>
       </button>
     </div>
   );
@@ -331,7 +333,7 @@ export default function DraggableTimeline({
       >
         <SortableContext
           items={localRows.map((r) => r.key)}
-          strategy={horizontalListSortingStrategy}
+          strategy={verticalListSortingStrategy}
         >
           <ol className="dt-timeline__list" aria-label="剪輯時間軸">
             {localRows.map((r) => (
