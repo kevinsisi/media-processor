@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     uploads_dir: str = Field(default="/app/media/uploads")
     analysis_dir: str = Field(default="/app/media/analysis")
     thumbnails_dir: str = Field(default="/app/media/thumbnails")
+    # M6.4 — uploaded BGM tracks (one per project). Lives under
+    # ${MEDIA_STORAGE_DIR}/bgm on the host via the existing media bind mount.
+    bgm_dir: str = Field(default="/app/media/bgm")
 
     # M4 — Whisper local STT in the worker container.
     # WHISPER_FAKE=1 swaps the engine for a deterministic canned zh-Hant

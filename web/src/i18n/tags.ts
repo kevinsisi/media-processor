@@ -32,11 +32,14 @@ export const ANALYSIS_STEP_LABELS: Record<string, string> = {
 };
 
 // M5 — auto-edit pipeline stage labels. Used by ProjectEdit.tsx.
+// M6.4 added the bgm stage; it no-ops (auto "done") when the project has
+// no uploaded BGM track, so the chip just confirms the stage ran.
 export const EDIT_STEP_LABELS: Record<string, string> = {
   plan: "規劃",
   cut: "切片",
   concat: "拼接",
   subtitles: "字幕",
+  bgm: "配樂",
 };
 
 export const DRAFT_STATUS_LABELS: Record<string, string> = {

@@ -94,13 +94,15 @@ def _mock_transport(handler):  # type: ignore[no-untyped-def]
 
 @pytest.mark.asyncio
 async def test_plan_happy_path(session: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
-    # New shape: one Gemini call per asset, each returns a per-asset score.
+    # New shape: one Gemini call per asset, each returns a per-asset score
+    # plus an M6.3 transition_to_next field.
     asset_score_payload = {
         "schema_version": ASSET_SCORE_SCHEMA_VERSION,
         "score": 80,
         "position": "opening",
         "best_span_ms": [0, 4000],
         "source_kind": "scripted",
+        "transition_to_next": "fade",
         "reason": "matches line 1",
     }
 
@@ -133,6 +135,7 @@ async def test_plan_happy_path(session: AsyncSession, monkeypatch: pytest.Monkey
     assert seg.asset_start_ms == 0
     assert seg.asset_end_ms == 4000
     assert seg.source_kind == "scripted"
+    assert seg.transition_to_next == "fade"
     assert plan.target_duration_ms == 20_000
     # Notes are now synthesised locally summarising the fanout.
     assert "per-asset fanout" in plan.notes

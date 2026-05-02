@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -172,6 +172,7 @@ async def get_project(
         created_at=project.created_at,
         asset_count=int(asset_count or 0),
         draft_count=int(draft_count or 0),
+        bgm_path=project.bgm_path,
     )
 
 
@@ -269,6 +270,105 @@ async def trigger_project_edit(
         job_id=job_id,
         status="enqueued",
     )
+
+
+# M6.4 — BGM upload limits. Streamed to disk in BGM_CHUNK_BYTES blocks so a
+# 50 MB file doesn't sit fully in RAM during the request.
+BGM_MAX_BYTES = 50 * 1024 * 1024
+BGM_CHUNK_BYTES = 1 * 1024 * 1024
+BGM_ALLOWED_EXTS = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg"}
+
+
+@router.post("/{project_id}/bgm", response_model=ProjectDetail)
+async def upload_project_bgm(
+    project_id: int,
+    session: SessionDep,
+    file: UploadFile = File(...),  # noqa: B008
+) -> ProjectDetail:
+    """Upload (or replace) the project's background-music track.
+
+    Single multipart POST — typical BGM is a few MB so chunked upload
+    sessions are overkill. The file is streamed to disk in 1 MB chunks
+    and rejected past 50 MB. Filename extension picks the on-disk
+    extension; content_type is informational only.
+    """
+    project = await session.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
+
+    raw_name = (file.filename or "").lower()
+    ext = "".join(Path(raw_name).suffixes[-1:]) if raw_name else ""
+    if ext not in BGM_ALLOWED_EXTS:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail=f"BGM must be one of {sorted(BGM_ALLOWED_EXTS)}; got {ext or 'no extension'!r}",
+        )
+
+    bgm_dir = Path(settings.bgm_dir)
+    bgm_dir.mkdir(parents=True, exist_ok=True)
+    target = bgm_dir / f"{project_id}{ext}"
+    # Remove any prior BGM with a different extension so we don't leak files.
+    for stale in bgm_dir.glob(f"{project_id}.*"):
+        if stale != target:
+            stale.unlink(missing_ok=True)
+
+    written = 0
+    with target.open("wb") as fh:
+        while True:
+            chunk = await file.read(BGM_CHUNK_BYTES)
+            if not chunk:
+                break
+            written += len(chunk)
+            if written > BGM_MAX_BYTES:
+                fh.close()
+                target.unlink(missing_ok=True)
+                raise HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail=f"BGM exceeds {BGM_MAX_BYTES // (1024 * 1024)} MB limit",
+                )
+            fh.write(chunk)
+    if written == 0:
+        target.unlink(missing_ok=True)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="empty BGM upload")
+
+    project.bgm_path = str(target)
+    await session.commit()
+    await session.refresh(project)
+
+    asset_count = await session.scalar(
+        select(func.count(Asset.id)).where(Asset.project_id == project_id)
+    )
+    draft_count = await session.scalar(
+        select(func.count(Draft.id)).where(Draft.project_id == project_id)
+    )
+    return ProjectDetail(
+        id=project.id,
+        name=project.name,
+        client=project.client,
+        profile_name=project.profile_name,
+        source_dir=project.source_dir,
+        status=project.status,
+        target_aspect_ratio=project.target_aspect_ratio,
+        created_at=project.created_at,
+        asset_count=int(asset_count or 0),
+        draft_count=int(draft_count or 0),
+        bgm_path=project.bgm_path,
+    )
+
+
+@router.delete("/{project_id}/bgm", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_project_bgm(
+    project_id: int,
+    session: SessionDep,
+) -> None:
+    """Remove the project's BGM track. Idempotent — 204 even if none set."""
+    project = await session.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
+    if project.bgm_path:
+        Path(project.bgm_path).unlink(missing_ok=True)
+        project.bgm_path = None
+        await session.commit()
 
 
 @router.get("/{project_id}/script", response_model=ScriptOut)
@@ -404,6 +504,7 @@ async def list_project_assets_with_analysis(
         created_at=project.created_at,
         asset_count=int(asset_count or 0),
         draft_count=int(draft_count or 0),
+        bgm_path=project.bgm_path,
     )
 
     script_row = (

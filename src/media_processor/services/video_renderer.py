@@ -272,17 +272,126 @@ def _write_concat_list(intermediate_paths: list[Path], list_path: Path) -> None:
             fh.write(f"file '{posix}'\n")
 
 
+# Transition knobs — kept locally rather than imported from edit_planner
+# so video_renderer stays usable as a pure ffmpeg wrapper. The whitelist
+# is the ffmpeg xfade values we promise to support; anything else from a
+# stored plan is coerced to the safe default.
+TRANSITION_DURATION_S: float = 0.5
+VALID_TRANSITIONS: frozenset[str] = frozenset({"fade", "dissolve", "wipeleft", "slideright"})
+TRANSITION_DEFAULT: str = "dissolve"
+
+
+def _safe_transition(name: str) -> str:
+    """Coerce any plan-provided transition name to a safe whitelisted one."""
+    return name if name in VALID_TRANSITIONS else TRANSITION_DEFAULT
+
+
+def _build_xfade_filter(
+    durations_ms: list[int],
+    transitions: list[str],
+) -> tuple[str, str]:
+    """Build (video_chain, audio_chain) for N inputs → [vout]/[aout].
+
+    Video uses xfade with cumulative offsets so adjacent cuts overlap by
+    TRANSITION_DURATION_S. Audio uses acrossfade with the same duration —
+    it auto-aligns to the end of each stream so no offset arithmetic is
+    needed there. Caller guarantees ``len(durations_ms) >= 2`` and
+    ``len(transitions) >= len(durations_ms) - 1``.
+    """
+    n = len(durations_ms)
+    td = TRANSITION_DURATION_S
+
+    v_parts: list[str] = []
+    cumulative_s = durations_ms[0] / 1000.0
+    prev = "[0:v]"
+    for i in range(1, n):
+        offset = max(0.0, cumulative_s - td)
+        out_label = "[vout]" if i == n - 1 else f"[v{i}]"
+        t = _safe_transition(transitions[i - 1])
+        v_parts.append(
+            f"{prev}[{i}:v]xfade=transition={t}:duration={td}:offset={offset:.3f}{out_label}"
+        )
+        cumulative_s += durations_ms[i] / 1000.0 - td
+        prev = out_label
+
+    a_parts: list[str] = []
+    prev = "[0:a]"
+    for i in range(1, n):
+        out_label = "[aout]" if i == n - 1 else f"[a{i}]"
+        a_parts.append(f"{prev}[{i}:a]acrossfade=d={td}:c1=tri:c2=tri{out_label}")
+        prev = out_label
+
+    return ";".join(v_parts), ";".join(a_parts)
+
+
 def concat_segments(
     intermediate_paths: list[Path],
     output_path: Path,
     list_path: Path,
+    *,
+    durations_ms: list[int] | None = None,
+    transitions: list[str] | None = None,
 ) -> None:
-    """Concat the intermediates into a single mux-only mp4."""
+    """Concat intermediates into a single mp4.
+
+    Two paths:
+      - **Plain mux** (default, when ``durations_ms`` / ``transitions`` are
+        omitted or there's only one segment) — ffmpeg's concat demuxer
+        with ``-c copy``. Fast, no re-encode, what M5 used pre-6.3.
+      - **xfade chain** (when both lists provided AND len ≥ 2) — feeds
+        every intermediate as a separate input and chains
+        ``xfade``/``acrossfade`` between them so adjacent cuts overlap by
+        ``TRANSITION_DURATION_S``. Re-encodes (xfade can't operate on
+        compressed streams).
+
+    ``list_path`` is still written in both modes so the demuxer fallback
+    stays a one-line config change away.
+    """
     _require_ffmpeg()
     if not intermediate_paths:
         raise VideoRenderError("concat: no intermediate segments to join")
     _write_concat_list(intermediate_paths, list_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    use_xfade = (
+        durations_ms is not None
+        and transitions is not None
+        and len(intermediate_paths) >= 2
+        and len(durations_ms) == len(intermediate_paths)
+        and len(transitions) >= len(intermediate_paths) - 1
+    )
+
+    if use_xfade:
+        v_chain, a_chain = _build_xfade_filter(durations_ms, transitions)
+        cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y"]
+        for p in intermediate_paths:
+            cmd += ["-i", str(p)]
+        cmd += [
+            "-filter_complex",
+            f"{v_chain};{a_chain}",
+            "-map",
+            "[vout]",
+            "-map",
+            "[aout]",
+            "-c:v",
+            VIDEO_CODEC,
+            "-pix_fmt",
+            VIDEO_PIX_FMT,
+            "-preset",
+            VIDEO_PRESET,
+            "-crf",
+            str(VIDEO_CRF),
+            "-c:a",
+            AUDIO_CODEC,
+            "-b:a",
+            AUDIO_BITRATE,
+            "-movflags",
+            "+faststart",
+            str(output_path),
+        ]
+        _run(cmd, timeout_s=CONCAT_TIMEOUT_S, stage="concat")
+        return
+
     cmd = [
         "ffmpeg",
         "-hide_banner",
@@ -479,10 +588,21 @@ def render(
 
     # Stage 2 — concat into the final output path. If we're going to burn
     # subtitles we still concat first so a subtitle failure leaves a
-    # playable preview behind.
+    # playable preview behind. Pass per-cut durations + transitions so the
+    # concat stage uses xfade chains instead of plain mux when we have
+    # ≥2 cuts; a single-cut plan still goes through the demuxer copy
+    # path automatically.
     list_path = intermediate_dir / "concat.txt"
     concat_path = intermediate_dir / "concat.mp4" if srt_path is not None else output_path
-    concat_segments(intermediates, concat_path, list_path)
+    durations_ms = [s.asset_end_ms - s.asset_start_ms for s in plan.segments]
+    transitions = [s.transition_to_next for s in plan.segments[:-1]] if len(plan.segments) > 1 else []
+    concat_segments(
+        intermediates,
+        concat_path,
+        list_path,
+        durations_ms=durations_ms,
+        transitions=transitions,
+    )
     if on_progress is not None:
         on_progress("concat", 1, 1)
 
@@ -524,6 +644,9 @@ __all__ = [
     "SUBTITLE_BURN_TIMEOUT_S",
     "SUBTITLE_FORCE_STYLE",
     "subtitle_force_style",
+    "TRANSITION_DEFAULT",
+    "TRANSITION_DURATION_S",
+    "VALID_TRANSITIONS",
     "VIDEO_CODEC",
     "VIDEO_CRF",
     "VIDEO_FPS",

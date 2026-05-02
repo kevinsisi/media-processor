@@ -29,6 +29,10 @@ export interface ProjectDetail {
   created_at: string;
   asset_count: number;
   draft_count: number;
+  // M6.4 — populated when the project has an uploaded BGM track. UI can
+  // show a "BGM ✓" chip when set; null = no BGM and the bgm render stage
+  // no-ops.
+  bgm_path: string | null;
 }
 
 export interface ProjectCreate {

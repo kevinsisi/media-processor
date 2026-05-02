@@ -60,6 +60,10 @@ class Project(Base):
         default=TargetAspectRatio.REELS.value,
         server_default=TargetAspectRatio.REELS.value,
     )
+    # M6.4 — optional BGM track for the auto-edit mixer. Path is to the
+    # uploaded audio file under ``BGM_DIR``; null means "no BGM, the bgm
+    # render stage is a no-op copy".
+    bgm_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

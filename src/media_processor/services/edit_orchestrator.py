@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -33,7 +34,7 @@ from media_processor.models import (
     Project,
 )
 from media_processor.profile.loader import ProfileSpec, load_profile
-from media_processor.services import edit_planner, subtitles, video_renderer
+from media_processor.services import bgm_mixer, edit_planner, subtitles, video_renderer
 from media_processor.services.edit_planner import CutPlan
 from media_processor.services.settings_store import get_llm_api_keys
 
@@ -45,6 +46,7 @@ _STAGES: tuple[str, ...] = (
     EditStep.CUT.value,
     EditStep.CONCAT.value,
     EditStep.SUBTITLES.value,
+    EditStep.BGM.value,
 )
 _GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 
@@ -442,7 +444,12 @@ async def run_render(
 
     # Stages 2 + 3 + 4 — cut / concat / subtitles. The renderer batches
     # these so the on_progress callback is the only progress hook.
-    progress_state = {"cut": "pending", "concat": "pending", "subtitles": "pending"}
+    progress_state = {
+        "cut": "pending",
+        "concat": "pending",
+        "subtitles": "pending",
+        "bgm": "pending",
+    }
 
     async def update_state(stage: str, value: str) -> None:
         progress_state[stage] = value
@@ -503,6 +510,36 @@ async def run_render(
                 break
         await _mark_failed(handle.draft_id, f"render: {exc}")
         return summary
+
+    # Stage 5 — BGM mix. No-op when the project has no uploaded bgm_path,
+    # which is the common case until the user uploads one. A BGM failure
+    # only fails the bgm stage, not the whole draft — the subtitled mp4
+    # at output_path is still a valid deliverable on its own.
+    await update_state(EditStep.BGM.value, "running")
+    if project.bgm_path:
+        try:
+            tmp_mixed = scratch_dir / f"draft_{handle.draft_id}_bgm.mp4"
+            await asyncio.to_thread(
+                bgm_mixer.mix_bgm,
+                output_path,
+                Path(project.bgm_path),
+                srt_path if srt_text else None,
+                tmp_mixed,
+            )
+            os.replace(tmp_mixed, output_path)
+            await update_state(EditStep.BGM.value, "done")
+        except bgm_mixer.BgmMixError as exc:
+            logger.warning(
+                "bgm mix failed for draft %d, keeping subtitled mp4: %s",
+                handle.draft_id,
+                exc,
+            )
+            await _set_stage_state(
+                handle.draft_id, EditStep.BGM.value, f"failed:{type(exc).__name__}"
+            )
+            summary["stages"][EditStep.BGM.value] = f"failed:{type(exc).__name__}"
+    else:
+        await update_state(EditStep.BGM.value, "done")
 
     await _mark_ready(
         handle.draft_id,

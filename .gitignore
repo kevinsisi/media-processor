@@ -30,6 +30,7 @@ Thumbs.db
 .env
 .env.local
 .local/
+.claude/worktrees/
 samples/capcut_draft/
 samples/carsmeet_screenshots/
 samples/blurred/

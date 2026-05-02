@@ -61,6 +61,13 @@ Mirror locations (`.claude/skills/`, `.gemini/skills/`, `.opencode/skills/`, `.g
 - Any requirement that should govern future implementation must be written into the formal rule sources (this file or a skill), not left only in chat context. Rule home: `skills/execution-style/SKILL.md`.
 - Any non-trivial feature request should first go through an exploration/confirmation step and be captured in OpenSpec before implementation.
 
+## Project Architecture Pointers
+
+CLAUDE.md is meta-rules; concrete project state lives elsewhere. When you need to understand what's currently in the codebase, prefer in this order:
+- `openspec/changes/` — per-milestone proposals + tasks (latest: `m6-rhythm-transitions-bgm`, version 0.12.0).
+- The auto-memory index at `~/.claude/projects/D--GitClone--HomeProject-media-processor/memory/MEMORY.md` — non-obvious deploy / runtime quirks (Tailscale routing, GPU runtime, drafts/BGM storage, key pools, etc.).
+- The code itself — `services/edit_planner.py` for the per-asset Gemini fanout, `services/video_renderer.py` for the xfade chain + drawtext subtitle burn-in, `services/bgm_mixer.py` for the voice-ducked BGM stage.
+
 ## When To Remove Or Replace Skills
 
 - Remove `skills/frontend-design/` if the project has no frontend.

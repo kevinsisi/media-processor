@@ -11,11 +11,12 @@ import {
 } from "../i18n/tags";
 import "./ProjectEdit.css";
 
-const EDIT_STEP_ORDER: ("plan" | "cut" | "concat" | "subtitles")[] = [
+const EDIT_STEP_ORDER: ("plan" | "cut" | "concat" | "subtitles" | "bgm")[] = [
   "plan",
   "cut",
   "concat",
   "subtitles",
+  "bgm",
 ];
 
 // Quick-pick lengths offered alongside the free-form input. Matches the

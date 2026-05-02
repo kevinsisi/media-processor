@@ -63,6 +63,13 @@ _MOTION_DEFAULT = "static"  # if asset has no motion tags, treat as static
 _MOTION_ALTERNATION_BONUS = 10  # boost for differing from prev cut's motion
 _MOTION_POSITION_BONUS = 15  # boost for matching opening=dynamic / closing=static
 
+# xfade transition whitelist — must match ffmpeg xfade filter values.
+# Any other suggestion from Gemini gets coerced to TRANSITION_DEFAULT so a
+# typo / hallucination doesn't crash the render stage.
+VALID_TRANSITIONS: frozenset[str] = frozenset({"fade", "dissolve", "wipeleft", "slideright"})
+TRANSITION_DEFAULT: str = "dissolve"
+TRANSITION_DURATION_S: float = 0.5
+
 # Prompt-budget caps so very long shoots don't blow the context window.
 MAX_TRANSCRIPT_SEGMENTS_VERBATIM = 60
 TRANSCRIPT_BUCKET_SIZE = 8
@@ -106,6 +113,10 @@ class CutPlanSegment:
     asset_end_ms: int
     source_kind: str  # "scripted" | "improv"
     reason: str
+    # xfade transition into the NEXT cut. The last cut's value is unused
+    # (no next). Defaults are safe so older serialised plans without this
+    # field stay loadable.
+    transition_to_next: str = "dissolve"
 
 
 @dataclass(frozen=True)
@@ -252,7 +263,10 @@ _ASSET_SCORE_PROMPT = (
     "若品質太低或與腳本完全無關回 skip\n"
     " 3. best_span_ms：這段「最值得用」的 1.5–6 秒時間範圍 "
     "[start_ms, end_ms]，必須在 [0, {duration_ms}] 之內\n"
-    " 4. source_kind：scripted（照腳本講的部分）或 improv（自然發揮 / 情緒亮點）\n\n"
+    " 4. source_kind：scripted（照腳本講的部分）或 improv（自然發揮 / 情緒亮點）\n"
+    " 5. transition_to_next：這段播完後若銜接「下一段」適合的轉場效果，"
+    "從 fade / dissolve / wipeleft / slideright 擇一（情緒延續用 dissolve；"
+    "場景大跳用 wipeleft 或 slideright；段落收束用 fade）\n\n"
     "嚴格輸出 JSON：\n"
     "{{\n"
     f'  "schema_version": "{ASSET_SCORE_SCHEMA_VERSION}",\n'
@@ -260,6 +274,7 @@ _ASSET_SCORE_PROMPT = (
     '  "position": "opening" | "middle" | "closing" | "skip",\n'
     '  "best_span_ms": [<start_ms>, <end_ms>],\n'
     '  "source_kind": "scripted" | "improv",\n'
+    '  "transition_to_next": "fade" | "dissolve" | "wipeleft" | "slideright",\n'
     '  "reason": "<一句話原因>"\n'
     "}}\n"
 )
@@ -311,6 +326,7 @@ class _AssetScore:
     source_kind: str
     reason: str
     dominant_motion: str = _MOTION_DEFAULT
+    transition_to_next: str = TRANSITION_DEFAULT  # xfade filter type
 
 
 def _dominant_motion_for_span(asset: Asset, span_ms: tuple[int, int]) -> str:
@@ -410,6 +426,12 @@ def _parse_asset_score(
             f"asset {asset_id}: source_kind must be in {_VALID_SOURCE_KINDS}, got {kind!r}"
         )
 
+    # Coerce unknown / missing transition to the safe default rather than
+    # rejecting the whole response — a typo here doesn't ruin the cut plan.
+    transition = str(data.get("transition_to_next", "")).strip().lower()
+    if transition not in VALID_TRANSITIONS:
+        transition = TRANSITION_DEFAULT
+
     reason = str(data.get("reason", "")).strip() or "(no reason)"
     return _AssetScore(
         asset_id=asset_id,
@@ -418,6 +440,7 @@ def _parse_asset_score(
         best_span_ms=(start_ms, end_ms),
         source_kind=kind,
         reason=reason,
+        transition_to_next=transition,
     )
 
 
@@ -527,6 +550,7 @@ def _assemble_plan(
             asset_end_ms=s.best_span_ms[1],
             source_kind=s.source_kind,
             reason=s.reason,
+            transition_to_next=s.transition_to_next,
         )
         for i, s in enumerate(chosen)
     ]
@@ -886,6 +910,7 @@ def serialise_plan(plan_obj: CutPlan) -> dict[str, Any]:
                 "asset_end_ms": s.asset_end_ms,
                 "source_kind": s.source_kind,
                 "reason": s.reason,
+                "transition_to_next": s.transition_to_next,
             }
             for s in plan_obj.segments
         ],
