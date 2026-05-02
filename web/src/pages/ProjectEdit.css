@@ -329,6 +329,32 @@
   margin: 0 0 var(--space-3) 0;
 }
 
+/* ---- BGM uploader (v0.14.5 — explicit "上傳配樂" entry point) ---- */
+
+.bgm-uploader {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 0 var(--space-4) 0;
+}
+
+.bgm-uploader__btn {
+  align-self: flex-start;
+}
+
+.bgm-uploader__hint {
+  font-size: var(--t-xs, 0.75rem);
+  color: var(--text-muted, #888);
+  letter-spacing: 0;
+  margin: 0;
+}
+
+.bgm-uploader__err {
+  font-size: var(--t-xs, 0.75rem);
+  color: var(--status-down, #b34b3a);
+  margin: 0;
+}
+
 /* ---- Stabilize toggle (v0.14.3 — vidstab on/off) ---- */
 
 .stabilize-toggle {

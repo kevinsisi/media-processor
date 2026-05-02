@@ -110,6 +110,18 @@ export class ApiClient {
     });
   }
 
+  // v0.14.5 — single-shot multipart BGM upload. Backend caps at 50 MB
+  // and rewrites prior BGM at the same project_id, so a re-upload is
+  // safe. We let the browser set Content-Type for FormData (boundary).
+  uploadProjectBgm(projectId: number, file: File): Promise<ProjectDetail> {
+    const fd = new FormData();
+    fd.append("file", file);
+    return this.request<ProjectDetail>(`/projects/${projectId}/bgm`, {
+      method: "POST",
+      body: fd,
+    });
+  }
+
   async fetchScript(projectId: number): Promise<ScriptOut | null> {
     try {
       return await this.get<ScriptOut>(`/projects/${projectId}/script`);

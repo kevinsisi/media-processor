@@ -38,26 +38,79 @@
   flex-direction: column;
   flex: 0 1 calc(50% - 0.25rem);
   min-width: 9rem;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02));
-  border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 12px;
-  padding: 0.5rem 0.75rem;
   touch-action: none;
   user-select: none;
 }
 
-.dt-cell--scripted {
+.dt-cell-inner {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.05),
+    rgba(255, 255, 255, 0.02)
+  );
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 0.5rem 0.75rem;
+  position: relative;
+}
+
+.dt-cell--scripted,
+.dt-cell-inner.dt-cell--scripted {
   border-left: 3px solid #84d9c4;
 }
 
-.dt-cell--improv {
+.dt-cell--improv,
+.dt-cell-inner.dt-cell--improv {
   border-left: 3px solid #f4b942;
 }
 
-.dt-cell--dragging {
-  z-index: 10;
-  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.45);
+/* "Ghost" placeholder of the original-position card during drag. It
+   stays in the layout so siblings know where to slide; visually faded
+   so the eye tracks the floating clone instead. */
+.dt-cell--ghost {
+  opacity: 0.25;
+}
+
+/* Floating clone rendered by DragOverlay. Lifts above the rest of the
+   page via the portal at document root; we only need the elevated
+   shadow + grabbing cursor. ``min-width`` mirrors a typical cell so
+   the overlay's size doesn't snap on grab. */
+.dt-cell--floating {
   cursor: grabbing;
+  box-shadow: 0 18px 36px rgba(0, 0, 0, 0.55);
+  transform: scale(1.02);
+  min-width: 9rem;
+  /* DragOverlay provides its own positioning; let its inline transform
+     stack on top of ours. */
+}
+
+/* ---- Commit banner (v0.14.5 — "以此順序重新生成") ---- */
+
+.dt-timeline__commit {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.6rem 0.9rem;
+  border: 1px solid rgba(132, 217, 196, 0.4);
+  background: rgba(132, 217, 196, 0.08);
+  border-radius: 10px;
+}
+
+.dt-timeline__commit-label {
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.dt-timeline__commit-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-shrink: 0;
 }
 
 .dt-cell__handle {
@@ -84,6 +137,15 @@
   padding: 0;
   text-align: left;
   display: flex;
+}
+
+/* The DragOverlay clone passes onTap=undefined, so the button gets
+   ``disabled``. Override the UA's grey-out so the floating card looks
+   identical to its in-list version. */
+.dt-cell--floating .dt-cell__btn[disabled] {
+  cursor: grabbing;
+  opacity: 1;
+  color: inherit;
   flex-direction: column;
   gap: 0.25rem;
   font: inherit;

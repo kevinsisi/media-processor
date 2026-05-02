@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   DndContext,
   type DragEndEvent,
+  DragOverlay,
+  type DragStartEvent,
   KeyboardSensor,
   PointerSensor,
   TouchSensor,
@@ -48,46 +50,32 @@ function makeRow(seg: DraftSegmentOut): SegRowKey {
   return { key: `seg-${seg.id}`, segment: seg };
 }
 
-interface DraggableCellProps {
+interface CellContentProps {
   row: SegRowKey;
   totalMs: number;
-  onTap: (seg: DraftSegmentOut) => void;
+  onTap?: (seg: DraftSegmentOut) => void;
+  // Pass-through for the drag handle's listeners + a11y attributes when
+  // useSortable is wired up. The DragOverlay clone renders without
+  // these so we accept undefined.
+  handleAttrs?: React.HTMLAttributes<HTMLDivElement>;
 }
 
-function DraggableCell({ row, totalMs, onTap }: DraggableCellProps) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id: row.key });
-  const style: React.CSSProperties = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.6 : 1,
-  };
+function CellContent({ row, totalMs, onTap, handleAttrs }: CellContentProps) {
   const seg = row.segment;
   const cls =
-    seg.source_kind === "scripted"
-      ? "dt-cell--scripted"
-      : "dt-cell--improv";
+    seg.source_kind === "scripted" ? "dt-cell--scripted" : "dt-cell--improv";
   const span = seg.on_timeline_end_ms - seg.on_timeline_start_ms;
   const pct = totalMs > 0 ? Math.round((span / totalMs) * 100) : 0;
   return (
-    <li
-      ref={setNodeRef}
-      style={style}
-      className={`dt-cell ${cls}${isDragging ? " dt-cell--dragging" : ""}`}
-    >
-      <div className="dt-cell__handle" {...attributes} {...listeners} aria-label="拖拉重新排序">
+    <div className={`dt-cell-inner ${cls}`}>
+      <div className="dt-cell__handle" {...handleAttrs} aria-label="拖拉重新排序">
         ⋮⋮
       </div>
       <button
         type="button"
         className="dt-cell__btn"
-        onClick={() => onTap(seg)}
+        onClick={onTap ? () => onTap(seg) : undefined}
+        disabled={!onTap}
       >
         <span className="dt-cell__order mono">#{seg.order + 1}</span>
         <span className="dt-cell__range mono">
@@ -103,18 +91,60 @@ function DraggableCell({ row, totalMs, onTap }: DraggableCellProps) {
         )}
         <span className="dt-cell__total mono">{pct}%</span>
       </button>
+    </div>
+  );
+}
+
+interface DraggableCellProps {
+  row: SegRowKey;
+  totalMs: number;
+  onTap: (seg: DraftSegmentOut) => void;
+}
+
+function DraggableCell({ row, totalMs, onTap }: DraggableCellProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: row.key });
+  // The cell's *original* slot stays in the DOM during drag. We dim it
+  // (DragOverlay renders a high-z-index clone above the list so users
+  // see the actual moving card on top of everything else).
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.25 : 1,
+  };
+  return (
+    <li
+      ref={setNodeRef}
+      style={style}
+      className={`dt-cell${isDragging ? " dt-cell--ghost" : ""}`}
+    >
+      <CellContent
+        row={row}
+        totalMs={totalMs}
+        onTap={onTap}
+        handleAttrs={{ ...attributes, ...listeners }}
+      />
     </li>
   );
 }
 
 /**
- * M7.1 — Drag-droppable timeline. The user re-orders cuts, the local state
- * updates immediately, and a debounced PATCH /drafts/{id}/order is sent.
- * On success the parent (`useDraftPolling`) will refresh and pick up the
- * new server state; until then we keep our optimistic order on screen.
+ * M7.1 — Drag-droppable timeline. v0.14.5 reworked the commit flow:
+ * dragging only updates local state, with a "順序已調整" banner offering
+ * the user an explicit "以此順序重新生成" button. Without that click the
+ * backend never sees the new ordering, so accidental drags don't kick
+ * off a 4-minute re-render. The button calls
+ * PATCH /drafts/{id}/order, which on the backend renumbers segments,
+ * rewrites cut_plan_json, and enqueues a skip-plan render.
  *
- * When the draft is in flight (pending / processing), drag is disabled so
- * the user can't reorder mid-render.
+ * When the draft is in flight (pending / processing) drag is disabled
+ * so the user can't reorder mid-render.
  */
 export default function DraggableTimeline({
   draft,
@@ -126,16 +156,30 @@ export default function DraggableTimeline({
     () => [...draft.segments].sort((a, b) => a.order - b.order),
     [draft.segments],
   );
-  const [localRows, setLocalRows] = useState<SegRowKey[]>(() => segments.map(makeRow));
-  // When upstream prop changes (poll refresh, force re-render), reseed
-  // unless we just dragged — in that case we trust our optimistic state
-  // until the PATCH lands.
-  const dirtyRef = useRef(false);
+  const [localRows, setLocalRows] = useState<SegRowKey[]>(() =>
+    segments.map(makeRow),
+  );
+  // Snapshot of the segment ids in their server order. We compare this
+  // against the local order to decide whether the "commit" banner shows.
+  const [serverIds, setServerIds] = useState<number[]>(() =>
+    segments.map((s) => s.id),
+  );
+  // Active dragged-cell key — fed into <DragOverlay> so we can render a
+  // high-contrast floating clone of the cell instead of relying on the
+  // CSS z-index gymnastics that mis-stacked under tall siblings.
+  const [activeKey, setActiveKey] = useState<string | null>(null);
+  // True while the commit PATCH is in flight; prevents double-tap.
+  const [committing, setCommitting] = useState<boolean>(false);
+
+  // Re-seed local rows when the upstream draft changes — e.g. poll
+  // refresh after a successful re-render. We trust the server ordering
+  // when it differs from our last-known snapshot, which is the only
+  // safe way to avoid stuck-banner state after a successful commit.
+  const segmentSig = segments.map((s) => s.id).join(",");
   useEffect(() => {
-    if (!dirtyRef.current) {
-      setLocalRows(segments.map(makeRow));
-    }
-  }, [segments]);
+    setLocalRows(segments.map(makeRow));
+    setServerIds(segments.map((s) => s.id));
+  }, [segmentSig]);
 
   const totalMs = useMemo(
     () =>
@@ -150,50 +194,79 @@ export default function DraggableTimeline({
     useSensor(TouchSensor, {
       activationConstraint: { delay: 150, tolerance: 8 },
     }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
   );
 
   const inFlight =
     draft.status === "pending" || draft.status === "processing";
 
-  const submitReorder = useCallback(
-    async (rows: SegRowKey[]) => {
-      onReorderStart?.();
-      try {
-        const ids = rows.map((r) => r.segment.id);
-        await apiClient.reorderDraftSegments(draft.id, { orders: ids });
-      } catch (err) {
-        const msg =
-          err instanceof ApiError
-            ? `${err.status}: ${err.message}`
-            : err instanceof Error
-              ? err.message
-              : String(err);
-        onReorderError?.(`重新排序失敗：${msg}`);
-        dirtyRef.current = false;
-        setLocalRows(segments.map(makeRow));
-      }
-    },
-    [draft.id, onReorderStart, onReorderError, segments],
-  );
+  // Dirty when local order differs from the server snapshot.
+  const dirty = useMemo(() => {
+    if (localRows.length !== serverIds.length) return true;
+    for (let i = 0; i < localRows.length; i += 1) {
+      if (localRows[i].segment.id !== serverIds[i]) return true;
+    }
+    return false;
+  }, [localRows, serverIds]);
 
-  const handleDragEnd = useCallback(
-    (ev: DragEndEvent) => {
-      const { active, over } = ev;
-      if (!over || active.id === over.id) return;
-      setLocalRows((prev) => {
-        const fromIdx = prev.findIndex((r) => r.key === active.id);
-        const toIdx = prev.findIndex((r) => r.key === over.id);
-        if (fromIdx < 0 || toIdx < 0) return prev;
-        const next = arrayMove(prev, fromIdx, toIdx);
-        dirtyRef.current = true;
-        // Fire-and-forget. The parent decides whether to show a chip.
-        void submitReorder(next);
-        return next;
-      });
-    },
-    [submitReorder],
-  );
+  const handleDragStart = useCallback((ev: DragStartEvent) => {
+    setActiveKey(String(ev.active.id));
+  }, []);
+
+  const handleDragEnd = useCallback((ev: DragEndEvent) => {
+    setActiveKey(null);
+    const { active, over } = ev;
+    if (!over || active.id === over.id) return;
+    setLocalRows((prev) => {
+      const fromIdx = prev.findIndex((r) => r.key === active.id);
+      const toIdx = prev.findIndex((r) => r.key === over.id);
+      if (fromIdx < 0 || toIdx < 0) return prev;
+      return arrayMove(prev, fromIdx, toIdx);
+    });
+  }, []);
+
+  const handleDragCancel = useCallback(() => {
+    setActiveKey(null);
+  }, []);
+
+  const handleCommit = useCallback(async () => {
+    if (!dirty || committing || inFlight) return;
+    setCommitting(true);
+    onReorderStart?.();
+    try {
+      const ids = localRows.map((r) => r.segment.id);
+      await apiClient.reorderDraftSegments(draft.id, { orders: ids });
+      // Locally reflect the commit by updating the server snapshot —
+      // when the parent re-fetches the new draft (with status=pending)
+      // the snapshot syncs again via the segments effect above.
+      setServerIds(ids);
+    } catch (err) {
+      const msg =
+        err instanceof ApiError
+          ? `${err.status}: ${err.message}`
+          : err instanceof Error
+            ? err.message
+            : String(err);
+      onReorderError?.(`重新排序失敗：${msg}`);
+    } finally {
+      setCommitting(false);
+    }
+  }, [
+    dirty,
+    committing,
+    inFlight,
+    localRows,
+    draft.id,
+    onReorderStart,
+    onReorderError,
+  ]);
+
+  const handleRevert = useCallback(() => {
+    // Drop the local order, snap back to whatever the server sent.
+    setLocalRows(segments.map(makeRow));
+  }, [segments]);
 
   const handleTap = useCallback(
     (seg: DraftSegmentOut) => {
@@ -204,6 +277,14 @@ export default function DraggableTimeline({
     },
     [videoRef],
   );
+
+  // Resolve the actively-dragged row for the overlay clone. ``null``
+  // when nothing is being dragged so DragOverlay renders nothing.
+  const activeRow = useRef<SegRowKey | null>(null);
+  if (activeKey) {
+    activeRow.current =
+      localRows.find((r) => r.key === activeKey) ?? activeRow.current;
+  }
 
   if (segments.length === 0) {
     return <div className="dt-timeline dt-timeline--empty mono">尚無片段</div>;
@@ -216,10 +297,37 @@ export default function DraggableTimeline({
           ? "剪輯進行中，完成後可拖拉排序"
           : "長按 ⋮⋮ 或拖拉卡片可調整片段順序"}
       </p>
+      {dirty && !inFlight && (
+        <div className="dt-timeline__commit" role="status">
+          <span className="dt-timeline__commit-label">
+            順序已調整。新順序只會在點下方按鈕後才套用並重新渲染。
+          </span>
+          <div className="dt-timeline__commit-actions">
+            <button
+              type="button"
+              className="cta cta--quiet"
+              onClick={handleRevert}
+              disabled={committing}
+            >
+              還原
+            </button>
+            <button
+              type="button"
+              className="cta cta--primary"
+              onClick={() => void handleCommit()}
+              disabled={committing}
+            >
+              {committing ? "排隊中…" : "以此順序重新生成"}
+            </button>
+          </div>
+        </div>
+      )}
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}
+        onDragStart={inFlight ? undefined : handleDragStart}
         onDragEnd={inFlight ? undefined : handleDragEnd}
+        onDragCancel={inFlight ? undefined : handleDragCancel}
       >
         <SortableContext
           items={localRows.map((r) => r.key)}
@@ -236,6 +344,16 @@ export default function DraggableTimeline({
             ))}
           </ol>
         </SortableContext>
+        {/* Floating clone of the dragged card; rendered in a portal at
+            the document root so no parent stacking context can hide it
+            behind sibling cells. Only the visible card; no listeners. */}
+        <DragOverlay dropAnimation={null}>
+          {activeKey && activeRow.current ? (
+            <div className="dt-cell dt-cell--floating">
+              <CellContent row={activeRow.current} totalMs={totalMs} />
+            </div>
+          ) : null}
+        </DragOverlay>
       </DndContext>
     </div>
   );

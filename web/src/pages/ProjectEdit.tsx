@@ -4,7 +4,12 @@ import { ApiError, apiClient } from "../api/client";
 import DraggableTimeline from "../components/DraggableTimeline";
 import ExportSheet from "../components/ExportSheet";
 import SubtitleEditor from "../components/SubtitleEditor";
-import type { DraftComment, DraftDetail, DraftSummary } from "../api/types";
+import type {
+  DraftComment,
+  DraftDetail,
+  DraftSummary,
+  ProjectDetail,
+} from "../api/types";
 import { useDraftPolling } from "../hooks/useDraftPolling";
 import {
   EDIT_STEP_LABELS,
@@ -372,6 +377,88 @@ function RenderOptions({
   );
 }
 
+interface BgmUploaderProps {
+  projectId: number;
+  bgmPath: string | null | undefined;
+  onUploaded: (project: ProjectDetail) => void;
+  disabled?: boolean;
+}
+
+function BgmUploader({
+  projectId,
+  bgmPath,
+  onUploaded,
+  disabled,
+}: BgmUploaderProps) {
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const [uploading, setUploading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const filename = useMemo(() => {
+    if (!bgmPath) return null;
+    const sep = bgmPath.lastIndexOf("/");
+    return sep >= 0 ? bgmPath.slice(sep + 1) : bgmPath;
+  }, [bgmPath]);
+
+  const handlePick = useCallback(
+    async (file: File): Promise<void> => {
+      setUploading(true);
+      setError(null);
+      try {
+        const proj = await apiClient.uploadProjectBgm(projectId, file);
+        onUploaded(proj);
+      } catch (err) {
+        setError(
+          err instanceof ApiError
+            ? `${err.status}: ${err.message}`
+            : err instanceof Error
+              ? err.message
+              : String(err),
+        );
+      } finally {
+        setUploading(false);
+      }
+    },
+    [projectId, onUploaded],
+  );
+
+  return (
+    <div className="bgm-uploader">
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".mp3,.wav,.m4a,.aac,.flac,.ogg,audio/*"
+        hidden
+        onChange={(e) => {
+          const f = e.currentTarget.files?.[0];
+          if (f) void handlePick(f);
+          e.currentTarget.value = "";
+        }}
+      />
+      <button
+        type="button"
+        className="cta cta--quiet bgm-uploader__btn"
+        onClick={() => inputRef.current?.click()}
+        disabled={disabled || uploading}
+      >
+        {uploading
+          ? "上傳中…"
+          : filename
+            ? `更換配樂（目前：${filename}）`
+            : "上傳配樂（選擇音檔）"}
+      </button>
+      <p className="bgm-uploader__hint mono">
+        支援 mp3 / wav / m4a / aac / flac / ogg；上限 50 MB。配樂會自動與人聲混音並 ducking。
+      </p>
+      {error && (
+        <p className="bgm-uploader__err mono" role="alert">
+          配樂上傳失敗：{error}
+        </p>
+      )}
+    </div>
+  );
+}
+
 interface ProgressTrackerProps {
   steps: Record<string, string> | null | undefined;
 }
@@ -457,6 +544,10 @@ export default function ProjectEdit() {
   // hard-cut version without re-rendering the source plan.
   const [subtitlesOn, setSubtitlesOn] = useState<boolean>(true);
   const [transitionsOn, setTransitionsOn] = useState<boolean>(true);
+  // v0.14.5 — project detail (mostly for bgm_path so the BGM upload
+  // button can show "目前：filename.mp3"). Fetched once on mount and
+  // refreshed after a successful BGM upload.
+  const [project, setProject] = useState<ProjectDetail | null>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
@@ -490,6 +581,25 @@ export default function ProjectEdit() {
       cancelled = true;
     };
   }, [projectId, refreshDrafts]);
+
+  // Fetch the project once on mount so the BGM uploader can show the
+  // current filename and the toggles know whether bgm exists. Failure
+  // is non-fatal — uploader just falls back to the "上傳配樂" label.
+  useEffect(() => {
+    if (!Number.isFinite(projectId)) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const p = await apiClient.fetchProject(validProjectId);
+        if (!cancelled) setProject(p);
+      } catch {
+        // tolerate
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, validProjectId]);
 
   const selectedSummary = useMemo(
     () => drafts.find((d) => d.id === selectedDraftId) ?? null,
@@ -671,6 +781,12 @@ export default function ProjectEdit() {
             setTransitionsOn={setTransitionsOn}
             disabled={triggering}
           />
+          <BgmUploader
+            projectId={validProjectId}
+            bgmPath={project?.bgm_path}
+            onUploaded={setProject}
+            disabled={triggering}
+          />
           <div className="edit-card__actions">
             <button
               type="button"
@@ -782,6 +898,12 @@ export default function ProjectEdit() {
               setSubtitlesOn={setSubtitlesOn}
               transitionsOn={transitionsOn}
               setTransitionsOn={setTransitionsOn}
+              disabled={triggering}
+            />
+            <BgmUploader
+              projectId={validProjectId}
+              bgmPath={project?.bgm_path}
+              onUploaded={setProject}
               disabled={triggering}
             />
             <DraggableTimeline
