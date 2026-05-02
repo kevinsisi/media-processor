@@ -14,7 +14,7 @@ from redis import Redis
 from rq import Queue, Worker
 
 from media_processor.api.config import settings
-from media_processor.workers import ANALYSIS_QUEUE, EDITING_QUEUE
+from media_processor.workers import ANALYSIS_QUEUE, BGM_QUEUE, EDITING_QUEUE
 
 logging.basicConfig(
     level=logging.INFO,
@@ -28,6 +28,7 @@ def main() -> int:
     queues = [
         Queue(ANALYSIS_QUEUE, connection=redis_conn),
         Queue(EDITING_QUEUE, connection=redis_conn),
+        Queue(BGM_QUEUE, connection=redis_conn),
     ]
     worker = Worker(
         queues,

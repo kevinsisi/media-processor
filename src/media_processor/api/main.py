@@ -12,7 +12,15 @@ from starlette.requests import Request
 from starlette.types import ASGIApp
 
 from media_processor.api.config import settings
-from media_processor.api.routers import assets, drafts, health, projects, reviews, uploads
+from media_processor.api.routers import (
+    assets,
+    drafts,
+    health,
+    music,
+    projects,
+    reviews,
+    uploads,
+)
 from media_processor.api.routers import settings as settings_router
 
 # Cache thumbnail files for 1 day; paths are stable per (asset_id, frame_index)
@@ -40,7 +48,7 @@ class StaticCacheMiddleware(BaseHTTPMiddleware):
 
 app = FastAPI(
     title="media-processor API",
-    version="0.14.9",
+    version="0.15.0",
 )
 
 app.include_router(health.router)
@@ -50,14 +58,20 @@ app.include_router(assets.router)
 app.include_router(reviews.router)
 app.include_router(settings_router.router)
 app.include_router(uploads.router)
+app.include_router(music.router)
 
 # Static-serve generated thumbnail JPEGs. The directory is the in-container
 # path; on the dispatch host this resolves under MEDIA_STORAGE_DIR. mkdir on
 # startup so the mount doesn't fail on a fresh deploy. Swallow OSError so
 # import still works in environments without write access (CI test runner).
-for _media_dir in (settings.thumbnails_dir, settings.drafts_dir):
+for _media_dir in (settings.thumbnails_dir, settings.drafts_dir, settings.bgm_dir):
     with contextlib.suppress(OSError):
         Path(_media_dir).mkdir(parents=True, exist_ok=True)
+# v0.15 — also create the curated library subdirectory so a fresh deploy
+# can immediately list (an empty) /music-library response without the
+# operator pre-creating the folder.
+with contextlib.suppress(OSError):
+    Path(settings.bgm_dir, "_library").mkdir(parents=True, exist_ok=True)
 app.add_middleware(
     StaticCacheMiddleware,
     prefix="/media/thumbnails",
@@ -77,4 +91,12 @@ app.mount(
     "/media/drafts",
     StaticFiles(directory=settings.drafts_dir, check_dir=False),
     name="drafts",
+)
+# v0.15 — serve BGM audio (uploaded, AI-generated, and library tracks).
+# Mounted with no cache header so a re-uploaded BGM at the same path is
+# picked up by browsers immediately.
+app.mount(
+    "/media/bgm",
+    StaticFiles(directory=settings.bgm_dir, check_dir=False),
+    name="bgm",
 )

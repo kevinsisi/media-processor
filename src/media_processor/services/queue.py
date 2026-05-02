@@ -19,7 +19,7 @@ from rq.job import Job
 from rq.registry import StartedJobRegistry
 
 from media_processor.api.config import settings
-from media_processor.workers import ANALYSIS_QUEUE, EDITING_QUEUE
+from media_processor.workers import ANALYSIS_QUEUE, BGM_QUEUE, EDITING_QUEUE
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,8 @@ ANALYZE_ASSET_FN = "media_processor.workers.analysis_jobs.analyze_asset"
 RENDER_DRAFT_FN = "media_processor.workers.edit_jobs.render_draft"
 EXPORT_DRAFT_FN = "media_processor.workers.edit_jobs.export_draft"
 EXPORT_JOB_TIMEOUT_SECONDS = 60 * 30  # 30 min — single ffmpeg pass
+GENERATE_BGM_FN = "media_processor.workers.bgm_jobs.generate_bgm"
+BGM_JOB_TIMEOUT_SECONDS = 60 * 15  # 15 min — small MusicGen + IO
 
 
 def _redis() -> Redis:
@@ -157,6 +159,18 @@ def enqueue_draft_export(
         height,
         job.id,
     )
+    return job.id
+
+
+def enqueue_bgm_generation(job_id: int) -> str:
+    """Schedule ``generate_bgm(job_id)`` on the bgm queue.
+
+    Returns the RQ job id so the api can write it back to the
+    ``BgmGenerationJob.rq_job_id`` column for cancel / inspection.
+    """
+    queue = Queue(BGM_QUEUE, connection=_redis(), default_timeout=BGM_JOB_TIMEOUT_SECONDS)
+    job = queue.enqueue(GENERATE_BGM_FN, args=(job_id,))
+    logger.info("enqueued generate_bgm(job_id=%d) as rq job %s", job_id, job.id)
     return job.id
 
 

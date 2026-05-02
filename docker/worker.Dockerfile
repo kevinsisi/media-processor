@@ -78,8 +78,26 @@ RUN pip install \
         "Pillow>=10.4.0" \
         "mediapipe>=0.10.14,<0.11"
 
+# v0.15 — MusicGen-small (services/music_gen.py): text → 30 s WAV.
+# transformers ships ``MusicgenForConditionalGeneration``; we pull torch +
+# torchaudio from the CUDA 12.1 wheel index so the runtime uses the GPU
+# when available and falls back to CPU when not. The model itself
+# (~600 MB) is downloaded lazily on the first generate call rather than
+# baked into the image, so the build stays fast.
+RUN pip install \
+        --extra-index-url https://download.pytorch.org/whl/cu121 \
+        "torch>=2.1.0,<2.5" \
+        "torchaudio>=2.1.0,<2.5" \
+ && pip install \
+        "transformers>=4.45.0,<5.0" \
+        "sentencepiece>=0.2.0" \
+        "accelerate>=0.34.0,<2.0"
+
 COPY src/ ./src/
 COPY profiles/ ./profiles/
+# v0.15 — operators run scripts/seed_music_library.py inside the worker
+# container to pre-render the curated BGM library.
+COPY scripts/ ./scripts/
 
 ENV PYTHONPATH=/app/src
 

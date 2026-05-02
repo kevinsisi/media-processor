@@ -373,6 +373,34 @@ export interface ThumbnailUrl {
   url: string;
 }
 
+// v0.15 — AI BGM generation + curated music library.
+export interface MusicSuggestion {
+  description: string;
+  used_fallback: boolean;
+}
+
+export interface BgmGenerationStatus {
+  job_id: number | null;
+  status: string | null;
+  prompt: string | null;
+  output_url: string | null;
+  error: string | null;
+  created_at: string | null;
+  completed_at: string | null;
+}
+
+export interface MusicLibraryItem {
+  name: string;
+  style: string | null;
+  duration_s: number | null;
+  url: string;
+  size_bytes: number;
+}
+
+export interface MusicLibraryResponse {
+  items: MusicLibraryItem[];
+}
+
 export interface AssetThumbnailsOut {
   asset_id: number;
   count: number;

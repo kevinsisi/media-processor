@@ -8,6 +8,7 @@ M2 §4.1 set up the original 9 entities (project / asset / draft / review / bgm
 from media_processor.models.app_setting import AppSetting
 from media_processor.models.base import Base
 from media_processor.models.bgm import BGM
+from media_processor.models.bgm_generation import BgmGenerationJob
 from media_processor.models.coverage import ScriptCoverage
 from media_processor.models.draft import Draft, DraftSegment
 from media_processor.models.draft_comment import DraftComment
@@ -47,6 +48,7 @@ __all__ = [
     "ASSET_STATUS_VALUES",
     "AppSetting",
     "BGM",
+    "BgmGenerationJob",
     "CUT_SOURCE_KIND_VALUES",
     "DRAFT_STATUS_VALUES",
     "EDIT_STEP_VALUES",

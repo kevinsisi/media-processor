@@ -490,5 +490,63 @@ class AssetThumbnailsOut(BaseModel):
     thumbnails: list[ThumbnailUrl]
 
 
+# ----- v0.15 — AI BGM generation + music library -----
+
+
+class MusicSuggestionOut(BaseModel):
+    """GET /projects/{id}/music-suggestion — Gemini-generated description.
+
+    ``description`` is the prefilled textarea content; ``used_fallback``
+    is true when the canned default fired because Gemini was unavailable
+    or all keys quota-exhausted (so the UI can show a small note).
+    """
+
+    description: str
+    used_fallback: bool = False
+
+
+class GenerateBgmRequest(BaseModel):
+    """POST /projects/{id}/generate-bgm — body."""
+
+    prompt: str = Field(..., min_length=1, max_length=2000)
+
+
+class BgmGenerationStatusOut(BaseModel):
+    """GET /projects/{id}/bgm-status — latest job for the project.
+
+    ``status`` is one of ``pending`` / ``running`` / ``done`` /
+    ``failed:{reason}``. ``output_url`` is null until status==done; UI
+    can use it as the audio preview src.
+    """
+
+    job_id: int | None = None
+    status: str | None = None
+    prompt: str | None = None
+    output_url: str | None = None
+    error: str | None = None
+    created_at: str | None = None
+    completed_at: str | None = None
+
+
+class MusicLibraryItem(BaseModel):
+    """One entry in GET /music-library."""
+
+    name: str  # filename without extension; doubles as the display name
+    style: str | None = None  # parsed from a leading "[style] " prefix if present
+    duration_s: float | None = None
+    url: str  # public path mounted at /api/media/bgm/_library/...
+    size_bytes: int
+
+
+class MusicLibraryOut(BaseModel):
+    items: list[MusicLibraryItem]
+
+
+class SelectLibraryBgmRequest(BaseModel):
+    """POST /projects/{id}/bgm/select-library — body."""
+
+    name: str = Field(..., min_length=1, max_length=256)
+
+
 # Resolve forward reference: UploadCompleteOut references AssetDetail defined below.
 UploadCompleteOut.model_rebuild()

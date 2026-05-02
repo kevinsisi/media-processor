@@ -11,6 +11,7 @@ import type {
   AnalyzeResponse,
   AssetDetail,
   AssetThumbnailsOut,
+  BgmGenerationStatus,
   DraftComment,
   DraftCommentCreate,
   DraftDetail,
@@ -22,6 +23,8 @@ import type {
   EditTriggerResponse,
   LLMKeysUpdateIn,
   LLMKeysUpdateOut,
+  MusicLibraryResponse,
+  MusicSuggestion,
   ProjectAnalysisOut,
   ProjectCreate,
   ProjectDetail,
@@ -120,6 +123,50 @@ export class ApiClient {
       method: "POST",
       body: fd,
     });
+  }
+
+  // ----- v0.15 — AI BGM gen + music library -----
+
+  fetchMusicSuggestion(projectId: number): Promise<MusicSuggestion> {
+    return this.get<MusicSuggestion>(
+      `/projects/${projectId}/music-suggestion`,
+    );
+  }
+
+  generateProjectBgm(
+    projectId: number,
+    prompt: string,
+  ): Promise<BgmGenerationStatus> {
+    return this.request<BgmGenerationStatus>(
+      `/projects/${projectId}/generate-bgm`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt }),
+      },
+    );
+  }
+
+  fetchProjectBgmStatus(projectId: number): Promise<BgmGenerationStatus> {
+    return this.get<BgmGenerationStatus>(`/projects/${projectId}/bgm-status`);
+  }
+
+  fetchMusicLibrary(): Promise<MusicLibraryResponse> {
+    return this.get<MusicLibraryResponse>("/music-library");
+  }
+
+  selectLibraryBgm(
+    projectId: number,
+    name: string,
+  ): Promise<BgmGenerationStatus> {
+    return this.request<BgmGenerationStatus>(
+      `/projects/${projectId}/bgm/select-library`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      },
+    );
   }
 
   async fetchScript(projectId: number): Promise<ScriptOut | null> {
