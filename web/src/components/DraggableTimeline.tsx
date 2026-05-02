@@ -24,11 +24,53 @@ import type { DraftDetail, DraftSegmentOut } from "../api/types";
 import { labelForCutSource } from "../i18n/tags";
 import "./DraggableTimeline.css";
 
+interface AssetThumbInfo {
+  duration_ms: number;
+  thumbnail_urls: string[];
+}
+
 interface DraggableTimelineProps {
   draft: DraftDetail;
   videoRef: React.RefObject<HTMLVideoElement>;
+  // v0.14.7 — per-asset keyframe gallery (asset_id → frames + duration).
+  // Used by each cell to pick the frame whose timestamp is closest to
+  // the cut's mid-point. Empty map when the analysis hasn't run yet
+  // — cells just render without a thumbnail.
+  assetThumbs?: Map<number, AssetThumbInfo>;
   onReorderStart?: () => void;
   onReorderError?: (msg: string) => void;
+}
+
+// Mirror of services.thumbnails.FRAME_PERCENTAGES so we can map a frame
+// index in ``thumbnail_urls`` back to its real asset timestamp. If the
+// backend ever changes the schedule, update both sides.
+const FRAME_PERCENTAGES = [0.1, 0.3, 0.5, 0.7, 0.9];
+
+function pickThumbnailForSpan(
+  info: AssetThumbInfo | undefined,
+  startMs: number | null,
+  endMs: number | null,
+): string | null {
+  if (!info || info.thumbnail_urls.length === 0) return null;
+  if (startMs == null || endMs == null || endMs <= startMs) {
+    // Fall back to the middle keyframe so we still show something.
+    const mid = Math.floor(info.thumbnail_urls.length / 2);
+    return info.thumbnail_urls[mid] ?? null;
+  }
+  const targetMs = (startMs + endMs) / 2;
+  const dur = info.duration_ms || endMs;
+  let bestIdx = 0;
+  let bestDelta = Infinity;
+  info.thumbnail_urls.forEach((_, i) => {
+    const pct = FRAME_PERCENTAGES[i] ?? (i + 0.5) / info.thumbnail_urls.length;
+    const tsMs = pct * dur;
+    const delta = Math.abs(tsMs - targetMs);
+    if (delta < bestDelta) {
+      bestDelta = delta;
+      bestIdx = i;
+    }
+  });
+  return info.thumbnail_urls[bestIdx] ?? null;
 }
 
 interface SegRowKey {
@@ -53,6 +95,7 @@ function makeRow(seg: DraftSegmentOut): SegRowKey {
 interface CellContentProps {
   row: SegRowKey;
   totalMs: number;
+  thumbnailUrl?: string | null;
   onTap?: (seg: DraftSegmentOut) => void;
   // Pass-through for the drag handle's listeners + a11y attributes when
   // useSortable is wired up. The DragOverlay clone renders without
@@ -60,7 +103,13 @@ interface CellContentProps {
   handleAttrs?: React.HTMLAttributes<HTMLDivElement>;
 }
 
-function CellContent({ row, totalMs, onTap, handleAttrs }: CellContentProps) {
+function CellContent({
+  row,
+  totalMs,
+  thumbnailUrl,
+  onTap,
+  handleAttrs,
+}: CellContentProps) {
   const seg = row.segment;
   const cls =
     seg.source_kind === "scripted" ? "dt-cell--scripted" : "dt-cell--improv";
@@ -71,6 +120,11 @@ function CellContent({ row, totalMs, onTap, handleAttrs }: CellContentProps) {
       <div className="dt-cell__handle" {...handleAttrs} aria-label="拖拉重新排序">
         ⋮⋮
       </div>
+      {thumbnailUrl && (
+        <div className="dt-cell__thumb">
+          <img src={thumbnailUrl} alt="" loading="lazy" />
+        </div>
+      )}
       <button
         type="button"
         className="dt-cell__btn"
@@ -100,10 +154,16 @@ function CellContent({ row, totalMs, onTap, handleAttrs }: CellContentProps) {
 interface DraggableCellProps {
   row: SegRowKey;
   totalMs: number;
+  thumbnailUrl: string | null;
   onTap: (seg: DraftSegmentOut) => void;
 }
 
-function DraggableCell({ row, totalMs, onTap }: DraggableCellProps) {
+function DraggableCell({
+  row,
+  totalMs,
+  thumbnailUrl,
+  onTap,
+}: DraggableCellProps) {
   const {
     attributes,
     listeners,
@@ -129,6 +189,7 @@ function DraggableCell({ row, totalMs, onTap }: DraggableCellProps) {
       <CellContent
         row={row}
         totalMs={totalMs}
+        thumbnailUrl={thumbnailUrl}
         onTap={onTap}
         handleAttrs={{ ...attributes, ...listeners }}
       />
@@ -151,6 +212,7 @@ function DraggableCell({ row, totalMs, onTap }: DraggableCellProps) {
 export default function DraggableTimeline({
   draft,
   videoRef,
+  assetThumbs,
   onReorderStart,
   onReorderError,
 }: DraggableTimelineProps) {
@@ -336,14 +398,26 @@ export default function DraggableTimeline({
           strategy={verticalListSortingStrategy}
         >
           <ol className="dt-timeline__list" aria-label="剪輯時間軸">
-            {localRows.map((r) => (
-              <DraggableCell
-                key={r.key}
-                row={r}
-                totalMs={totalMs}
-                onTap={handleTap}
-              />
-            ))}
+            {localRows.map((r) => {
+              const info =
+                r.segment.asset_id != null
+                  ? assetThumbs?.get(r.segment.asset_id)
+                  : undefined;
+              const thumbnailUrl = pickThumbnailForSpan(
+                info,
+                r.segment.asset_start_ms,
+                r.segment.asset_end_ms,
+              );
+              return (
+                <DraggableCell
+                  key={r.key}
+                  row={r}
+                  totalMs={totalMs}
+                  thumbnailUrl={thumbnailUrl}
+                  onTap={handleTap}
+                />
+              );
+            })}
           </ol>
         </SortableContext>
         {/* Floating clone of the dragged card; rendered in a portal at
@@ -352,7 +426,22 @@ export default function DraggableTimeline({
         <DragOverlay dropAnimation={null}>
           {activeKey && activeRow.current ? (
             <div className="dt-cell dt-cell--floating">
-              <CellContent row={activeRow.current} totalMs={totalMs} />
+              <CellContent
+                row={activeRow.current}
+                totalMs={totalMs}
+                thumbnailUrl={(() => {
+                  const seg = activeRow.current.segment;
+                  const info =
+                    seg.asset_id != null
+                      ? assetThumbs?.get(seg.asset_id)
+                      : undefined;
+                  return pickThumbnailForSpan(
+                    info,
+                    seg.asset_start_ms,
+                    seg.asset_end_ms,
+                  );
+                })()}
+              />
             </div>
           ) : null}
         </DragOverlay>

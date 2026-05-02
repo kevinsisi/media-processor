@@ -114,6 +114,24 @@
   flex-shrink: 0;
 }
 
+/* ---- Thumbnail strip (v0.14.7 — closest-to-mid keyframe) ---- */
+
+.dt-cell__thumb {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 8px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.4);
+  flex-shrink: 0;
+}
+
+.dt-cell__thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
 /* ---- Drag handle ---- */
 
 .dt-cell__handle {

@@ -548,6 +548,13 @@ export default function ProjectEdit() {
   // button can show "目前：filename.mp3"). Fetched once on mount and
   // refreshed after a successful BGM upload.
   const [project, setProject] = useState<ProjectDetail | null>(null);
+  // v0.14.7 — per-asset thumbnail metadata (duration + frame URLs) so
+  // each segment card can render the keyframe closest to the cut's
+  // mid-point. Fetched once on mount; failure is non-fatal — the cards
+  // just render without a thumbnail strip.
+  const [assetThumbs, setAssetThumbs] = useState<
+    Map<number, { duration_ms: number; thumbnail_urls: string[] }>
+  >(new Map());
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
@@ -594,6 +601,37 @@ export default function ProjectEdit() {
         if (!cancelled) setProject(p);
       } catch {
         // tolerate
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, validProjectId]);
+
+  // v0.14.7 — pull keyframe galleries for every analysed asset in the
+  // project so DraggableTimeline can render a per-cut thumbnail.
+  useEffect(() => {
+    if (!Number.isFinite(projectId)) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await apiClient.fetchProjectAnalysis(validProjectId);
+        if (cancelled) return;
+        const map = new Map<
+          number,
+          { duration_ms: number; thumbnail_urls: string[] }
+        >();
+        for (const a of data.assets) {
+          if (a.thumbnail_urls && a.thumbnail_urls.length > 0) {
+            map.set(a.id, {
+              duration_ms: a.duration_ms,
+              thumbnail_urls: a.thumbnail_urls,
+            });
+          }
+        }
+        setAssetThumbs(map);
+      } catch {
+        // tolerate — just don't show thumbnails
       }
     })();
     return () => {
@@ -909,6 +947,7 @@ export default function ProjectEdit() {
             <DraggableTimeline
               draft={draft}
               videoRef={videoRef as React.RefObject<HTMLVideoElement>}
+              assetThumbs={assetThumbs}
               onReorderStart={() => void refreshDrafts().catch(() => {})}
               onReorderError={(msg) => setTriggerError(msg)}
             />
