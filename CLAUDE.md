@@ -76,10 +76,17 @@ Mirror locations (`.claude/skills/`, `.gemini/skills/`, `.opencode/skills/`, `.g
 
 CLAUDE.md is meta-rules; concrete project state lives elsewhere. When you need to understand what's currently in the codebase, prefer in this order:
 - `ROADMAP.md` — Phase 6–9 全程路線圖（已完成/規劃中），含每個 sub-task 驗收標準。新對話開頭先讀這個就能對齊大方向。
-- `openspec/changes/` — per-milestone proposals + tasks (latest: `m7-manual-control`, version 0.13.x; 上一版 `m6-rhythm-transitions-bgm`, 0.12.0).
-- The auto-memory index at `~/.claude/projects/D--GitClone--HomeProject-media-processor/memory/MEMORY.md` — non-obvious deploy / runtime quirks (Tailscale routing, GPU runtime, drafts/BGM storage, key pools, etc.).
+- `openspec/changes/` — current in-flight proposals + tasks. Completed milestones live under `openspec/changes/archive/YYYY-MM-DD-<name>/` (M6 0.12.0 / M7 0.13.0 / M8 0.14.0 / M8.1 0.14.x — already archived).
+- The auto-memory index at `~/.claude/projects/D--GitClone--HomeProject-media-processor/memory/MEMORY.md` — non-obvious deploy / runtime quirks (Tailscale routing, GPU runtime, drafts/BGM storage, key pools, MusicGen, vidstab, YOLO tracking, etc.).
 - `skills/gemini-prompts/` — 4 個 reusable Gemini prompt skill（asset-score / scene-tag / script-coverage / llm-patcher），改 prompt 前先看這裡。
-- The code itself — `services/edit_planner.py` for the per-asset Gemini fanout, `services/video_renderer.py` for the xfade chain + drawtext subtitle burn-in, `services/bgm_mixer.py` for the voice-ducked BGM stage.
+- The code itself —
+  - `services/edit_planner.py` per-asset Gemini fanout (M6) + emotion / motion / face fields on `_AssetScore` + `_assemble_plan` 3-pass dedup/top-up (M8.1)
+  - `services/video_renderer.py` xfade chain + drawtext subtitle burn-in + `_zoompan_filter` (d=1, gated on motion-OR-face) + auto-reframe sendcmd chain (v0.16)
+  - `services/auto_reframe.py` Kalman-smoothed YOLO bbox → ffmpeg sendcmd dynamic crop (v0.16; tuned Q=120 R=80 MAX_DELTA=24 CROP_ZOOM_FACTOR=0.75 in v0.16.1)
+  - `services/bgm_mixer.py` voice-ducked BGM stage (M6.4)
+  - `services/musicgen.py` AI BGM generation (v0.15.x — fp32 forward + CFG step-down chain + transcript-aware prompt suggestion)
+  - `services/vidstab.py` two-pass digital stabilization (v0.14.3)
+  - `services/subtitles.py` builds drawtext-burned cues with `TRANSITION_OVERLAP_MS` accounting (M6.1 / M7.2)
 
 ## When To Remove Or Replace Skills
 

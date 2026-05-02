@@ -2,7 +2,7 @@
 
 > **單一定位**：個人 / 小團隊用的「拍完就上傳，AI 直接給可發佈影片」的工具。
 > 目標 UX：手機優先、繁體中文、高級感、最少手動編輯。
-> 目前版本：**0.14.0**（Phase 8.1 — 情緒分析 + 運鏡縮放 完成）
+> 目前版本：**0.16.1**（M9.1 — YOLO tracking + auto-reframe，含 reorder/render hardening）
 
 ## Phase 進度速覽
 
@@ -15,9 +15,11 @@
 | M5 | Auto-edit MVP（cut planner + edit planner + LLM patcher） | ✅ done | 0.11.x |
 | M6 | Rhythm + Transitions + BGM | ✅ done | 0.12.0 |
 | M7 | Manual control（timeline / subtitle / export format） | ✅ done | 0.13.0 |
-| **M8.1** | **情緒分析 + 運鏡縮放（zoompan + emotion-shift transitions）** | ✅ done | **0.14.0** |
-| M8.2 | BGM library + 智慧選曲 + 動態元素（kinetic typography / hero shot） | 🔜 planned | 0.15.x |
-| M9 | 多專案批次 + 社群直接發布 | 🔮 future | 0.16.x+ |
+| M8.1 | 情緒分析 + 運鏡縮放（zoompan + emotion-shift transitions） | ✅ done | 0.14.0 – 0.14.2 |
+| M8.3 | vidstab digital stabilization + subtitle/transition toggles + AI feedback | ✅ done | 0.14.3 – 0.14.9 |
+| M9.0 | AI BGM 生成（MusicGen）+ curated music library | ✅ done | 0.15.0 – 0.15.3 |
+| **M9.1** | **YOLO 物件追蹤 + auto-reframe 動態裁切** | ✅ done | **0.16.0 – 0.16.1** |
+| M9.2 | 多專案批次 + 社群直接發布 | 🔮 future | 0.17.x+ |
 
 ---
 
