@@ -103,20 +103,42 @@ export default function BgmSourcePicker({
   const [aiStatus, setAiStatus] = useState<BgmGenerationStatus | null>(null);
   const [aiSubmitting, setAiSubmitting] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
+  // v0.16 — once the user types into the AI prompt textarea, never let
+  // a background suggestion fetch overwrite their text. The flag flips
+  // back to false ONLY when the user explicitly clicks 「重新產生建議」.
+  // Stored in a ref (not useState) so changing it doesn't re-trigger
+  // the auto-load effect below.
+  const aiPromptUserEditedRef = useRef(false);
 
-  const loadAiSuggestion = useCallback(async () => {
-    setAiPromptLoading(true);
-    setAiError(null);
-    try {
-      const s = await apiClient.fetchMusicSuggestion(projectId);
-      setAiPrompt(s.description);
-      setAiPromptUsedFallback(s.used_fallback);
-    } catch (err) {
-      setAiError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setAiPromptLoading(false);
-    }
-  }, [projectId]);
+  const loadAiSuggestion = useCallback(
+    async (forceReplace: boolean) => {
+      setAiPromptLoading(true);
+      setAiError(null);
+      try {
+        const s = await apiClient.fetchMusicSuggestion(projectId);
+        // Only write into the textarea on the initial fetch (the user
+        // hasn't started editing yet) OR when the caller explicitly
+        // asked for a replace via the 「重新產生建議」 button. This
+        // protects user edits across re-renders, parent state changes,
+        // and any future polling-style refresh of the suggestion.
+        if (forceReplace || !aiPromptUserEditedRef.current) {
+          setAiPrompt(s.description);
+          setAiPromptUsedFallback(s.used_fallback);
+          if (forceReplace) {
+            // After an explicit "regenerate" the textarea now matches
+            // the fresh suggestion — drop the edited flag so the user
+            // can re-edit and the cycle works again.
+            aiPromptUserEditedRef.current = false;
+          }
+        }
+      } catch (err) {
+        setAiError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setAiPromptLoading(false);
+      }
+    },
+    [projectId],
+  );
 
   const loadAiStatus = useCallback(async () => {
     try {
@@ -129,8 +151,17 @@ export default function BgmSourcePicker({
 
   useEffect(() => {
     if (source !== "ai") return;
-    // Lazy-load suggestion on first switch into the AI tab.
-    if (!aiPrompt && !aiPromptLoading) void loadAiSuggestion();
+    // Lazy-load suggestion on first switch into the AI tab. Skip when
+    // the user has already typed something — even if their edits left
+    // the textarea momentarily empty, we treat that as intentional
+    // (they're rewriting the prompt) and don't reset to the AI text.
+    if (
+      !aiPrompt &&
+      !aiPromptLoading &&
+      !aiPromptUserEditedRef.current
+    ) {
+      void loadAiSuggestion(false);
+    }
     // Always re-fetch the most recent gen status on mount.
     void loadAiStatus();
   }, [source, aiPrompt, aiPromptLoading, loadAiSuggestion, loadAiStatus]);
@@ -326,13 +357,20 @@ export default function BgmSourcePicker({
             rows={4}
             maxLength={2000}
             disabled={disabled || aiSubmitting}
-            onChange={(e) => setAiPrompt(e.currentTarget.value)}
+            onChange={(e) => {
+              // First keystroke flips the userEdited flag; while set,
+              // any background suggestion fetch silently skips the
+              // textarea (see ``loadAiSuggestion``). The flag only
+              // resets when the user explicitly clicks 「重新產生建議」.
+              aiPromptUserEditedRef.current = true;
+              setAiPrompt(e.currentTarget.value);
+            }}
           />
           <div className="bgm-picker__row">
             <button
               type="button"
               className="cta cta--quiet"
-              onClick={() => void loadAiSuggestion()}
+              onClick={() => void loadAiSuggestion(true)}
               disabled={disabled || aiPromptLoading || aiSubmitting}
             >
               重新產生建議
