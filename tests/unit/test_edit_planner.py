@@ -103,6 +103,7 @@ async def test_plan_happy_path(session: AsyncSession, monkeypatch: pytest.Monkey
         "best_span_ms": [0, 4000],
         "source_kind": "scripted",
         "transition_to_next": "fade",
+        "summary": "片段一介紹主題",
         "reason": "matches line 1",
     }
 
@@ -290,6 +291,116 @@ async def test_heuristic_fallback_uses_transcript(session: AsyncSession) -> None
     assert plan.fallback_reason == "test"
     assert len(plan.segments) >= 1
     assert all(s.source_kind == "improv" for s in plan.segments)
+
+
+def test_assemble_plan_dedups_repeated_transcripts() -> None:
+    """Phase 8.2 regression: two cuts whose transcripts say the same thing
+    should not both make the cut, even when both are high-scored. Mirrors
+    the prod incident where 蚊子館 appeared 4–5 times in one reel."""
+    from media_processor.services.edit_planner import (
+        TRANSITION_DEFAULT,
+        _AssetScore,
+        _assemble_plan,
+    )
+
+    repeated = "蚊子館蓋了根本沒人去政府浪費錢"
+    scores = [
+        _AssetScore(
+            asset_id=1,
+            score=95,
+            position="opening",
+            best_span_ms=(0, 4_000),
+            source_kind="improv",
+            reason="",
+            transition_to_next=TRANSITION_DEFAULT,
+            summary="批評蚊子館浪費公帑",
+            span_transcript=repeated,
+            scene_tags_top=("室外",),
+        ),
+        _AssetScore(
+            asset_id=2,
+            score=92,
+            position="middle",
+            best_span_ms=(0, 4_000),
+            source_kind="improv",
+            reason="",
+            transition_to_next=TRANSITION_DEFAULT,
+            summary="批評蚊子館浪費公帑",
+            span_transcript=repeated,  # identical text → must be deduped
+            scene_tags_top=("室外",),
+        ),
+        _AssetScore(
+            asset_id=3,
+            score=70,
+            position="middle",
+            best_span_ms=(0, 4_000),
+            source_kind="improv",
+            reason="",
+            transition_to_next=TRANSITION_DEFAULT,
+            summary="介紹另一個建設案",
+            span_transcript="這個案子完工後對地方很有幫助",
+            scene_tags_top=("室內",),
+        ),
+    ]
+    cuts = _assemble_plan(scores, target_duration_ms=12_000)
+    asset_ids = [c.asset_id for c in cuts]
+    assert len(set(asset_ids)) == len(asset_ids), f"duplicate asset_id: {asset_ids}"
+    # The dup must drop, the unique third one must stay.
+    assert 2 not in asset_ids
+    assert 3 in asset_ids
+
+
+def test_assemble_plan_tops_up_to_target() -> None:
+    """Phase 8.2 regression: when the bucket walk under-shoots target, the
+    top-up pass must keep pulling candidates until total ≈ target."""
+    from media_processor.services.edit_planner import (
+        TRANSITION_DEFAULT,
+        _AssetScore,
+        _assemble_plan,
+    )
+
+    # 6 candidates × 4 s each = 24 s of usable material; target 20 s. The
+    # legacy assembler used to stop at ~4–8 s because each bucket bailed
+    # after one pick. Top-up should now drive us into the [target, 1.2×]
+    # window. Each transcript is genuinely different so the dedup pass
+    # doesn't fire.
+    transcripts = [
+        "今天去爬山看到非常壯觀的雲海風景",
+        "新店開幕特價商品打五折大家快來搶購",
+        "電影院新上映的科幻片視覺特效真的很棒",
+        "週末家裡聚餐媽媽做的紅燒肉超級好吃",
+        "夜市裡那攤蚵仔煎排隊排了快兩小時",
+        "公司年會抽獎抽到一台筆電真是太幸運",
+    ]
+    summaries = [
+        "山頂雲海",
+        "商店打折",
+        "科幻電影",
+        "家庭聚餐",
+        "夜市美食",
+        "年會抽獎",
+    ]
+    scores: list[_AssetScore] = []
+    for i in range(6):
+        scores.append(
+            _AssetScore(
+                asset_id=100 + i,
+                score=80,
+                position="middle",
+                best_span_ms=(0, 4_000),
+                source_kind="improv",
+                reason="",
+                transition_to_next=TRANSITION_DEFAULT,
+                summary=summaries[i],
+                span_transcript=transcripts[i],
+                scene_tags_top=(f"scene{i}",),
+            )
+        )
+    cuts = _assemble_plan(scores, target_duration_ms=20_000)
+    total_ms = sum(c.asset_end_ms - c.asset_start_ms for c in cuts)
+    assert total_ms >= 20_000, f"top-up failed: only {total_ms}ms vs 20000 target"
+    assert total_ms <= 24_000, f"overshot 1.2x cap: {total_ms}ms"
+    assert len(cuts) >= 5
 
 
 def test_serialise_plan_roundtrip() -> None:
