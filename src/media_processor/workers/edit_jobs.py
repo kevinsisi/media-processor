@@ -34,6 +34,7 @@ def render_draft(
     stabilize: bool = True,
     subtitles: bool = True,
     transitions: bool = True,
+    auto_reframe: bool = True,
 ) -> dict[str, Any]:
     """RQ job — produce the next-version draft mp4 for ``project_id``.
 
@@ -59,7 +60,8 @@ def render_draft(
     """
     logger.info(
         "render_draft: project_id=%d draft_id=%s force=%s target_duration_ms=%s "
-        "skip_plan=%s subtitles_from_db=%s stabilize=%s subtitles=%s transitions=%s",
+        "skip_plan=%s subtitles_from_db=%s stabilize=%s subtitles=%s transitions=%s "
+        "auto_reframe=%s",
         project_id,
         draft_id,
         force,
@@ -69,6 +71,7 @@ def render_draft(
         stabilize,
         subtitles,
         transitions,
+        auto_reframe,
     )
     # Local import keeps the api container free of ffmpeg / heavy deps.
     from media_processor.services.edit_orchestrator import run_render
@@ -86,6 +89,7 @@ def render_draft(
             # the ``subtitles`` module the orchestrator already imports.
             subtitles_enabled=subtitles,
             transitions_enabled=transitions,
+            auto_reframe_enabled=auto_reframe,
         )
     )
 

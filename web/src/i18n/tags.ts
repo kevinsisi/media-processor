@@ -29,8 +29,30 @@ export const ANALYSIS_STEP_LABELS: Record<string, string> = {
   scene: "場景",
   motion: "運鏡",
   emotion: "情緒",
+  tracking: "追蹤",
   coverage: "對稿",
 };
+
+// v0.16 — YOLO/COCO subject class names → Chinese labels for the
+// tracking summary chip on the analysis page. Anything not in the map
+// falls through to ``labelForTrackingSubject`` returning the raw token.
+export const TRACKING_SUBJECT_LABELS: Record<string, string> = {
+  person: "人物",
+  car: "汽車",
+  truck: "卡車",
+  bus: "公車",
+  motorcycle: "機車",
+  bicycle: "腳踏車",
+  dog: "狗",
+  cat: "貓",
+  horse: "馬",
+  skateboard: "滑板",
+};
+
+export function labelForTrackingSubject(name: string | null | undefined): string {
+  if (!name) return "";
+  return TRACKING_SUBJECT_LABELS[name] ?? name;
+}
 
 // Phase 8.1 — face emotion classes returned by services/emotion.py.
 export const EMOTION_TAG_LABELS: Record<string, string> = {

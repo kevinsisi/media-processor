@@ -93,6 +93,28 @@ RUN pip install \
         "sentencepiece>=0.2.0" \
         "accelerate>=0.34.0,<2.0"
 
+# v0.16 — YOLOv8 object tracking for services/object_tracking.py. The
+# yolov8n.pt weight file (~6 MB) is downloaded lazily on first detect
+# call (cached at TRACKING_MODEL_DIR), so this layer just provides the
+# python wrapper.
+#
+# ``--no-deps`` is critical: the default ultralytics install resolves
+# ``torch>=1.8`` to torch 2.11 + CUDA 13 wheels, which clobbers our
+# pinned cu121 stack and breaks MusicGen. We install the small Python-
+# only deps explicitly, plus a matching torchvision 0.19.1+cu121 from
+# the pytorch wheel index.
+RUN pip install \
+        --extra-index-url https://download.pytorch.org/whl/cu121 \
+        "torchvision==0.19.1+cu121" \
+ && pip install --no-deps \
+        "ultralytics>=8.3.0,<9.0" \
+        "ultralytics-thop>=2.0" \
+        "py-cpuinfo>=9.0" \
+        "scipy>=1.10" \
+        "matplotlib>=3.3" \
+        "pandas>=1.5" \
+        "tqdm>=4.65"
+
 COPY src/ ./src/
 COPY profiles/ ./profiles/
 # v0.15 — operators run scripts/seed_music_library.py inside the worker

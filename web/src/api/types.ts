@@ -164,6 +164,11 @@ export interface EditTriggerRequest {
   // v0.14.4 — toggle xfade transitions. False uses hard cuts (concat
   // demuxer plain mux, no overlap, no xfade re-encode).
   transitions?: boolean;
+  // v0.16 — toggle auto-reframe (YOLO-tracked dynamic crop). Default
+  // true on the backend; assets without tracking_json silently fall
+  // back to the static centered crop so leaving this on is safe even
+  // on partially analyzed projects.
+  auto_reframe?: boolean;
 }
 
 export interface EditTriggerResponse {
@@ -363,9 +368,19 @@ export interface AssetAnalysisItem {
   motion_segments: MotionSegmentOut[];
   // Phase 8.1 — null when the emotion stage hasn't run for this asset.
   emotion_tags?: EmotionTagsOut | null;
+  // v0.16 — null when the tracking stage hasn't run; ``frame_count: 0``
+  // and ``subject_class: ""`` when YOLO saw no recognised subjects.
+  tracking_summary?: TrackingSummaryOut | null;
   // Public URLs (e.g. "/api/media/thumbnails/12/frame_2.jpg") for the
   // keyframe gallery; empty until ffmpeg has produced the frames.
   thumbnail_urls: string[];
+}
+
+export interface TrackingSummaryOut {
+  subject_class: string;
+  confidence: number;
+  frame_count: number;
+  sampled_frames: number;
 }
 
 export interface ThumbnailUrl {

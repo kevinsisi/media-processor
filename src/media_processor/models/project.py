@@ -125,6 +125,14 @@ class Asset(Base):
         default=AssetStatus.PENDING.value,
     )
     analysis_steps_json: Mapped[Any] = mapped_column(JSON, nullable=True)
+    # v0.16 — YOLOv8 per-frame bounding boxes for the dominant subject.
+    # Shape: {"subject_class": "car", "confidence": 0.92,
+    #         "src_w": 1920, "src_h": 1080, "fps": 5.0,
+    #         "frames": [{"t_ms": 0, "x": 870, "y": 420, "w": 180, "h": 240}, …]}
+    # ``None`` means the tracking step hasn't run (or saw no detections).
+    # Read by services.auto_reframe to compute per-frame crop windows
+    # so the renderer can keep the subject centered in 9:16 output.
+    tracking_json: Mapped[Any] = mapped_column(JSON, nullable=True)
 
     project: Mapped[Project] = relationship("Project", back_populates="assets")
     tags: Mapped[list[AssetTag]] = relationship(

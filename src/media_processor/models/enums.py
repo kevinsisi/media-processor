@@ -63,6 +63,7 @@ class AnalysisStep(StrEnum):
     SCENE = "scene"
     MOTION = "motion"
     EMOTION = "emotion"  # Phase 8.1 — MediaPipe face landmarker → emotion tags
+    TRACKING = "tracking"  # v0.16 — YOLOv8 per-frame subject bbox → tracking_json
     COVERAGE = "coverage"
 
 

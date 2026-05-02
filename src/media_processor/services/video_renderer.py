@@ -19,7 +19,9 @@ import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
+from media_processor.services import auto_reframe
 from media_processor.services.edit_planner import CutPlan, CutPlanSegment
 
 logger = logging.getLogger(__name__)
@@ -275,6 +277,9 @@ def _cut_segment(
     cut: CutPlanSegment,
     out_path: Path,
     target_aspect: str,
+    *,
+    tracking: dict[str, Any] | None = None,
+    sendcmd_dir: Path | None = None,
 ) -> None:
     """Cut + scale-and-crop one segment to a uniform intermediate mp4.
 
@@ -282,11 +287,35 @@ def _cut_segment(
     ``ZOOMPAN_EMOTIONS`` we tack a ``zoompan`` filter onto the chain so
     the segment renders with a slow 1.00 → 1.15 zoom-in across its
     duration. Other emotions (or unknown) keep the static aspect crop.
+
+    v0.16: when ``tracking`` (per-asset YOLO bbox dict from
+    ``Asset.tracking_json``) is supplied AND covers this cut's window,
+    the static aspect filter is replaced by the
+    ``sendcmd → crop@reframe → scale`` chain from
+    :mod:`auto_reframe` so the subject stays centered across the cut.
+    Falls back to the static crop when tracking has no overlapping
+    frames or the source already matches the target aspect.
     """
     out_path.parent.mkdir(parents=True, exist_ok=True)
     start_s = cut.asset_start_ms / 1000.0
     duration_s = max(0.001, (cut.asset_end_ms - cut.asset_start_ms) / 1000.0)
+
     vf_chain = aspect_filter(target_aspect)
+    if tracking and sendcmd_dir is not None:
+        crop_path = auto_reframe.compute_crop_path(
+            tracking,
+            target_aspect=target_aspect,
+            asset_start_ms=cut.asset_start_ms,
+            asset_end_ms=cut.asset_end_ms,
+        )
+        if crop_path is not None:
+            sendcmd_path = sendcmd_dir / f"reframe_seg_{cut.order:04d}.txt"
+            auto_reframe.write_sendcmd_file(crop_path, sendcmd_path)
+            target_w, target_h = ASPECT_DIMENSIONS[target_aspect]
+            vf_chain = auto_reframe.build_filter_chain(
+                crop_path, sendcmd_path, target_w, target_h
+            )
+
     if _should_zoompan(cut):
         # zoompan operates on its own canvas, so we run it AFTER the
         # aspect crop so the zoom centre is the cropped frame's centre
@@ -336,10 +365,22 @@ def cut_segments(
     target_aspect: str,
     *,
     on_progress: Callable[[int, int], None] | None = None,
+    tracking_by_asset: dict[int, dict[str, Any]] | None = None,
 ) -> list[Path]:
-    """Cut every segment in the plan; return the intermediate paths in order."""
+    """Cut every segment in the plan; return the intermediate paths in order.
+
+    ``tracking_by_asset`` (when supplied) maps ``asset_id`` to its
+    ``Asset.tracking_json`` dict; segments backed by an asset present in
+    that map get the auto-reframe dynamic crop chain. A None value
+    or a missing key means the segment falls back to the static
+    aspect crop. The renderer caller decides whether the user opted
+    in to auto-reframe; this layer only reacts to the dict it gets.
+    """
     _require_ffmpeg()
     intermediate_dir.mkdir(parents=True, exist_ok=True)
+    sendcmd_dir = intermediate_dir / "reframe"
+    if tracking_by_asset:
+        sendcmd_dir.mkdir(parents=True, exist_ok=True)
     out_paths: list[Path] = []
     total = len(plan.segments)
     for cut in plan.segments:
@@ -347,7 +388,15 @@ def cut_segments(
         if src is None or not Path(src).is_file():
             raise VideoRenderError(f"segment {cut.order}: asset {cut.asset_id} source missing")
         out = intermediate_dir / f"seg_{cut.order:04d}.mp4"
-        _cut_segment(Path(src), cut, out, target_aspect)
+        track = (tracking_by_asset or {}).get(cut.asset_id)
+        _cut_segment(
+            Path(src),
+            cut,
+            out,
+            target_aspect,
+            tracking=track,
+            sendcmd_dir=sendcmd_dir if tracking_by_asset else None,
+        )
         out_paths.append(out)
         if on_progress is not None:
             on_progress(cut.order + 1, total)
@@ -767,6 +816,7 @@ def render(
     scratch_dir: Path,
     stabilize: bool = True,
     transitions_enabled: bool = True,
+    tracking_by_asset: dict[int, dict[str, Any]] | None = None,
     on_progress: Callable[[str, int, int], None] | None = None,
 ) -> RenderResult:
     """Run the render stages end-to-end.
@@ -784,6 +834,13 @@ def render(
     between adjacent cuts. When False the concat stage falls back to
     the plain demuxer mux (hard cuts, no overlap), matching the old
     pre-M6.3 behaviour. Useful for tight news-style edits.
+
+    ``tracking_by_asset`` (default ``None``) opts the cut stage into
+    the v0.16 auto-reframe dynamic crop. When supplied, every segment
+    whose source asset is keyed in the dict gets a Kalman-smoothed
+    sendcmd-driven crop window; segments without tracking data fall
+    back to the static centered aspect crop. When None, every segment
+    uses the static crop (M6 behaviour).
     """
     _require_ffmpeg()
 
@@ -801,6 +858,7 @@ def render(
         intermediate_dir,
         target_aspect,
         on_progress=_seg_progress,
+        tracking_by_asset=tracking_by_asset,
     )
 
     # Stage 1.5 — optional digital stabilization. Replaces each

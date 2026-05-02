@@ -265,7 +265,12 @@ async def _mark_ready(
 
 async def _gather_render_inputs(
     project_id: int,
-) -> tuple[Project, dict[int, Path], dict[int, AssetTranscript]]:
+) -> tuple[
+    Project,
+    dict[int, Path],
+    dict[int, AssetTranscript],
+    dict[int, dict[str, Any]],
+]:
     async with async_session_maker() as session:
         project = await session.get(Project, project_id)
         if project is None:
@@ -276,6 +281,18 @@ async def _gather_render_inputs(
             .all()
         )
         asset_paths = {a.id: Path(a.file_path) for a in assets}
+        # v0.16 — collect tracking_json so the renderer can drive auto-
+        # reframe. Assets that haven't run the tracking step yet (None /
+        # empty / no frames) are simply omitted from the dict; the
+        # renderer falls back to the static aspect crop for those.
+        # ``getattr(..., None)`` keeps this resilient if the column is
+        # missing on a degraded host — the planner / cut stage still
+        # ships, just without auto-reframe.
+        tracking_by_asset: dict[int, dict[str, Any]] = {}
+        for a in assets:
+            blob = getattr(a, "tracking_json", None)
+            if isinstance(blob, dict) and blob.get("frames"):
+                tracking_by_asset[a.id] = dict(blob)
         tx_rows = (
             (
                 await session.execute(
@@ -286,7 +303,7 @@ async def _gather_render_inputs(
             .all()
         )
         transcripts = {t.asset_id: t for t in tx_rows}
-        return project, asset_paths, transcripts
+        return project, asset_paths, transcripts, tracking_by_asset
 
 
 # ---------- Plan stage ----------
@@ -426,6 +443,7 @@ async def run_render(
     stabilize: bool = True,
     subtitles_enabled: bool = True,
     transitions_enabled: bool = True,
+    auto_reframe_enabled: bool = True,
 ) -> dict[str, Any]:
     """Run the full M5 pipeline for ``project_id`` and return a summary.
 
@@ -519,7 +537,9 @@ async def run_render(
     # ``subtitles_enabled``: when False the user explicitly opted out
     # of burned subtitles, so skip both SRT generation and the burn
     # stage entirely.
-    project, asset_paths, transcripts = await _gather_render_inputs(project_id)
+    project, asset_paths, transcripts, tracking_by_asset = await _gather_render_inputs(
+        project_id
+    )
     if not subtitles_enabled:
         srt_text = ""
         logger.info("draft %d: subtitles disabled by request", handle.draft_id)
@@ -626,6 +646,7 @@ async def run_render(
             scratch_dir=scratch_dir,
             stabilize=stabilize,
             transitions_enabled=transitions_enabled,
+            tracking_by_asset=tracking_by_asset if auto_reframe_enabled else None,
             on_progress=_sync_progress,
         )
     except Exception as exc:  # noqa: BLE001 — record + mark failed.

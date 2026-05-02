@@ -31,6 +31,7 @@ from media_processor.api.schemas import (
     SceneTagOut,
     ScriptOut,
     ScriptUpsert,
+    TrackingSummaryOut,
     TranscriptSummaryOut,
 )
 from media_processor.models import (
@@ -268,6 +269,7 @@ async def trigger_project_edit(
         stabilize=payload.stabilize,
         subtitles=payload.subtitles,
         transitions=payload.transitions,
+        auto_reframe=payload.auto_reframe,
     )
     return EditTriggerResponse(
         project_id=project_id,
@@ -521,6 +523,26 @@ def _emotion_tags_for(asset: Asset) -> EmotionTagsOut | None:
     return EmotionTagsOut(dominant=dominant or "neutral", ranges=ranges)  # type: ignore[arg-type]
 
 
+def _tracking_summary_for(asset: Asset) -> TrackingSummaryOut | None:
+    """v0.16 — surface a minimal YOLO tracking verdict for the analysis page.
+
+    The full per-frame bbox track in ``Asset.tracking_json`` is way too
+    chatty for the polling endpoint; we only return the headline fields
+    (subject class + confidence + how many frames carry data) so the UI
+    can render a single chip like "追蹤：汽車（92%, 142 幀）".
+    """
+    blob = getattr(asset, "tracking_json", None)
+    if not isinstance(blob, dict):
+        return None
+    frames = blob.get("frames")
+    return TrackingSummaryOut(
+        subject_class=str(blob.get("subject_class") or ""),
+        confidence=float(blob.get("confidence") or 0.0),
+        frame_count=len(frames) if isinstance(frames, list) else 0,
+        sampled_frames=int(blob.get("sampled_frames") or 0),
+    )
+
+
 @router.get("/{project_id}/assets", response_model=ProjectAnalysisOut)
 async def list_project_assets_with_analysis(
     project_id: int,
@@ -634,6 +656,7 @@ async def list_project_assets_with_analysis(
                 scene_tags=_scene_tags_for(asset),
                 motion_segments=_motion_segments_for(asset),
                 emotion_tags=_emotion_tags_for(asset),
+                tracking_summary=_tracking_summary_for(asset),
                 thumbnail_urls=thumbnail_urls_for_asset(asset.id),
             )
         )

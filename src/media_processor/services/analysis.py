@@ -32,6 +32,7 @@ from media_processor.models import (
 from media_processor.services import (
     camera_motion,
     emotion,
+    object_tracking,
     scene_tagging,
     script_coverage,
     whisper_stt,
@@ -41,7 +42,7 @@ from media_processor.services.settings_store import get_llm_api_keys
 logger = logging.getLogger(__name__)
 
 
-VALID_STEPS = ("stt", "scene", "motion", "emotion", "coverage")
+VALID_STEPS = ("stt", "scene", "motion", "emotion", "tracking", "coverage")
 STEP_TIMEOUT_S = 30 * 60  # 30 min per step
 
 # Max retry-able exceptions that map to a known reason token.
@@ -52,6 +53,7 @@ _KNOWN_REASONS: dict[type[Exception], str] = {
     script_coverage.ScriptCoverageQuotaError: "quota-exhausted",
     script_coverage.ScriptCoverageMissingScriptError: "missing-script",
     emotion.EmotionUnavailableError: "model-missing",
+    object_tracking.TrackingUnavailableError: "model-missing",
 }
 
 _GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
@@ -390,6 +392,44 @@ async def _run_emotion(
     return "done"
 
 
+async def _run_tracking(
+    session: AsyncSession,
+    asset: Asset,
+    *,
+    force: bool,
+) -> str:
+    """v0.16 — YOLOv8 object tracking.
+
+    Persists the dominant subject's per-frame bbox track to
+    ``Asset.tracking_json`` so the renderer's auto-reframe stage can
+    compute Kalman-smoothed crop windows. ``force`` only matters for
+    deciding whether to re-run when ``tracking_json`` is already set
+    — the column itself is overwritten unconditionally on each run.
+    """
+    existing = getattr(asset, "tracking_json", None)
+    if existing and not force:
+        logger.info("asset %d already has tracking_json; skipping (force=False)", asset.id)
+        return "done"
+
+    media_path = Path(asset.file_path)
+    result = await asyncio.to_thread(
+        object_tracking.detect, media_path, asset.duration_ms or 0
+    )
+    try:
+        asset.tracking_json = object_tracking.serialise(result)
+        await session.commit()
+    except Exception as exc:  # noqa: BLE001
+        # Column may be missing on a degraded host (migration not yet
+        # applied). Surface as a known reason so the analysis pipeline
+        # records "failed:model-missing" rather than crashing the
+        # whole asset-analysis run.
+        await session.rollback()
+        raise object_tracking.TrackingUnavailableError(
+            f"tracking_json persist failed: {exc}"
+        ) from exc
+    return "done"
+
+
 async def _run_coverage(session: AsyncSession, asset: Asset) -> str:
     api_keys = await _api_keys(session)
     if not api_keys:
@@ -536,6 +576,8 @@ async def _dispatch(
         return await _run_motion(session, asset, force=force)
     if step == "emotion":
         return await _run_emotion(session, asset, force=force)
+    if step == "tracking":
+        return await _run_tracking(session, asset, force=force)
     if step == "coverage":
         return await _run_coverage(session, asset)
     raise ValueError(f"unknown step: {step}")

@@ -16,16 +16,18 @@ import {
   labelForMotionType,
   labelForSceneTag,
   labelForStepState,
+  labelForTrackingSubject,
 } from "../i18n/tags";
 import "./ProjectAnalysis.css";
 
-const ANALYSIS_STEP_ORDER: ("stt" | "scene" | "motion" | "emotion" | "coverage")[] = [
-  "stt",
-  "scene",
-  "motion",
-  "emotion",
-  "coverage",
-];
+const ANALYSIS_STEP_ORDER: (
+  | "stt"
+  | "scene"
+  | "motion"
+  | "emotion"
+  | "tracking"
+  | "coverage"
+)[] = ["stt", "scene", "motion", "emotion", "tracking", "coverage"];
 
 const TRANSCRIPT_DEBOUNCE_MS = 1500;
 
@@ -422,6 +424,39 @@ function AssetCard({ asset, onAnalyze, selected, onToggleSelect }: AssetCardProp
           </span>
           <span className="emotion-chip__label">
             {labelForEmotionTag(asset.emotion_tags.dominant)}
+          </span>
+        </div>
+      )}
+
+      {asset.tracking_summary && (
+        <div
+          className={`tracking-chip tracking-chip--${
+            asset.tracking_summary.subject_class || "none"
+          }`}
+          aria-label={
+            asset.tracking_summary.subject_class
+              ? `追蹤主體：${labelForTrackingSubject(
+                  asset.tracking_summary.subject_class,
+                )}`
+              : "未偵測到主體"
+          }
+          title={
+            asset.tracking_summary.subject_class
+              ? `${asset.tracking_summary.frame_count} 幀（共取樣 ${asset.tracking_summary.sampled_frames}），平均信心 ${(
+                  asset.tracking_summary.confidence * 100
+                ).toFixed(0)}%`
+              : "本片段沒有偵測到可追蹤主體"
+          }
+        >
+          <span className="tracking-chip__icon" aria-hidden>
+            🎯
+          </span>
+          <span className="tracking-chip__label">
+            {asset.tracking_summary.subject_class
+              ? `追蹤：${labelForTrackingSubject(asset.tracking_summary.subject_class)}（${(
+                  asset.tracking_summary.confidence * 100
+                ).toFixed(0)}%）`
+              : "追蹤：無主體"}
           </span>
         </div>
       )}

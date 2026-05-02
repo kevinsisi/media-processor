@@ -339,6 +339,8 @@ interface RenderOptionsProps {
   setSubtitlesOn: (v: boolean) => void;
   transitionsOn: boolean;
   setTransitionsOn: (v: boolean) => void;
+  autoReframe: boolean;
+  setAutoReframe: (v: boolean) => void;
   disabled?: boolean;
 }
 
@@ -349,6 +351,8 @@ function RenderOptions({
   setSubtitlesOn,
   transitionsOn,
   setTransitionsOn,
+  autoReframe,
+  setAutoReframe,
   disabled,
 }: RenderOptionsProps) {
   return (
@@ -372,6 +376,13 @@ function RenderOptions({
         hint="關閉後片段直接硬切（無重疊），畫面節奏更俐落。"
         value={transitionsOn}
         onChange={setTransitionsOn}
+        disabled={disabled}
+      />
+      <EditOptionToggle
+        label="自動構圖（YOLO 物件追蹤）"
+        hint="開啟後 9:16 / 4:5 裁切會自動跟隨主體（人 / 車 / 動物）。素材沒跑過追蹤分析則自動退回置中裁切。"
+        value={autoReframe}
+        onChange={setAutoReframe}
         disabled={disabled}
       />
     </div>
@@ -463,6 +474,11 @@ export default function ProjectEdit() {
   // hard-cut version without re-rendering the source plan.
   const [subtitlesOn, setSubtitlesOn] = useState<boolean>(true);
   const [transitionsOn, setTransitionsOn] = useState<boolean>(true);
+  // v0.16 — auto-reframe (YOLO-tracked dynamic crop). Default on. The
+  // backend silently falls back to the static centered crop for assets
+  // without tracking_json, so leaving this on is safe even on a half-
+  // analyzed project.
+  const [autoReframe, setAutoReframe] = useState<boolean>(true);
   // v0.14.5 — project detail (mostly for bgm_path so the BGM upload
   // button can show "目前：filename.mp3"). Fetched once on mount and
   // refreshed after a successful BGM upload.
@@ -597,6 +613,7 @@ export default function ProjectEdit() {
           stabilize,
           subtitles: subtitlesOn,
           transitions: transitionsOn,
+          auto_reframe: autoReframe,
         });
         // The API now creates the Draft row synchronously, so resp.draft_id
         // is always a real id. Switch the selected version to it immediately
@@ -627,6 +644,7 @@ export default function ProjectEdit() {
       stabilize,
       subtitlesOn,
       transitionsOn,
+      autoReframe,
       refreshDrafts,
     ],
   );
@@ -736,6 +754,8 @@ export default function ProjectEdit() {
             setSubtitlesOn={setSubtitlesOn}
             transitionsOn={transitionsOn}
             setTransitionsOn={setTransitionsOn}
+            autoReframe={autoReframe}
+            setAutoReframe={setAutoReframe}
             disabled={triggering}
           />
           <BgmSourcePicker
@@ -855,6 +875,8 @@ export default function ProjectEdit() {
               setSubtitlesOn={setSubtitlesOn}
               transitionsOn={transitionsOn}
               setTransitionsOn={setTransitionsOn}
+              autoReframe={autoReframe}
+              setAutoReframe={setAutoReframe}
               disabled={triggering}
             />
             <BgmSourcePicker

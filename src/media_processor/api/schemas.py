@@ -185,6 +185,12 @@ class EditTriggerRequest(BaseModel):
     # no overlap). Useful for tight news-style edits where xfade
     # softens the cut energy too much.
     transitions: bool = True
+    # v0.16 — toggle auto-reframe (YOLO-tracked dynamic crop). Default
+    # on: when an asset has tracking_json the renderer drives a
+    # Kalman-smoothed crop that keeps the subject centered in the
+    # output aspect. Assets without tracking data quietly fall back
+    # to the static centered crop.
+    auto_reframe: bool = True
 
 
 class EditTriggerResponse(BaseModel):
@@ -408,6 +414,17 @@ class EmotionTagsOut(BaseModel):
     ranges: list[EmotionRangeOut]
 
 
+# v0.16 — YOLO object-tracking summary surfaced on the analysis page.
+# ``frame_count`` is 0 + ``subject_class=""`` for assets where the
+# tracking step ran but YOLO saw no recognised subjects (legitimate
+# b-roll outcome). ``confidence`` is the mean across kept frames.
+class TrackingSummaryOut(BaseModel):
+    subject_class: str
+    confidence: float
+    frame_count: int
+    sampled_frames: int
+
+
 class AssetAnalysisItem(BaseModel):
     """One row for the project-analysis page polling list."""
 
@@ -423,6 +440,8 @@ class AssetAnalysisItem(BaseModel):
     motion_segments: list[MotionSegmentOut]
     # Phase 8.1 — null when the emotion stage hasn't run for this asset.
     emotion_tags: EmotionTagsOut | None = None
+    # v0.16 — null when the tracking stage hasn't run for this asset.
+    tracking_summary: TrackingSummaryOut | None = None
     # Public URLs for the keyframe gallery; empty list when frames have not
     # been generated yet (the UI shows a placeholder).
     thumbnail_urls: list[str]
