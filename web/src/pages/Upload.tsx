@@ -23,6 +23,14 @@ interface VideoRow {
 }
 
 const SCRIPT_DEBOUNCE_MS = 600;
+// Cap on simultaneous in-flight video uploads. Without this, picking N
+// files fans out N runChunkedUpload() calls in parallel, each PUTting
+// 4 MiB chunks. The api's single-event-loop write path then queues
+// every chunk write end-to-end and slow-disk situations exceed the
+// nginx proxy timeout → 502s back to the browser. Three at a time
+// keeps the per-file UI responsive and stays well under the api's
+// thread-pool default.
+const MAX_CONCURRENT_UPLOADS = 3;
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -54,6 +62,12 @@ export default function Upload() {
   const [videoRows, setVideoRows] = useState<VideoRow[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [completedAssetIds, setCompletedAssetIds] = useState<number[]>([]);
+  // Track row IDs currently mid-upload independently of React state so
+  // the drain function can decide synchronously whether a slot is free
+  // without waiting for setVideoRows to flush.
+  const inFlightIdsRef = useRef<Set<string>>(new Set());
+  const videoRowsRef = useRef<VideoRow[]>([]);
+  videoRowsRef.current = videoRows;
 
   // Script state
   const [scriptBody, setScriptBody] = useState("");
@@ -141,10 +155,29 @@ export default function Upload() {
       });
     }
     setVideoRows((prev) => [...prev, ...fresh]);
-    fresh.forEach((row) => beginUpload(row));
+    // Defer the drain to the next microtask so the setVideoRows state
+    // update lands first; videoRowsRef catches up via the inline assign.
+    Promise.resolve().then(drainUploadQueue);
+  }
+
+  function drainUploadQueue(): void {
+    // Start additional uploads while the in-flight count is under cap
+    // AND there are queued rows. Reads from videoRowsRef so we see the
+    // latest committed state rather than stale closure values.
+    const inFlight = inFlightIdsRef.current;
+    for (const row of videoRowsRef.current) {
+      if (inFlight.size >= MAX_CONCURRENT_UPLOADS) break;
+      if (row.state !== "queued") continue;
+      if (inFlight.has(row.id)) continue;
+      inFlight.add(row.id);
+      void beginUpload(row);
+    }
   }
 
   async function beginUpload(initial: VideoRow): Promise<void> {
+    // ``drainUploadQueue`` is the only caller and reserves the slot in
+    // ``inFlightIdsRef`` before invoking us; ``finally`` below releases
+    // it on every exit path.
     setVideoRows((prev) =>
       prev.map((r) =>
         r.id === initial.id ? { ...r, state: "uploading", errorMessage: null } : r,
@@ -192,7 +225,9 @@ export default function Upload() {
         // tolerate
       }
     } catch (err) {
-      if ((err as { name?: string }).name === "AbortError") return;
+      if ((err as { name?: string }).name === "AbortError") {
+        return;
+      }
       setVideoRows((prev) =>
         prev.map((r) =>
           r.id === initial.id
@@ -204,15 +239,25 @@ export default function Upload() {
             : r,
         ),
       );
+    } finally {
+      // Free this row's slot on every exit path (success / error /
+      // aborted) and start the next queued upload if there is one.
+      inFlightIdsRef.current.delete(initial.id);
+      drainUploadQueue();
     }
   }
 
   function retryUpload(rowId: string): void {
-    const row = videoRows.find((r) => r.id === rowId);
+    const row = videoRowsRef.current.find((r) => r.id === rowId);
     if (!row) return;
-    const fresh = { ...row, abort: new AbortController() };
+    const fresh: VideoRow = {
+      ...row,
+      state: "queued",
+      errorMessage: null,
+      abort: new AbortController(),
+    };
     setVideoRows((prev) => prev.map((r) => (r.id === rowId ? fresh : r)));
-    beginUpload(fresh);
+    Promise.resolve().then(drainUploadQueue);
   }
 
   function uploadScriptFile(file: File): void {

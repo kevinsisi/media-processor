@@ -133,7 +133,16 @@ async def put_upload_chunk(
             detail="empty chunk body",
         )
 
-    upload_svc.write_chunk(settings.uploads_dir, session_id, chunk_index, body)
+    # write_chunk is sync file I/O (4 MiB write per call). With many
+    # concurrent video uploads each PUTting chunks in parallel, calling
+    # it directly from the asyncio event loop serialises every disk
+    # write and lets one slow disk stall the entire uvicorn worker —
+    # which manifests as nginx 502s when the proxy timeout fires before
+    # the queued write finishes. asyncio.to_thread offloads to the
+    # default executor so writes overlap.
+    await asyncio.to_thread(
+        upload_svc.write_chunk, settings.uploads_dir, session_id, chunk_index, body
+    )
 
     received = sorted({int(i) for i in (row.received_chunks or [])} | {chunk_index})
     row.received_chunks = received
