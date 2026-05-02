@@ -42,10 +42,7 @@ SCHEMA_VERSION = "m5.cut-plan.v1"
 # Per-asset score response schema — separate from the CutPlan output
 # schema since they're independent contracts. The planner now fans out
 # one call per asset and assembles the CutPlan locally.
-# v2 (M8.2 quality fix) — adds the ``summary`` field used by
-# ``_assemble_plan`` for transcript-level deduplication so two assets
-# that captured the same line/scene don't both land in the cut.
-ASSET_SCORE_SCHEMA_VERSION = "m5.asset-score.v2"
+ASSET_SCORE_SCHEMA_VERSION = "m5.asset-score.v1"
 
 # Assembly knobs. Anything below MIN_KEEP_SCORE or position="skip" is
 # dropped. Spans wider than MAX_SPAN_MS / narrower than MIN_SPAN_MS get
@@ -66,25 +63,6 @@ _MOTION_DEFAULT = "static"  # if asset has no motion tags, treat as static
 _MOTION_ALTERNATION_BONUS = 10  # boost for differing from prev cut's motion
 _MOTION_POSITION_BONUS = 15  # boost for matching opening=dynamic / closing=static
 
-# Phase 8.2 — content-diversity bonuses applied during _assemble_plan.
-# A candidate whose top scene tags don't yet appear in the chosen list
-# gets a bonus per fresh tag; tags that have already shown up draw a
-# penalty proportional to how many times they've appeared so the picker
-# stops piling on the same scene (the prod regression where 蚊子館
-# appeared 4–5 times in one reel).
-_SCENE_DIVERSITY_BONUS: int = 8
-_SCENE_REPEAT_PENALTY: int = 12
-_SCENE_TAG_TOP_K: int = 3
-
-# Phase 8.2 — transcript-level deduplication. Two cuts whose actual
-# spoken text overlaps by more than this Jaccard ratio (3-gram chars)
-# are treated as duplicates; the higher-ranked one wins. A second
-# threshold falls back to the Gemini-supplied one-sentence summary so
-# we still catch repeats when the transcript is sparse.
-TRANSCRIPT_DEDUP_THRESHOLD: float = 0.5
-SUMMARY_DEDUP_THRESHOLD: float = 0.6
-_NGRAM_SIZE: int = 3
-
 # Phase 8.1 — emotion-aware bonuses. The planner cares about two things:
 # (1) tell the renderer the dominant emotion so it can apply zoompan, and
 # (2) when a cut sits next to one with a *different* emotion, escalate
@@ -104,13 +82,11 @@ VALID_TRANSITIONS: frozenset[str] = frozenset(
 )
 TRANSITION_DEFAULT: str = "dissolve"
 TRANSITION_DURATION_S: float = 0.5
-# How much of each non-first cut gets consumed by the xfade overlap with
-# the previous cut. _assemble_plan budgets in *rendered* duration, so two
-# 4 s spans separated by an xfade contribute 4 + (4 - 0.5) = 7.5 s, not
-# 8 s. Mirrors video_renderer.TRANSITION_DURATION_S × 1000; if you change
-# one, change both — keeping the constant duplicated rather than imported
-# avoids an edit_planner ↔ video_renderer dependency cycle.
-TRANSITION_OVERLAP_MS: int = 500
+# Each xfade between adjacent cuts shortens the timeline by this much, so
+# the planner aims a touch higher than the raw target so the rendered
+# reel actually lands at target_duration_ms. Mirrors
+# ``video_renderer.TRANSITION_DURATION_S`` and the M8.1 subtitle anchor.
+_TRANSITION_OVERLAP_MS: int = 500
 
 # Prompt-budget caps so very long shoots don't blow the context window.
 MAX_TRANSCRIPT_SEGMENTS_VERBATIM = 60
@@ -164,6 +140,17 @@ class CutPlanSegment:
     # (DYNAMIC_EMOTIONS get a slow zoom-in; STATIC stays locked off).
     # Default keeps older serialised plans loadable.
     dominant_emotion: str = EMOTION_DEFAULT
+    # M8.1 follow-up — motion class of the chosen span (pan / tilt /
+    # handheld / static). The renderer uses this together with
+    # ``has_face`` to gate zoompan: a static, faceless clip with
+    # zoompan reads as a frozen frame, so we only zoom when the source
+    # has actual movement OR a face was detected during the span.
+    dominant_motion: str = _MOTION_DEFAULT
+    # True when at least one emotion-tag time-range overlapped the
+    # chosen ``[asset_start_ms, asset_end_ms)`` window — i.e. a face
+    # was actually visible during the cut, not just somewhere in the
+    # asset. Read alongside ``dominant_motion`` by the renderer.
+    has_face: bool = False
 
 
 @dataclass(frozen=True)
@@ -364,11 +351,7 @@ _ASSET_SCORE_PROMPT = (
     "    指引：情緒延續或同場景用 dissolve；情緒平緩接同類用 fade；"
     "    場景大跳（室內↔戶外、人物↔產品）用 wipeleft 或 slideright；"
     "    情緒大跳（平靜↔激動 / 嚴肅↔驚喜）用 circlecrop；"
-    "    避免整支片只用一種。\n"
-    " 6. summary：用「一句話 (≤25 字繁中)」描述 best_span 內這段在講什麼"
-    "（含主題與動作 / 主詞）。系統會用此欄位做去重，避免同樣的內容被多支"
-    "素材重複塞進剪輯。請寫具體名詞，不要寫『介紹某事』『解釋某物』之類"
-    "的空話。\n\n"
+    "    避免整支片只用一種。\n\n"
     "嚴格輸出 JSON：\n"
     "{{\n"
     f'  "schema_version": "{ASSET_SCORE_SCHEMA_VERSION}",\n'
@@ -377,7 +360,6 @@ _ASSET_SCORE_PROMPT = (
     '  "best_span_ms": [<start_ms>, <end_ms>],\n'
     '  "source_kind": "scripted" | "improv",\n'
     '  "transition_to_next": "fade" | "dissolve" | "wipeleft" | "slideright" | "circlecrop",\n'
-    '  "summary": "<一句話 ≤25 字>",\n'
     '  "reason": "<一句話原因>"\n'
     "}}\n"
 )
@@ -421,12 +403,6 @@ class _AssetScore:
     whose time_ranges_ms most overlap the picked ``best_span_ms``. The
     assembler uses it for rhythm-aware ordering (no two same-motion cuts
     in a row, dynamic at opening, static at closing).
-
-    ``summary`` / ``span_transcript`` / ``scene_tags_top`` are the
-    dedup-and-diversity signals consumed only by :func:`_assemble_plan`.
-    They have safe empty defaults so older _AssetScore call sites
-    (tests, fallbacks) keep working — an assembler that gets empty
-    strings simply skips the dedup check for that pair.
     """
 
     asset_id: int
@@ -441,14 +417,46 @@ class _AssetScore:
     # before assembly. Carried through to ``CutPlanSegment.dominant_emotion``
     # so the renderer can act on it without re-querying tags.
     dominant_emotion: str = EMOTION_DEFAULT
-    # Phase 8.2 — content-dedup + diversity signals. ``summary`` is the
-    # one-sentence Gemini description of best_span; ``span_transcript``
-    # is the raw whisper text inside best_span; ``scene_tags_top`` is
-    # the top-K scene tags by confidence. Empty defaults make these
-    # opt-in for the heuristic / test path.
-    summary: str = ""
-    span_transcript: str = ""
-    scene_tags_top: tuple[str, ...] = ()
+    # Source asset's full duration; carried so the assembler can extend
+    # ``best_span_ms`` up to the actual asset bound during the
+    # duration-fill pass without crossing past the source.
+    asset_duration_ms: int = 0
+    # True when an emotion-tag range (excluding the ``dominant``
+    # sentinel row) overlapped the chosen span — i.e. a face was
+    # visible during this exact window. Used by the renderer to gate
+    # zoompan so static clips without faces don't get a frozen-frame
+    # zoom.
+    has_face: bool = False
+
+
+def _has_face_in_span(asset: Asset, span_ms: tuple[int, int]) -> bool:
+    """True if any emotion range (face detection) overlaps ``span_ms``.
+
+    The ``dominant`` sentinel row stores the asset-wide verdict in
+    ``time_ranges_ms`` (as ``[class]``) so we skip it — only per-class
+    rows carry real ``[start_ms, end_ms]`` windows. Used to gate the
+    renderer's zoompan: an asset whose dominant emotion is ``happy``
+    but whose chosen span has no face overlap should NOT get zoompan,
+    because the source is effectively a static frame with the zoom
+    layered on top, which reads as a frozen photo.
+    """
+    span_start, span_end = span_ms
+    if span_end <= span_start:
+        return False
+    for tag in asset.tags:
+        if tag.tag_type != "emotion" or tag.tag_name == "dominant":
+            continue
+        for r in tag.time_ranges_ms or []:
+            if not isinstance(r, list | tuple) or len(r) != 2:
+                continue
+            try:
+                r_start = int(r[0])
+                r_end = int(r[1])
+            except (TypeError, ValueError):
+                continue
+            if min(r_end, span_end) > max(r_start, span_start):
+                return True
+    return False
 
 
 def _dominant_motion_for_span(asset: Asset, span_ms: tuple[int, int]) -> str:
@@ -555,10 +563,6 @@ def _parse_asset_score(
         transition = TRANSITION_DEFAULT
 
     reason = str(data.get("reason", "")).strip() or "(no reason)"
-    # ``summary`` is best-effort — older ``m5.asset-score.v1`` responses
-    # never contained it. Treat missing as empty so the dedup pass simply
-    # falls back to the transcript-only signal for that candidate.
-    summary = str(data.get("summary", "")).strip()
     return _AssetScore(
         asset_id=asset_id,
         score=score,
@@ -567,117 +571,7 @@ def _parse_asset_score(
         source_kind=kind,
         reason=reason,
         transition_to_next=transition,
-        summary=summary,
     )
-
-
-def _char_ngrams(text: str, n: int = _NGRAM_SIZE) -> set[str]:
-    """Character n-grams for Chinese-friendly similarity. Whitespace and
-    common punctuation are stripped first so reordered sentences with the
-    same nouns still cluster."""
-    if not text:
-        return set()
-    norm = "".join(c for c in text if c.isalnum())
-    if len(norm) < n:
-        return {norm} if norm else set()
-    return {norm[i : i + n] for i in range(len(norm) - n + 1)}
-
-
-def _jaccard(a: str, b: str, n: int = _NGRAM_SIZE) -> float:
-    """Jaccard similarity over character n-grams. 0.0 when either side
-    has no extractable n-grams (treated as "can't tell" → not duplicate)."""
-    sa = _char_ngrams(a, n)
-    sb = _char_ngrams(b, n)
-    if not sa or not sb:
-        return 0.0
-    inter = len(sa & sb)
-    union = len(sa | sb)
-    return inter / union if union else 0.0
-
-
-def _is_content_duplicate(cand: _AssetScore, chosen: list[_AssetScore]) -> bool:
-    """True when ``cand`` says the same thing as something already chosen.
-
-    Three-signal check: (1) same ``asset_id`` — per-asset fanout gives
-    one score per asset, so seeing the same id again means the leftover
-    pool wasn't filtered; (2) raw transcript text inside best_span —
-    strongest semantic signal, since identical lines really did get
-    spoken twice; (3) the Gemini one-sentence summary — weaker fallback
-    for sparse-transcript cuts. Any one breaching its threshold counts
-    as a dup; that bias matches the prod regression where a single
-    "蚊子館" topic landed 4–5 times.
-    """
-    for c in chosen:
-        if cand.asset_id == c.asset_id:
-            return True
-        if cand.span_transcript and c.span_transcript:
-            if _jaccard(cand.span_transcript, c.span_transcript) >= TRANSCRIPT_DEDUP_THRESHOLD:
-                return True
-        if cand.summary and c.summary:
-            if _jaccard(cand.summary, c.summary) >= SUMMARY_DEDUP_THRESHOLD:
-                return True
-    return False
-
-
-def _scene_counts(chosen: list[_AssetScore]) -> dict[str, int]:
-    counts: dict[str, int] = {}
-    for c in chosen:
-        for tag in c.scene_tags_top[:_SCENE_TAG_TOP_K]:
-            counts[tag] = counts.get(tag, 0) + 1
-    return counts
-
-
-def _diversity_score(cand: _AssetScore, chosen_counts: dict[str, int]) -> int:
-    """Bonus for fresh scene tags, penalty scaling with how many times a
-    tag has already been picked. Stays bounded by clamping each tag's
-    contribution so a single repeated tag can't make a candidate
-    unusable on its own."""
-    if not cand.scene_tags_top:
-        return 0
-    delta = 0
-    for tag in cand.scene_tags_top[:_SCENE_TAG_TOP_K]:
-        seen = chosen_counts.get(tag, 0)
-        if seen == 0:
-            delta += _SCENE_DIVERSITY_BONUS
-        else:
-            delta -= _SCENE_REPEAT_PENALTY * min(seen, 3)
-    return delta
-
-
-def _transcript_text_in_span(
-    transcript: AssetTranscript | None,
-    span_ms: tuple[int, int],
-) -> str:
-    """Whisper text whose segments overlap ``span_ms``. Joined with spaces
-    so character n-grams stay positionally meaningful."""
-    if transcript is None:
-        return ""
-    span_start, span_end = span_ms
-    if span_end <= span_start:
-        return ""
-    parts: list[str] = []
-    for seg in transcript.segments_json or []:
-        try:
-            s_start = int(seg.get("start_ms", 0))
-            s_end = int(seg.get("end_ms", 0))
-        except (TypeError, ValueError):
-            continue
-        if s_end <= span_start or s_start >= span_end:
-            continue
-        text = str(seg.get("text", "")).strip()
-        if text:
-            parts.append(text)
-    return " ".join(parts)
-
-
-def _top_scene_tag_names(asset: Asset, k: int = _SCENE_TAG_TOP_K) -> tuple[str, ...]:
-    """Top-K scene tags by confidence. Used by the diversity bonus so
-    the picker knows which thematic buckets are already over-represented."""
-    pairs = sorted(
-        ((t.tag_name, float(t.confidence)) for t in asset.tags if t.tag_type == "scene"),
-        key=lambda p: -p[1],
-    )
-    return tuple(name for name, _ in pairs[:k])
 
 
 def _bucket_motion_preference(bucket: str) -> str | None:
@@ -708,77 +602,102 @@ def _rhythm_score(
     score = candidate.score
     if prev_motion is not None and candidate.dominant_motion != prev_motion:
         score += _MOTION_ALTERNATION_BONUS
-    if position_preference == "dynamic" and candidate.dominant_motion in DYNAMIC_MOTIONS:
-        score += _MOTION_POSITION_BONUS
-    elif position_preference == "static" and candidate.dominant_motion in STATIC_MOTIONS:
+    if position_preference == "dynamic" and candidate.dominant_motion in DYNAMIC_MOTIONS or position_preference == "static" and candidate.dominant_motion in STATIC_MOTIONS:
         score += _MOTION_POSITION_BONUS
     return score
 
 
-def _argmax_pick(
-    candidates: list[_AssetScore],
-    *,
-    chosen: list[_AssetScore],
-    position_pref: str | None,
-) -> _AssetScore | None:
-    """Pop and return the best candidate from ``candidates`` that is not a
-    content-duplicate of any cut already in ``chosen``. Skipped duplicates
-    are dropped from the list. Returns ``None`` when the list is empty
-    after dedup.
+def _dedup_by_asset(scores: list[_AssetScore]) -> list[_AssetScore]:
+    """Collapse multiple ``_AssetScore`` rows for the same asset.
 
-    The ranking blends three soft signals so no single one can dominate:
-    base Gemini score, rhythm bonus (motion alternation + position
-    preference), and Phase 8.2 scene-diversity bonus (fresh tags reward,
-    repeats penalised). Hard duplicate rejection happens *after* ranking
-    — picking the best then discarding it on a dup match is what lets
-    the rhythm/diversity signals still push us toward different scenes,
-    rather than letting transcript-overlap silently keep the dup in
-    play.
+    Per-asset fanout produces one score per asset, but a defensive
+    pass keeps the assembler safe against future shapes (e.g. multi-
+    span scoring) and against malformed serialised plans fed back
+    through this path. When duplicates exist, keep the highest-score
+    row so we don't downgrade a known-good pick.
     """
-    chosen_counts = _scene_counts(chosen)
-    while candidates:
-        prev_motion = chosen[-1].dominant_motion if chosen else None
-        best_idx = max(
-            range(len(candidates)),
-            key=lambda i: (
-                _rhythm_score(
-                    candidates[i],
-                    prev_motion=prev_motion,
-                    position_preference=position_pref,
-                )
-                + _diversity_score(candidates[i], chosen_counts),
-                candidates[i].score,
-            ),
-        )
-        cand = candidates.pop(best_idx)
-        if _is_content_duplicate(cand, chosen):
+    by_id: dict[int, _AssetScore] = {}
+    for s in scores:
+        existing = by_id.get(s.asset_id)
+        if existing is None or s.score > existing.score:
+            by_id[s.asset_id] = s
+    # Preserve original ordering for determinism on ties; iterate the
+    # input once more and keep only the winners selected above.
+    seen: set[int] = set()
+    out: list[_AssetScore] = []
+    for s in scores:
+        winner = by_id.get(s.asset_id)
+        if winner is None or s.asset_id in seen:
             continue
-        return cand
-    return None
+        out.append(winner)
+        seen.add(s.asset_id)
+    return out
+
+
+def _effective_target_ms(target_duration_ms: int, num_chosen: int) -> int:
+    """Bias the stop-threshold up by total xfade overlap.
+
+    Each xfade between adjacent cuts shortens the rendered timeline by
+    ``_TRANSITION_OVERLAP_MS``; the planner's accumulated tally is the
+    raw span sum, so without this bias an N-cut plan rendered with
+    xfade lands ~N*500ms short of the target.
+    """
+    return target_duration_ms + max(0, num_chosen) * _TRANSITION_OVERLAP_MS
+
+
+def _extended_span(
+    score: _AssetScore,
+    extra_ms: int,
+) -> tuple[int, int]:
+    """Stretch ``best_span_ms`` by up to ``extra_ms`` without exceeding
+    ``MAX_SPAN_MS`` or running past the asset's actual duration.
+
+    Used by the duration-fill pass after every candidate is exhausted
+    but the accumulated total is still under target. Grows the span
+    forwards first (more natural for talking-head footage where the
+    sentence continues), then backwards if the asset still allows it.
+    """
+    start, end = score.best_span_ms
+    if extra_ms <= 0:
+        return start, end
+    asset_end = max(end, score.asset_duration_ms)
+    span_cap = min(MAX_SPAN_MS, asset_end - 0)  # never exceed asset
+    cur = end - start
+    room_ahead = max(0, asset_end - end)
+    grow_ahead = min(extra_ms, room_ahead, max(0, span_cap - cur))
+    end += grow_ahead
+    cur += grow_ahead
+    remaining = extra_ms - grow_ahead
+    if remaining > 0:
+        room_back = max(0, start)
+        grow_back = min(remaining, room_back, max(0, span_cap - cur))
+        start -= grow_back
+    return max(0, start), end
 
 
 def _assemble_plan(
     scores: list[_AssetScore],
     target_duration_ms: int,
 ) -> list[CutPlanSegment]:
-    """Local cut-plan assembly with rhythm-aware ordering, content dedup
-    and a top-up pass that hits ``target_duration_ms``.
+    """Local cut-plan assembly with rhythm-aware motion ordering.
 
-    Pipeline:
+    Five passes:
+      1. **Dedup** by ``asset_id`` (defensive — keep highest score).
+      2. **Primary** bucketed walk (opening → middle → closing) using
+         the rhythm-adjusted score.
+      3. **Duration-fill** — when the primary pass left the timeline
+         short of target (sparse buckets, low scores, or simply too
+         few clips), pull from the dropped pool sorted by raw score.
+      4. **Span-extend** — if still short after fill, stretch chosen
+         spans up to ``MAX_SPAN_MS`` proportionally.
+      5. **Materialise** ``CutPlanSegment`` rows, escalating the
+         transition to ``circlecrop`` across emotion-bucket boundaries.
 
-    1. Drop ``position=="skip"`` and anything below ``MIN_KEEP_SCORE``.
-    2. Walk opening → middle → closing buckets. Each pick is the highest
-       rhythm- + diversity-adjusted candidate that isn't a transcript /
-       summary duplicate of an already-chosen cut.
-    3. If the bucket pass under-shoots the target (Phase 8.2 prod fix —
-       a 60 s ask had been resolving at ~30 s because each bucket bailed
-       as soon as one cut was placed), top up from the rest of the
-       usable pool — same dedup + diversity rules — until we hit the
-       target or run out of candidates.
-
-    Returns the chosen ``_AssetScore``s in pick order, with transition
-    escalation applied (Phase 8.1: emotion-bucket shifts get circlecrop).
+    The stop threshold accounts for the renderer's xfade overlap so
+    the rendered timeline lands at ``target_duration_ms`` rather than
+    ``target_duration_ms - (N-1) * 500ms``.
     """
+    scores = _dedup_by_asset(scores)
     usable = [s for s in scores if s.position != "skip" and s.score >= MIN_KEEP_SCORE]
     if not usable:
         # Loosen: if everything got skipped or scored low, take the best 4
@@ -796,92 +715,119 @@ def _assemble_plan(
         by_pos[s.position].append(s)
 
     chosen: list[_AssetScore] = []
+    chosen_ids: set[int] = set()
     accumulated = 0
-    max_target = int(target_duration_ms * 1.2)
+    # Soft over-budget cap during the primary pass so we don't blow
+    # past target with one giant span. The fill / extend passes use
+    # the same cap; raising it during fill would just produce a too-
+    # long reel that still feels under-curated.
+    max_target = int(_effective_target_ms(target_duration_ms, num_chosen=8) * 1.2)
 
-    def _try_consume(cand: _AssetScore) -> bool:
-        """Append ``cand`` if it wouldn't blow past ``max_target``.
-        Returns True iff the candidate was added.
-
-        ``accumulated`` tracks *rendered* duration: each non-first cut
-        contributes ``span - TRANSITION_OVERLAP_MS`` because xfade
-        overlaps that much of the new clip onto the previous one. This
-        is what lets a 60 s ask actually produce ~60 s of output rather
-        than ~50 s after the renderer eats 500 ms per transition.
-        """
-        nonlocal accumulated
-        span_dur = cand.best_span_ms[1] - cand.best_span_ms[0]
-        increment = span_dur - (TRANSITION_OVERLAP_MS if chosen else 0)
-        if accumulated + increment > max_target and chosen:
-            return False
-        chosen.append(cand)
-        accumulated += increment
-        return True
-
-    # Pass 1 — bucket-driven selection. Stop early if we already hit
-    # target so opening / closing don't get filled past the budget.
+    # ---- Primary pass: bucketed rhythm-aware picker.
     for bucket in _POSITION_ORDER:
         candidates = list(by_pos[bucket])
         position_pref = _bucket_motion_preference(bucket)
-        while candidates and accumulated < target_duration_ms:
-            cand = _argmax_pick(candidates, chosen=chosen, position_pref=position_pref)
-            if cand is None:
+        while candidates:
+            prev_motion = chosen[-1].dominant_motion if chosen else None
+            best_idx = max(
+                range(len(candidates)),
+                key=lambda i: (
+                    _rhythm_score(
+                        candidates[i],
+                        prev_motion=prev_motion,
+                        position_preference=position_pref,
+                    ),
+                    candidates[i].score,
+                ),
+            )
+            s = candidates.pop(best_idx)
+            if s.asset_id in chosen_ids:
+                continue
+            span_dur = s.best_span_ms[1] - s.best_span_ms[0]
+            if accumulated + span_dur > max_target and chosen:
+                continue
+            chosen.append(s)
+            chosen_ids.add(s.asset_id)
+            accumulated += span_dur
+            stop_at = _effective_target_ms(target_duration_ms, num_chosen=len(chosen))
+            if accumulated >= stop_at:
                 break
-            _try_consume(cand)
-        if accumulated >= target_duration_ms:
+        stop_at = _effective_target_ms(target_duration_ms, num_chosen=len(chosen))
+        if accumulated >= stop_at:
             break
 
-    # Pass 2 — duration top-up from the high-quality pool. The bucket
-    # walk above used to stop with whatever it had after one
-    # bucket-per-cut walk, which is how a 60 s request would render at
-    # ~30 s. Now we keep pulling from any remaining usable candidate
-    # (regardless of bucket) until we either reach the target or
-    # genuinely have nothing left that isn't a dup.
-    if accumulated < target_duration_ms:
-        leftovers: list[_AssetScore] = []
-        for bucket in _POSITION_ORDER:
-            leftovers.extend(by_pos[bucket])
-        while leftovers and accumulated < target_duration_ms:
-            cand = _argmax_pick(leftovers, chosen=chosen, position_pref=None)
-            if cand is None:
+    # ---- Duration-fill pass: pull more cuts from the dropped pool when
+    # the primary pass under-shot. Includes both below-threshold scores
+    # and ``position=="skip"`` rows as a last resort — better to use a
+    # mediocre clip than ship a 12-second reel for a 60-second target.
+    if accumulated < _effective_target_ms(target_duration_ms, num_chosen=len(chosen)):
+        leftovers = [s for s in scores if s.asset_id not in chosen_ids]
+        # Below-threshold non-skip first (sorted by score); skip-marked
+        # last so we only touch them when nothing else fits.
+        below = sorted(
+            (s for s in leftovers if s.position != "skip" and s.score < MIN_KEEP_SCORE),
+            key=lambda x: -x.score,
+        )
+        skips = sorted(
+            (s for s in leftovers if s.position == "skip"),
+            key=lambda x: -x.score,
+        )
+        for s in [*below, *skips]:
+            span_dur = s.best_span_ms[1] - s.best_span_ms[0]
+            if accumulated + span_dur > max_target and chosen:
+                continue
+            chosen.append(s)
+            chosen_ids.add(s.asset_id)
+            accumulated += span_dur
+            stop_at = _effective_target_ms(target_duration_ms, num_chosen=len(chosen))
+            if accumulated >= stop_at:
                 break
-            _try_consume(cand)
 
-    # Pass 3 — last-resort top-up from the rejected pool (position=skip
-    # or score<MIN_KEEP_SCORE). Operator asked for a specific duration;
-    # honour it even at the cost of some weaker clips, as long as they
-    # aren't content-duplicates of what's already chosen. This is the
-    # "不能提前停" guarantee — don't bail just because the high-quality
-    # pool is exhausted.
-    if accumulated < target_duration_ms:
-        chosen_ids = {id(c) for c in chosen}
-        rejected_pool = [s for s in scores if id(s) not in chosen_ids]
-        while rejected_pool and accumulated < target_duration_ms:
-            cand = _argmax_pick(rejected_pool, chosen=chosen, position_pref=None)
-            if cand is None:
+    # ---- Span-extend pass: still short after fill → stretch chosen
+    # spans up to MAX_SPAN_MS / asset bounds. Distributes the deficit
+    # roughly evenly so we don't blow one cut into a 6-second monolog.
+    extended_spans: dict[int, tuple[int, int]] = {
+        i: c.best_span_ms for i, c in enumerate(chosen)
+    }
+    stop_at = _effective_target_ms(target_duration_ms, num_chosen=len(chosen))
+    deficit = stop_at - accumulated
+    if deficit > 0 and chosen:
+        per_cut_extra = (deficit + len(chosen) - 1) // len(chosen)
+        for i, c in enumerate(chosen):
+            new_span = _extended_span(c, per_cut_extra)
+            cur_span = extended_spans[i]
+            cur_dur = cur_span[1] - cur_span[0]
+            new_dur = new_span[1] - new_span[0]
+            gain = new_dur - cur_dur
+            if gain <= 0:
+                continue
+            extended_spans[i] = new_span
+            accumulated += gain
+            if accumulated >= stop_at:
                 break
-            _try_consume(cand)
 
-    # Phase 8.1 — escalate transition to ``circlecrop`` whenever the
-    # following cut's dominant emotion is a different bucket (dynamic
-    # vs static), so the visual jolt mirrors the emotional jolt. The
-    # last cut's transition is unused by the renderer so we leave it.
+    # ---- Materialise. Escalate transition to ``circlecrop`` whenever
+    # the next cut's dominant emotion is a different bucket (dynamic
+    # vs static), so the visual jolt mirrors the emotional jolt.
     out: list[CutPlanSegment] = []
     for i, s in enumerate(chosen):
         next_emotion = chosen[i + 1].dominant_emotion if i + 1 < len(chosen) else None
         transition = s.transition_to_next
         if next_emotion is not None and _is_emotion_shift(s.dominant_emotion, next_emotion):
             transition = _EMOTION_SHIFT_TRANSITION
+        start, end = extended_spans[i]
         out.append(
             CutPlanSegment(
                 order=i,
                 asset_id=s.asset_id,
-                asset_start_ms=s.best_span_ms[0],
-                asset_end_ms=s.best_span_ms[1],
+                asset_start_ms=start,
+                asset_end_ms=end,
                 source_kind=s.source_kind,
                 reason=s.reason,
                 transition_to_next=transition,
                 dominant_emotion=s.dominant_emotion,
+                dominant_motion=s.dominant_motion,
+                has_face=s.has_face,
             )
         )
     return out
@@ -1039,16 +985,12 @@ async def _score_one_asset(
             # and renderer-side zoompan / transition decisions. We do
             # this server-side rather than asking Gemini to echo back
             # the tags so the model can't accidentally rewrite them.
-            # Phase 8.2 also attaches the actual transcript inside
-            # best_span and the asset's top scene tags so _assemble_plan
-            # can dedup by content and reward scene diversity without
-            # needing another DB round-trip.
             return replace(
                 parsed,
                 dominant_motion=_dominant_motion_for_span(asset, parsed.best_span_ms),
                 dominant_emotion=_dominant_emotion_for_asset(asset),
-                span_transcript=_transcript_text_in_span(transcript, parsed.best_span_ms),
-                scene_tags_top=_top_scene_tag_names(asset),
+                asset_duration_ms=int(asset.duration_ms),
+                has_face=_has_face_in_span(asset, parsed.best_span_ms),
             )
         except EditPlanInvalidError as exc:
             last_invalid = exc
@@ -1204,6 +1146,8 @@ async def heuristic_fallback(
                         source_kind="improv",
                         reason="fallback: middle slice",
                         dominant_emotion=_dominant_emotion_for_asset(asset),
+                        dominant_motion=_dominant_motion_for_span(asset, (mid, end)),
+                        has_face=_has_face_in_span(asset, (mid, end)),
                     )
                 )
                 accumulated_ms += end - mid
@@ -1223,6 +1167,8 @@ async def heuristic_fallback(
                         source_kind="improv",
                         reason="fallback: transcript segment",
                         dominant_emotion=_dominant_emotion_for_asset(asset),
+                        dominant_motion=_dominant_motion_for_span(asset, (start, end)),
+                        has_face=_has_face_in_span(asset, (start, end)),
                     )
                 )
                 accumulated_ms += end - start
@@ -1267,6 +1213,8 @@ def serialise_plan(plan_obj: CutPlan) -> dict[str, Any]:
                 "reason": s.reason,
                 "transition_to_next": s.transition_to_next,
                 "dominant_emotion": s.dominant_emotion,
+                "dominant_motion": s.dominant_motion,
+                "has_face": s.has_face,
             }
             for s in plan_obj.segments
         ],
@@ -1293,6 +1241,8 @@ def deserialise_plan(blob: dict[str, Any]) -> CutPlan:
                 reason=str(seg.get("reason", "")),
                 transition_to_next=str(seg.get("transition_to_next", "dissolve")),
                 dominant_emotion=str(seg.get("dominant_emotion", EMOTION_DEFAULT)),
+                dominant_motion=str(seg.get("dominant_motion", _MOTION_DEFAULT)),
+                has_face=bool(seg.get("has_face", False)),
             )
         )
     segments.sort(key=lambda s: s.order)

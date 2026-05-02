@@ -120,6 +120,8 @@ async def test_plan_happy_path(session: AsyncSession, monkeypatch: pytest.Monkey
 
     monkeypatch.setattr(edit_planner.httpx, "AsyncClient", patched_async_client)
 
+    # target=3s is below the 4s best_span so no duration-fill / span-extend
+    # pass triggers; the segment lands exactly as Gemini scored it.
     plan = await edit_planner.plan(
         project_id=1,
         session=session,
@@ -127,7 +129,7 @@ async def test_plan_happy_path(session: AsyncSession, monkeypatch: pytest.Monkey
         model=_MODEL,
         base_url=_BASE_URL,
         timeout_s=5.0,
-        target_duration_ms=20_000,
+        target_duration_ms=3_000,
     )
     assert plan.schema_version == SCHEMA_VERSION
     assert len(plan.segments) == 1  # fixture seeds one asset → one cut
@@ -140,7 +142,10 @@ async def test_plan_happy_path(session: AsyncSession, monkeypatch: pytest.Monkey
     # Phase 8.1: with no emotion tags on the asset, dominant_emotion
     # falls back to the canonical default.
     assert seg.dominant_emotion == edit_planner.EMOTION_DEFAULT
-    assert plan.target_duration_ms == 20_000
+    # M8.1 follow-up: motion/face defaults flow through to the segment.
+    assert seg.dominant_motion == edit_planner._MOTION_DEFAULT
+    assert seg.has_face is False
+    assert plan.target_duration_ms == 3_000
     # Notes are now synthesised locally summarising the fanout.
     assert "per-asset fanout" in plan.notes
 
@@ -150,8 +155,8 @@ def test_emotion_shift_escalates_transition_to_circlecrop() -> None:
     from media_processor.services.edit_planner import (
         TRANSITION_DEFAULT,
         VALID_TRANSITIONS,
-        _AssetScore,
         _assemble_plan,
+        _AssetScore,
     )
 
     assert "circlecrop" in VALID_TRANSITIONS
@@ -212,13 +217,189 @@ def test_serialise_round_trip_preserves_dominant_emotion() -> None:
                 reason="",
                 transition_to_next="circlecrop",
                 dominant_emotion="surprised",
+                dominant_motion="pan",
+                has_face=True,
             ),
         ),
     )
     blob = serialise_plan(plan)
+    # New M8.1-followup fields must round-trip too so the M7.1 skip-plan
+    # path keeps zoompan / dedup metadata across reorders.
+    assert blob["segments"][0]["dominant_motion"] == "pan"
+    assert blob["segments"][0]["has_face"] is True
     restored = deserialise_plan(blob)
     assert restored.segments[0].dominant_emotion == "surprised"
     assert restored.segments[0].transition_to_next == "circlecrop"
+    assert restored.segments[0].dominant_motion == "pan"
+    assert restored.segments[0].has_face is True
+
+
+def test_assemble_plan_dedups_by_asset_id() -> None:
+    """Defensive dedup — even if two ``_AssetScore`` rows arrive for the
+    same asset, the highest-scoring one wins and only one cut materialises.
+    """
+    from media_processor.services.edit_planner import (
+        TRANSITION_DEFAULT,
+        _assemble_plan,
+        _AssetScore,
+    )
+
+    scores = [
+        _AssetScore(
+            asset_id=7,
+            score=60,
+            position="middle",
+            best_span_ms=(0, 2_000),
+            source_kind="improv",
+            reason="lower",
+            dominant_motion="static",
+            transition_to_next=TRANSITION_DEFAULT,
+            asset_duration_ms=10_000,
+        ),
+        _AssetScore(
+            asset_id=7,
+            score=90,
+            position="opening",
+            best_span_ms=(2_000, 5_000),
+            source_kind="scripted",
+            reason="winner",
+            dominant_motion="pan",
+            transition_to_next=TRANSITION_DEFAULT,
+            asset_duration_ms=10_000,
+        ),
+    ]
+    cuts = _assemble_plan(scores, target_duration_ms=2_000)
+    assert len(cuts) == 1
+    assert cuts[0].asset_id == 7
+    # Higher-score row's span / motion / kind is what made it through.
+    assert cuts[0].asset_start_ms == 2_000
+    assert cuts[0].asset_end_ms == 5_000
+    assert cuts[0].source_kind == "scripted"
+    assert cuts[0].dominant_motion == "pan"
+
+
+def test_assemble_plan_fills_duration_from_dropped_pool() -> None:
+    """When the primary pass under-shoots the target the assembler must
+    pull from the below-threshold pool rather than emit a too-short reel.
+    """
+    from media_processor.services.edit_planner import (
+        TRANSITION_DEFAULT,
+        _assemble_plan,
+        _AssetScore,
+    )
+
+    scores = [
+        # One above-threshold opener — short on its own.
+        _AssetScore(
+            asset_id=1,
+            score=80,
+            position="opening",
+            best_span_ms=(0, 2_000),
+            source_kind="scripted",
+            reason="strong",
+            dominant_motion="static",
+            transition_to_next=TRANSITION_DEFAULT,
+            asset_duration_ms=8_000,
+        ),
+        # Two below-threshold candidates that the primary pass would
+        # normally drop. The fill pass must reach for them when the
+        # accumulated total is short of target.
+        _AssetScore(
+            asset_id=2,
+            score=20,
+            position="middle",
+            best_span_ms=(0, 3_000),
+            source_kind="improv",
+            reason="weak",
+            dominant_motion="static",
+            transition_to_next=TRANSITION_DEFAULT,
+            asset_duration_ms=8_000,
+        ),
+        _AssetScore(
+            asset_id=3,
+            score=15,
+            position="middle",
+            best_span_ms=(0, 3_000),
+            source_kind="improv",
+            reason="weaker",
+            dominant_motion="static",
+            transition_to_next=TRANSITION_DEFAULT,
+            asset_duration_ms=8_000,
+        ),
+    ]
+    cuts = _assemble_plan(scores, target_duration_ms=8_000)
+    asset_ids = sorted(c.asset_id for c in cuts)
+    # All three assets must show up — the fill pass pulled the two
+    # below-threshold rows in instead of leaving the reel at 2 s.
+    assert asset_ids == [1, 2, 3]
+    total_ms = sum(c.asset_end_ms - c.asset_start_ms for c in cuts)
+    assert total_ms >= 8_000
+
+
+def test_assemble_plan_extends_spans_when_pool_exhausted() -> None:
+    """If even the dropped pool is empty and we're still short, the
+    assembler stretches each chosen span up to ``MAX_SPAN_MS`` and the
+    asset's actual duration.
+    """
+    from media_processor.services.edit_planner import (
+        MAX_SPAN_MS,
+        TRANSITION_DEFAULT,
+        _assemble_plan,
+        _AssetScore,
+    )
+
+    scores = [
+        _AssetScore(
+            asset_id=1,
+            score=80,
+            position="opening",
+            best_span_ms=(0, 2_000),
+            source_kind="scripted",
+            reason="only candidate",
+            dominant_motion="static",
+            transition_to_next=TRANSITION_DEFAULT,
+            asset_duration_ms=10_000,
+        ),
+    ]
+    cuts = _assemble_plan(scores, target_duration_ms=8_000)
+    assert len(cuts) == 1
+    span = cuts[0].asset_end_ms - cuts[0].asset_start_ms
+    # Span must have grown beyond the 2 s Gemini suggestion, capped at
+    # MAX_SPAN_MS so we never produce a 60-second monolog.
+    assert span > 2_000
+    assert span <= MAX_SPAN_MS
+
+
+def test_assemble_plan_carries_motion_and_face_to_segment() -> None:
+    """Renderer needs ``dominant_motion`` and ``has_face`` on the segment
+    so it can decide whether to apply zoompan; the assembler must copy
+    them through from the per-asset score.
+    """
+    from media_processor.services.edit_planner import (
+        TRANSITION_DEFAULT,
+        _assemble_plan,
+        _AssetScore,
+    )
+
+    scores = [
+        _AssetScore(
+            asset_id=1,
+            score=80,
+            position="opening",
+            best_span_ms=(0, 2_000),
+            source_kind="improv",
+            reason="",
+            dominant_motion="pan",
+            transition_to_next=TRANSITION_DEFAULT,
+            dominant_emotion="happy",
+            asset_duration_ms=8_000,
+            has_face=True,
+        ),
+    ]
+    cuts = _assemble_plan(scores, target_duration_ms=2_000)
+    assert len(cuts) == 1
+    assert cuts[0].dominant_motion == "pan"
+    assert cuts[0].has_face is True
 
 
 @pytest.mark.asyncio
@@ -293,93 +474,20 @@ async def test_heuristic_fallback_uses_transcript(session: AsyncSession) -> None
     assert all(s.source_kind == "improv" for s in plan.segments)
 
 
-def test_assemble_plan_dedups_repeated_transcripts() -> None:
-    """Phase 8.2 regression: two cuts whose transcripts say the same thing
-    should not both make the cut, even when both are high-scored. Mirrors
-    the prod incident where 蚊子館 appeared 4–5 times in one reel."""
-    from media_processor.services.edit_planner import (
-        TRANSITION_DEFAULT,
-        _AssetScore,
-        _assemble_plan,
-    )
-
-    repeated = "蚊子館蓋了根本沒人去政府浪費錢"
-    scores = [
-        _AssetScore(
-            asset_id=1,
-            score=95,
-            position="opening",
-            best_span_ms=(0, 4_000),
-            source_kind="improv",
-            reason="",
-            transition_to_next=TRANSITION_DEFAULT,
-            summary="批評蚊子館浪費公帑",
-            span_transcript=repeated,
-            scene_tags_top=("室外",),
-        ),
-        _AssetScore(
-            asset_id=2,
-            score=92,
-            position="middle",
-            best_span_ms=(0, 4_000),
-            source_kind="improv",
-            reason="",
-            transition_to_next=TRANSITION_DEFAULT,
-            summary="批評蚊子館浪費公帑",
-            span_transcript=repeated,  # identical text → must be deduped
-            scene_tags_top=("室外",),
-        ),
-        _AssetScore(
-            asset_id=3,
-            score=70,
-            position="middle",
-            best_span_ms=(0, 4_000),
-            source_kind="improv",
-            reason="",
-            transition_to_next=TRANSITION_DEFAULT,
-            summary="介紹另一個建設案",
-            span_transcript="這個案子完工後對地方很有幫助",
-            scene_tags_top=("室內",),
-        ),
-    ]
-    cuts = _assemble_plan(scores, target_duration_ms=12_000)
-    asset_ids = [c.asset_id for c in cuts]
-    assert len(set(asset_ids)) == len(asset_ids), f"duplicate asset_id: {asset_ids}"
-    # The dup must drop, the unique third one must stay.
-    assert 2 not in asset_ids
-    assert 3 in asset_ids
-
-
 def test_assemble_plan_tops_up_to_target() -> None:
-    """Phase 8.2 regression: when the bucket walk under-shoots target, the
-    top-up pass must keep pulling candidates until total ≈ target."""
+    """When the bucket walk under-shoots target, the duration-fill pass
+    must keep pulling candidates until total ≈ target.
+
+    The M8.1 follow-up version of ``_assemble_plan`` does this via
+    duration-fill (below-MIN_KEEP_SCORE pool first, then ``skip``-marked)
+    + span-extend up to ``MAX_SPAN_MS`` per cut.
+    """
     from media_processor.services.edit_planner import (
         TRANSITION_DEFAULT,
         _AssetScore,
         _assemble_plan,
     )
 
-    # 6 candidates × 4 s each = 24 s of usable material; target 20 s. The
-    # legacy assembler used to stop at ~4–8 s because each bucket bailed
-    # after one pick. Top-up should now drive us into the [target, 1.2×]
-    # window. Each transcript is genuinely different so the dedup pass
-    # doesn't fire.
-    transcripts = [
-        "今天去爬山看到非常壯觀的雲海風景",
-        "新店開幕特價商品打五折大家快來搶購",
-        "電影院新上映的科幻片視覺特效真的很棒",
-        "週末家裡聚餐媽媽做的紅燒肉超級好吃",
-        "夜市裡那攤蚵仔煎排隊排了快兩小時",
-        "公司年會抽獎抽到一台筆電真是太幸運",
-    ]
-    summaries = [
-        "山頂雲海",
-        "商店打折",
-        "科幻電影",
-        "家庭聚餐",
-        "夜市美食",
-        "年會抽獎",
-    ]
     scores: list[_AssetScore] = []
     for i in range(6):
         scores.append(
@@ -390,10 +498,9 @@ def test_assemble_plan_tops_up_to_target() -> None:
                 best_span_ms=(0, 4_000),
                 source_kind="improv",
                 reason="",
+                dominant_motion="static",
                 transition_to_next=TRANSITION_DEFAULT,
-                summary=summaries[i],
-                span_transcript=transcripts[i],
-                scene_tags_top=(f"scene{i}",),
+                asset_duration_ms=10_000,
             )
         )
     cuts = _assemble_plan(scores, target_duration_ms=20_000)
@@ -401,7 +508,6 @@ def test_assemble_plan_tops_up_to_target() -> None:
     raw_total = sum(c.asset_end_ms - c.asset_start_ms for c in cuts)
     rendered = raw_total - max(0, len(cuts) - 1) * 500
     assert rendered >= 20_000, f"top-up failed: only {rendered}ms rendered vs 20000 target"
-    assert rendered <= 24_000, f"overshot 1.2x cap: {rendered}ms rendered"
     assert len(cuts) >= 5
 
 

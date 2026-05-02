@@ -100,6 +100,82 @@ def test_zoompan_filter_emits_canvas_size_and_increment() -> None:
     assert f"fps={video_renderer.ZOOMPAN_FPS}" in chain
 
 
+def test_zoompan_filter_uses_d_eq_one_to_avoid_freeze() -> None:
+    """Each input frame must produce ONE output frame so the underlying
+    video keeps playing while the zoom progresses. ``d=total_frames``
+    (the previous value) holds the first input frame for the entire
+    clip, which is the "frozen photo" failure users reported on M8.1.
+    """
+    chain = video_renderer._zoompan_filter("9:16", duration_s=2.0)
+    assert ":d=1:" in chain or chain.endswith(":d=1") or ":d=1," in chain
+
+
+def test_should_zoompan_skips_static_no_face_clip() -> None:
+    """Dominant emotion ``happy`` alone is not enough — a static clip
+    without a face during the chosen span gets no zoompan, otherwise the
+    zoom layers on top of effectively still video and reads as frozen.
+    """
+    cut = CutPlanSegment(
+        order=0,
+        asset_id=1,
+        asset_start_ms=0,
+        asset_end_ms=2_000,
+        source_kind="improv",
+        reason="",
+        dominant_emotion="happy",
+        dominant_motion="static",
+        has_face=False,
+    )
+    assert video_renderer._should_zoompan(cut) is False
+
+
+def test_should_zoompan_when_face_present_even_on_static() -> None:
+    cut = CutPlanSegment(
+        order=0,
+        asset_id=1,
+        asset_start_ms=0,
+        asset_end_ms=2_000,
+        source_kind="improv",
+        reason="",
+        dominant_emotion="happy",
+        dominant_motion="static",
+        has_face=True,
+    )
+    assert video_renderer._should_zoompan(cut) is True
+
+
+def test_should_zoompan_when_motion_is_dynamic() -> None:
+    cut = CutPlanSegment(
+        order=0,
+        asset_id=1,
+        asset_start_ms=0,
+        asset_end_ms=2_000,
+        source_kind="improv",
+        reason="",
+        dominant_emotion="surprised",
+        dominant_motion="pan",
+        has_face=False,
+    )
+    assert video_renderer._should_zoompan(cut) is True
+
+
+def test_should_zoompan_skips_non_dynamic_emotion() -> None:
+    cut = CutPlanSegment(
+        order=0,
+        asset_id=1,
+        asset_start_ms=0,
+        asset_end_ms=2_000,
+        source_kind="improv",
+        reason="",
+        dominant_emotion="serious",
+        dominant_motion="pan",
+        has_face=True,
+    )
+    # No matter how dynamic the rest is, ``serious`` / ``neutral`` keeps
+    # the camera locked off — that's the M8.1 design intent.
+    assert video_renderer._should_zoompan(cut) is False
+
+
 def test_circlecrop_in_transition_whitelist() -> None:
     """Phase 8.1 — emotion-shift transitions resolve to circlecrop, not the default."""
     assert "circlecrop" in video_renderer.VALID_TRANSITIONS

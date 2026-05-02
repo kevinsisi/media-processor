@@ -276,6 +276,33 @@ export default function Upload() {
 
   const charCount = useMemo(() => scriptBody.length, [scriptBody]);
   const completedVideoCount = videoRows.filter((r) => r.state === "complete").length;
+  const pendingUploadCount = useMemo(
+    () =>
+      videoRows.filter((r) => r.state === "queued" || r.state === "uploading")
+        .length,
+    [videoRows],
+  );
+
+  // Browser-level guard: if any uploads are still in flight when the
+  // user tries to navigate away (close tab, refresh, hit Back), surface
+  // the confirm dialog so they don't lose progress. Modern browsers
+  // ignore the custom message text and show their own generic prompt;
+  // setting returnValue to a non-empty string is what actually triggers
+  // the confirm. The handler is registered only while pending > 0 so we
+  // never block clean navigation.
+  useEffect(() => {
+    if (pendingUploadCount === 0) return;
+    const handler = (event: BeforeUnloadEvent) => {
+      const message = `有 ${pendingUploadCount} 個影片還在上傳中，離開會放棄未完成的上傳。確定離開嗎？`;
+      event.preventDefault();
+      event.returnValue = message;
+      return message;
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => {
+      window.removeEventListener("beforeunload", handler);
+    };
+  }, [pendingUploadCount]);
   // Server count is authoritative once project re-fetches; otherwise count
   // what we know we've completed locally this session.
   const assetCount = project?.asset_count ?? completedAssetIds.length;

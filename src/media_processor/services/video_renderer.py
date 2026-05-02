@@ -162,26 +162,62 @@ ZOOMPAN_EMOTIONS: frozenset[str] = frozenset({"happy", "surprised"})
 ZOOMPAN_END_ZOOM: float = 1.15
 ZOOMPAN_FPS: int = VIDEO_FPS
 
+# Camera-motion classes that already carry visual energy on their own —
+# combined with a dynamic emotion they make zoompan feel earned. Mirror
+# of ``edit_planner.DYNAMIC_MOTIONS``; duplicated here so the renderer
+# stays a pure ffmpeg wrapper without a planner import dep.
+ZOOMPAN_DYNAMIC_MOTIONS: frozenset[str] = frozenset({"pan", "tilt", "handheld"})
+
+
+def _should_zoompan(cut: CutPlanSegment) -> bool:
+    """Decide whether ``cut`` should get the slow zoom-in chain.
+
+    Three conditions must all hold:
+      * Dominant emotion is one we've decided is energetic enough to
+        motivate a zoom (``happy`` / ``surprised``).
+      * EITHER the source camera was moving (pan / tilt / handheld) OR
+        a face was actually visible inside the chosen span.
+
+    Without the second clause we'd zoom on a static, faceless clip
+    (e.g. a product shot whose surrounding asset happened to score as
+    ``happy`` from a face elsewhere) and the result reads as a frozen
+    photo with a slow Ken Burns layered on top — exactly the "looks
+    frozen" failure mode users reported on M8.1.
+    """
+    if getattr(cut, "dominant_emotion", "neutral") not in ZOOMPAN_EMOTIONS:
+        return False
+    motion = getattr(cut, "dominant_motion", "static")
+    has_face = bool(getattr(cut, "has_face", False))
+    return motion in ZOOMPAN_DYNAMIC_MOTIONS or has_face
+
 
 def _zoompan_filter(target_aspect: str, duration_s: float) -> str:
     """Build a ``zoompan`` filter chain that smoothly zooms 1.0 → 1.15.
 
-    duration_s drives the per-frame increment so the end zoom lands at
-    ZOOMPAN_END_ZOOM regardless of cut length. Output canvas matches
-    ASPECT_DIMENSIONS so the surrounding ``aspect_filter`` chain doesn't
-    have to crop again. We cap ``d`` at the closest integer frame count
-    so ffmpeg's zoompan integer-frame requirement is met.
+    Critical: ``d=1`` so each *input* frame produces ONE output frame —
+    that keeps the underlying video playing while the zoom progresses.
+    The previous implementation set ``d=total_frames``, which is the
+    Ken-Burns "still photo zoom" mode: ffmpeg holds the first input
+    frame for total_frames output frames, freezing the clip for its
+    entire duration. That mismatch is what users reported as
+    "zoompan looks frozen" on M8.1.
+
+    The per-frame increment is sized so that across ``total_frames``
+    output frames the zoom lands exactly at ``ZOOMPAN_END_ZOOM``,
+    regardless of cut length. ``s=`` matches ASPECT_DIMENSIONS so the
+    surrounding aspect chain doesn't have to crop again.
     """
     width, height = ASPECT_DIMENSIONS[target_aspect]
     duration_s = max(0.001, duration_s)
     total_frames = max(1, int(round(duration_s * ZOOMPAN_FPS)))
     # Per-frame zoom increment so we land at ZOOMPAN_END_ZOOM after
-    # total_frames; clamped with min(...) so rounding never overshoots.
+    # total_frames output frames; clamped with min(...) so rounding
+    # never overshoots even with float drift.
     increment = (ZOOMPAN_END_ZOOM - 1.0) / float(total_frames)
     return (
         f"zoompan="
         f"z='min(zoom+{increment:.6f},{ZOOMPAN_END_ZOOM})'"
-        f":d={total_frames}"
+        f":d=1"
         f":x='iw/2-(iw/zoom)/2'"
         f":y='ih/2-(ih/zoom)/2'"
         f":s={width}x{height}"
@@ -239,7 +275,7 @@ def _cut_segment(
     start_s = cut.asset_start_ms / 1000.0
     duration_s = max(0.001, (cut.asset_end_ms - cut.asset_start_ms) / 1000.0)
     vf_chain = aspect_filter(target_aspect)
-    if getattr(cut, "dominant_emotion", "neutral") in ZOOMPAN_EMOTIONS:
+    if _should_zoompan(cut):
         # zoompan operates on its own canvas, so we run it AFTER the
         # aspect crop so the zoom centre is the cropped frame's centre
         # rather than the original asset's.
@@ -707,6 +743,7 @@ __all__ = [
     "VIDEO_PRESET",
     "VideoRenderError",
     "VideoRenderTimeoutError",
+    "ZOOMPAN_DYNAMIC_MOTIONS",
     "ZOOMPAN_EMOTIONS",
     "ZOOMPAN_END_ZOOM",
     "aspect_filter",
