@@ -24,7 +24,12 @@
 /* v0.14.6 — full-width vertical list. Each cut is a single row that
    shows ALL its info (no overflow ellipsis on the reason text). The
    prior 50%-flex layout truncated reasons mid-character on phone-
-   width screens. */
+   width screens.
+   v0.14.8 — removed the ``max-height: 70vh; overflow-y: auto`` cage
+   that introduced an inner scroller. With the subtitle editor +
+   export buttons stacked below in the same card, the list ended up
+   only tall enough to show 2 rows on phones. The page scrolls now;
+   the list just grows. */
 .dt-timeline__list {
   list-style: none;
   margin: 0;
@@ -32,9 +37,6 @@
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  max-height: 70vh;
-  overflow-y: auto;
-  scrollbar-width: thin;
 }
 
 .dt-cell {
