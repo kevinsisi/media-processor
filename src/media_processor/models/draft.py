@@ -53,6 +53,12 @@ class Draft(Base):
     output_zip_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     mp4_preview_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     subtitle_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    # v0.16.2 — snapshot of the BGM file this draft was rendered with.
+    # First render copies project.bgm_path here; subsequent re-renders
+    # (e.g. timeline reorder) reuse this path even after the user
+    # generates a new AI track on the project, so each draft keeps
+    # whichever BGM it actually shipped with.
+    bgm_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     ai_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     prompt_feedback: Mapped[str | None] = mapped_column(Text, nullable=True)
     progress_steps_json: Mapped[Any] = mapped_column(JSON, nullable=True)

@@ -203,6 +203,28 @@ async def _set_stage_state(draft_id: int, stage: str, value: str) -> None:
         await session.commit()
 
 
+async def _snapshot_draft_bgm_path(
+    draft_id: int, project_bgm_path: str | None
+) -> str | None:
+    """Return the BGM path this draft should mix against.
+
+    First render: if the draft has no ``bgm_path`` recorded yet, copy the
+    project's current ``bgm_path`` onto it and return that. Subsequent
+    renders return whatever was snapshotted earlier — the project's
+    current BGM is ignored, so a freshly-generated AI track on the
+    project doesn't silently overwrite an older draft's soundtrack.
+    Returns ``None`` when neither side has a BGM (the BGM stage no-ops).
+    """
+    async with async_session_maker() as session:
+        draft = await session.get(Draft, draft_id)
+        if draft is None:
+            return project_bgm_path
+        if draft.bgm_path is None and project_bgm_path:
+            draft.bgm_path = project_bgm_path
+            await session.commit()
+        return draft.bgm_path
+
+
 async def _persist_plan(handle: _DraftHandle, plan: CutPlan) -> None:
     """Write ``Draft.cut_plan_json`` plus a row per CutPlanSegment."""
     async with async_session_maker() as session:
@@ -666,18 +688,26 @@ async def run_render(
         await _mark_failed(handle.draft_id, f"render: {exc}")
         return summary
 
-    # Stage 5 — BGM mix. No-op when the project has no uploaded bgm_path,
-    # which is the common case until the user uploads one. A BGM failure
-    # only fails the bgm stage, not the whole draft — the subtitled mp4
-    # at output_path is still a valid deliverable on its own.
+    # Stage 5 — BGM mix. No-op when neither the draft nor the project has
+    # a BGM path. A BGM failure only fails the bgm stage, not the whole
+    # draft — the subtitled mp4 at output_path is still a valid
+    # deliverable on its own.
+    #
+    # v0.16.2 — snapshot semantics: the first time a draft renders we
+    # copy ``project.bgm_path`` into ``draft.bgm_path`` and use that
+    # snapshot from then on. Re-renders (timeline reorder, etc.) ignore
+    # any newer ``project.bgm_path`` so each draft keeps whichever BGM
+    # it actually shipped with — generating a fresh AI track no longer
+    # silently swaps the soundtrack on older drafts.
     await update_state(EditStep.BGM.value, "running")
-    if project.bgm_path:
+    bgm_source_path = await _snapshot_draft_bgm_path(handle.draft_id, project.bgm_path)
+    if bgm_source_path:
         try:
             tmp_mixed = scratch_dir / f"draft_{handle.draft_id}_bgm.mp4"
             await asyncio.to_thread(
                 bgm_mixer.mix_bgm,
                 output_path,
-                Path(project.bgm_path),
+                Path(bgm_source_path),
                 srt_path if srt_text else None,
                 tmp_mixed,
             )

@@ -2,7 +2,7 @@
 
 > **單一定位**：個人 / 小團隊用的「拍完就上傳，AI 直接給可發佈影片」的工具。
 > 目標 UX：手機優先、繁體中文、高級感、最少手動編輯。
-> 目前版本：**0.16.1**（M9.1 — YOLO tracking + auto-reframe，含 reorder/render hardening）
+> 目前版本：**0.16.2**（M9.1 + per-draft BGM 快照、轉場 checkbox 正向語意、AI 配樂按鈕防連點）
 
 ## Phase 進度速覽
 

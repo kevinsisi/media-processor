@@ -372,8 +372,8 @@ function RenderOptions({
         disabled={disabled}
       />
       <EditOptionToggle
-        label="轉場特效（xfade）"
-        hint="關閉後片段直接硬切（無重疊），畫面節奏更俐落。"
+        label="使用轉場效果"
+        hint="打勾 = 片段之間加轉場（wipe / slide / circlecrop）；不勾 = 直接硬切。"
         value={transitionsOn}
         onChange={setTransitionsOn}
         disabled={disabled}

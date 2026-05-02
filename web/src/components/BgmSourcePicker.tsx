@@ -197,6 +197,13 @@ export default function BgmSourcePicker({
     lastSeenStatus.current = cur;
   }, [aiStatus, projectId, onProjectUpdated]);
 
+  // True while a generation job sits on the queue or runs on the
+  // worker. Used to keep both AI buttons disabled (and a spinner
+  // visible) so the user can't queue a second job by accident — the
+  // worker is single-GPU and parallel jobs would just contend.
+  const aiJobInFlight =
+    aiStatus?.status === "pending" || aiStatus?.status === "running";
+
   const handleGenerate = useCallback(async () => {
     if (!aiPrompt.trim()) return;
     setAiSubmitting(true);
@@ -342,6 +349,11 @@ export default function BgmSourcePicker({
           <p className="bgm-picker__hint mono">
             AI 會根據素材的場景、運鏡、情緒生成一段風格描述。可手動修改後再生成 30 秒配樂（約需 30–60 秒）。
           </p>
+          {filename && (
+            <p className="bgm-picker__hint mono">
+              目前配樂：<span className="mono">{filename}</span>。重新生成會建立新檔案（generated_<i>{`{時間戳}`}</i>.wav），舊草稿仍會沿用原本的配樂。按下「重新生成」前，目前這首一直保留。
+            </p>
+          )}
           {aiPromptLoading && (
             <p className="bgm-picker__hint mono">產生建議中…</p>
           )}
@@ -356,7 +368,7 @@ export default function BgmSourcePicker({
             placeholder="例：輕快的 lo-fi 配樂，鋼琴搭配電子節拍，70 BPM，溫暖懷舊。"
             rows={4}
             maxLength={2000}
-            disabled={disabled || aiSubmitting}
+            disabled={disabled || aiSubmitting || aiJobInFlight}
             onChange={(e) => {
               // First keystroke flips the userEdited flag; while set,
               // any background suggestion fetch silently skips the
@@ -371,17 +383,39 @@ export default function BgmSourcePicker({
               type="button"
               className="cta cta--quiet"
               onClick={() => void loadAiSuggestion(true)}
-              disabled={disabled || aiPromptLoading || aiSubmitting}
+              disabled={disabled || aiPromptLoading || aiSubmitting || aiJobInFlight}
             >
-              重新產生建議
+              {aiPromptLoading ? (
+                <span className="cta__spinner-row">
+                  <span className="bgm-picker__spinner" aria-hidden="true" />
+                  產生建議中…
+                </span>
+              ) : (
+                "重新產生建議"
+              )}
             </button>
             <button
               type="button"
               className="cta cta--primary"
               onClick={() => void handleGenerate()}
-              disabled={disabled || !aiPrompt.trim() || aiSubmitting}
+              disabled={
+                disabled || !aiPrompt.trim() || aiSubmitting || aiJobInFlight
+              }
             >
-              {aiSubmitting ? "排隊中…" : "生成配樂"}
+              {aiSubmitting || aiJobInFlight ? (
+                <span className="cta__spinner-row">
+                  <span className="bgm-picker__spinner" aria-hidden="true" />
+                  {aiSubmitting
+                    ? "排隊中…"
+                    : aiStatus?.status === "running"
+                      ? "生成中…"
+                      : "排隊中…"}
+                </span>
+              ) : filename ? (
+                "重新生成"
+              ) : (
+                "生成配樂"
+              )}
             </button>
           </div>
           {aiStatus && aiStatus.job_id != null && (

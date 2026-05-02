@@ -169,3 +169,27 @@
   flex: 1 1 12rem;
   min-width: 12rem;
 }
+
+/* ---- Inline button spinner (used while an AI BGM job is queued / running) ---- */
+
+.cta__spinner-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.bgm-picker__spinner {
+  display: inline-block;
+  width: 0.85rem;
+  height: 0.85rem;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: bgm-picker__spin 0.8s linear infinite;
+}
+
+@keyframes bgm-picker__spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
