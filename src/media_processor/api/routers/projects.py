@@ -31,6 +31,7 @@ from media_processor.api.schemas import (
     SceneTagOut,
     ScriptOut,
     ScriptUpsert,
+    SubtitleStylePatch,
     TrackingSummaryOut,
     TranscriptSummaryOut,
 )
@@ -78,6 +79,39 @@ def _draft_summary_with_urls(draft: Draft) -> DraftSummary:
 
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
+
+
+def _project_detail(
+    project: Project,
+    *,
+    asset_count: int,
+    draft_count: int,
+) -> ProjectDetail:
+    """Build a ProjectDetail with every Project column projected through.
+
+    Centralised so adding a column to ``Project`` only needs to change
+    one place — the four endpoints that hand back a ProjectDetail used
+    to repeat this constructor and silently drift apart.
+    """
+    return ProjectDetail(
+        id=project.id,
+        name=project.name,
+        client=project.client,
+        profile_name=project.profile_name,
+        source_dir=project.source_dir,
+        status=project.status,
+        target_aspect_ratio=project.target_aspect_ratio,
+        created_at=project.created_at,
+        asset_count=asset_count,
+        draft_count=draft_count,
+        bgm_path=project.bgm_path,
+        subtitle_font=project.subtitle_font,  # type: ignore[arg-type]
+        subtitle_color=project.subtitle_color,
+        subtitle_outline_color=project.subtitle_outline_color,
+        subtitle_position=project.subtitle_position,  # type: ignore[arg-type]
+        subtitle_size=project.subtitle_size,  # type: ignore[arg-type]
+        subtitle_outline_width=project.subtitle_outline_width,  # type: ignore[arg-type]
+    )
 
 
 @router.get("", response_model=list[ProjectSummary])
@@ -136,18 +170,7 @@ async def create_project(
     project.source_dir = str(Path(settings.assets_dir) / str(project.id))
     await session.commit()
     await session.refresh(project)
-    return ProjectDetail(
-        id=project.id,
-        name=project.name,
-        client=project.client,
-        profile_name=project.profile_name,
-        source_dir=project.source_dir,
-        status=project.status,
-        target_aspect_ratio=project.target_aspect_ratio,
-        created_at=project.created_at,
-        asset_count=0,
-        draft_count=0,
-    )
+    return _project_detail(project, asset_count=0, draft_count=0)
 
 
 @router.get("/{project_id}", response_model=ProjectDetail)
@@ -164,18 +187,10 @@ async def get_project(
     draft_count = await session.scalar(
         select(func.count(Draft.id)).where(Draft.project_id == project_id)
     )
-    return ProjectDetail(
-        id=project.id,
-        name=project.name,
-        client=project.client,
-        profile_name=project.profile_name,
-        source_dir=project.source_dir,
-        status=project.status,
-        target_aspect_ratio=project.target_aspect_ratio,
-        created_at=project.created_at,
+    return _project_detail(
+        project,
         asset_count=int(asset_count or 0),
         draft_count=int(draft_count or 0),
-        bgm_path=project.bgm_path,
     )
 
 
@@ -348,18 +363,10 @@ async def upload_project_bgm(
     draft_count = await session.scalar(
         select(func.count(Draft.id)).where(Draft.project_id == project_id)
     )
-    return ProjectDetail(
-        id=project.id,
-        name=project.name,
-        client=project.client,
-        profile_name=project.profile_name,
-        source_dir=project.source_dir,
-        status=project.status,
-        target_aspect_ratio=project.target_aspect_ratio,
-        created_at=project.created_at,
+    return _project_detail(
+        project,
         asset_count=int(asset_count or 0),
         draft_count=int(draft_count or 0),
-        bgm_path=project.bgm_path,
     )
 
 
@@ -376,6 +383,43 @@ async def delete_project_bgm(
         Path(project.bgm_path).unlink(missing_ok=True)
         project.bgm_path = None
         await session.commit()
+
+
+# v0.18 — subtitle style PATCH. Every field is optional so the UI can
+# send a partial diff; unspecified fields keep whatever the project
+# already has. Returns the updated ProjectDetail so the frontend can
+# refresh its local state in one round-trip.
+@router.patch("/{project_id}/subtitle-style", response_model=ProjectDetail)
+async def patch_project_subtitle_style(
+    project_id: int,
+    payload: SubtitleStylePatch,
+    session: SessionDep,
+) -> ProjectDetail:
+    project = await session.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
+    diff = payload.model_dump(exclude_unset=True)
+    if not diff:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="no fields to update",
+        )
+    for field, value in diff.items():
+        setattr(project, field, value)
+    await session.commit()
+    await session.refresh(project)
+
+    asset_count = await session.scalar(
+        select(func.count(Asset.id)).where(Asset.project_id == project_id)
+    )
+    draft_count = await session.scalar(
+        select(func.count(Draft.id)).where(Draft.project_id == project_id)
+    )
+    return _project_detail(
+        project,
+        asset_count=int(asset_count or 0),
+        draft_count=int(draft_count or 0),
+    )
 
 
 @router.get("/{project_id}/script", response_model=ScriptOut)
@@ -565,18 +609,10 @@ async def list_project_assets_with_analysis(
     draft_count = await session.scalar(
         select(func.count(Draft.id)).where(Draft.project_id == project_id)
     )
-    project_detail = ProjectDetail(
-        id=project.id,
-        name=project.name,
-        client=project.client,
-        profile_name=project.profile_name,
-        source_dir=project.source_dir,
-        status=project.status,
-        target_aspect_ratio=project.target_aspect_ratio,
-        created_at=project.created_at,
+    project_detail = _project_detail(
+        project,
         asset_count=int(asset_count or 0),
         draft_count=int(draft_count or 0),
-        bgm_path=project.bgm_path,
     )
 
     script_row = (

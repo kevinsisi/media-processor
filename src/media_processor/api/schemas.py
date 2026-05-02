@@ -13,6 +13,23 @@ ReviewActionLiteral = Literal["approve", "reject", "repatch", "download"]
 TargetAspectRatioLiteral = Literal["9:16", "4:5", "1:1"]
 UploadKindLiteral = Literal["video", "script"]
 
+# v0.18 — subtitle style customisation. Keep these literal lists in sync
+# with services.video_renderer.SUBTITLE_FONT_CHOICES /
+# SUBTITLE_SIZE_CHOICES / SUBTITLE_POSITION_CHOICES /
+# SUBTITLE_OUTLINE_WIDTH_CHOICES so a stale literal can't quietly accept
+# a value the renderer doesn't know how to apply.
+SubtitleFontLiteral = Literal[
+    "noto_sans_tc",
+    "noto_sans_tc_bold",
+    "noto_serif_tc",
+]
+SubtitlePositionLiteral = Literal["top", "middle", "bottom"]
+SubtitleSizeLiteral = Literal["small", "medium", "large"]
+SubtitleOutlineWidthLiteral = Literal["none", "thin", "thick"]
+# Hex colours like "#ffffff" or shorthand "#fff". Rejected with 422 when
+# the format doesn't match.
+SUBTITLE_COLOR_PATTERN = r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$"
+
 
 class ProjectSummary(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -41,6 +58,33 @@ class ProjectDetail(BaseModel):
     created_at: datetime
     asset_count: int
     draft_count: int
+    # M6.4 — populated when the project has an uploaded BGM track.
+    bgm_path: str | None = None
+    # v0.18 — subtitle style settings. Defaults match the historic
+    # white-on-black/Noto Sans CJK TC bottom-anchored look so older
+    # clients can ignore these fields without behavioural drift.
+    subtitle_font: SubtitleFontLiteral = "noto_sans_tc"
+    subtitle_color: str = "#ffffff"
+    subtitle_outline_color: str = "#000000"
+    subtitle_position: SubtitlePositionLiteral = "bottom"
+    subtitle_size: SubtitleSizeLiteral = "medium"
+    subtitle_outline_width: SubtitleOutlineWidthLiteral = "thin"
+
+
+class SubtitleStylePatch(BaseModel):
+    """Body for PATCH /projects/{id}/subtitle-style.
+
+    Every field is optional — the user can tweak one knob at a time and
+    the others stay at whatever the project already has. Colours must be
+    a 3- or 6-digit hex string with a leading ``#``.
+    """
+
+    subtitle_font: SubtitleFontLiteral | None = None
+    subtitle_color: str | None = Field(default=None, pattern=SUBTITLE_COLOR_PATTERN)
+    subtitle_outline_color: str | None = Field(default=None, pattern=SUBTITLE_COLOR_PATTERN)
+    subtitle_position: SubtitlePositionLiteral | None = None
+    subtitle_size: SubtitleSizeLiteral | None = None
+    subtitle_outline_width: SubtitleOutlineWidthLiteral | None = None
 
 
 class ProjectCreate(BaseModel):

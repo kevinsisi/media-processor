@@ -5,6 +5,7 @@ import BgmSourcePicker from "../components/BgmSourcePicker";
 import DraggableTimeline from "../components/DraggableTimeline";
 import ExportSheet from "../components/ExportSheet";
 import SubtitleEditor from "../components/SubtitleEditor";
+import SubtitleStyleEditor from "../components/SubtitleStyleEditor";
 import type {
   DraftComment,
   DraftDetail,
@@ -764,6 +765,11 @@ export default function ProjectEdit() {
             onProjectUpdated={setProject}
             disabled={triggering}
           />
+          <SubtitleStyleEditor
+            project={project}
+            onProjectUpdated={setProject}
+            disabled={triggering || !subtitlesOn}
+          />
           <div className="edit-card__actions">
             <button
               type="button"
@@ -884,6 +890,11 @@ export default function ProjectEdit() {
               bgmPath={project?.bgm_path}
               onProjectUpdated={setProject}
               disabled={triggering}
+            />
+            <SubtitleStyleEditor
+              project={project}
+              onProjectUpdated={setProject}
+              disabled={triggering || !subtitlesOn}
             />
             <DraggableTimeline
               draft={draft}

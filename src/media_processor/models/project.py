@@ -64,6 +64,52 @@ class Project(Base):
     # uploaded audio file under ``BGM_DIR``; null means "no BGM, the bgm
     # render stage is a no-op copy".
     bgm_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    # v0.18 — user-customisable subtitle burn-in style. The renderer reads
+    # these to build the drawtext filter; defaults match the historic
+    # SUBTITLE_FONT_PATH / white-on-black / bottom-anchored look so a
+    # project that hasn't been touched renders identically.
+    # ``font`` keys into video_renderer.SUBTITLE_FONT_CHOICES (Noto Sans CJK
+    # TC / Noto Sans CJK TC Bold / Noto Serif CJK TC); ``position`` is one
+    # of "top" / "middle" / "bottom"; ``size`` is one of "small" / "medium"
+    # / "large"; ``outline_width`` is one of "none" / "thin" / "thick".
+    # Colours are stored as hex like ``#ffffff`` and converted to drawtext's
+    # 0xRRGGBB form at render time.
+    subtitle_font: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        default="noto_sans_tc",
+        server_default="noto_sans_tc",
+    )
+    subtitle_color: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="#ffffff",
+        server_default="#ffffff",
+    )
+    subtitle_outline_color: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="#000000",
+        server_default="#000000",
+    )
+    subtitle_position: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="bottom",
+        server_default="bottom",
+    )
+    subtitle_size: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="medium",
+        server_default="medium",
+    )
+    subtitle_outline_width: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="thin",
+        server_default="thin",
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

@@ -39,6 +39,7 @@ import type {
   SettingsOut,
   SubtitleCueOut,
   SubtitleCuePatch,
+  SubtitleStylePatch,
   SyncFromManagerIn,
   SyncFromManagerOut,
   TrackingDetailOut,
@@ -116,6 +117,22 @@ export class ApiClient {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
+  }
+
+  // v0.18 — patch the project-level subtitle burn-in style. Send a
+  // partial diff; unspecified fields keep their existing value.
+  patchProjectSubtitleStyle(
+    projectId: number,
+    payload: SubtitleStylePatch,
+  ): Promise<ProjectDetail> {
+    return this.request<ProjectDetail>(
+      `/projects/${projectId}/subtitle-style`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      },
+    );
   }
 
   // v0.14.5 — single-shot multipart BGM upload. Backend caps at 50 MB
