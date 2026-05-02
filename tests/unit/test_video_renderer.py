@@ -182,6 +182,104 @@ def test_circlecrop_in_transition_whitelist() -> None:
     assert video_renderer._safe_transition("circlecrop") == "circlecrop"
 
 
+# ----- v0.18 watermark / overlay -----
+
+
+def test_watermark_position_xy_known_anchors() -> None:
+    """Each of the nine anchor names maps to the expected ffmpeg expr."""
+    assert video_renderer._watermark_position_xy("top-left") == ("${m}", "${m}")
+    assert video_renderer._watermark_position_xy("top-right") == (
+        "W-w-${m}",
+        "${m}",
+    )
+    assert video_renderer._watermark_position_xy("middle-center") == (
+        "(W-w)/2",
+        "(H-h)/2",
+    )
+    assert video_renderer._watermark_position_xy("bottom-left") == (
+        "${m}",
+        "H-h-${m}",
+    )
+    assert video_renderer._watermark_position_xy("bottom-right") == (
+        "W-w-${m}",
+        "H-h-${m}",
+    )
+
+
+def test_watermark_position_xy_falls_back_to_default() -> None:
+    """Unrecognised anchor names land at the documented default — never crash."""
+    fallback = video_renderer._watermark_position_xy("nonsense")
+    default = video_renderer._watermark_position_xy(
+        video_renderer.WATERMARK_DEFAULT_POSITION
+    )
+    assert fallback == default
+
+
+def test_watermark_filter_clamps_scale_and_opacity() -> None:
+    """A degenerate row can't request a 200 % wide logo or 9.0 alpha."""
+    f = video_renderer._watermark_filter(
+        canvas_w=1080,
+        canvas_h=1920,
+        position="bottom-right",
+        scale=2.0,  # over the cap
+        opacity=9.0,  # over the cap
+    )
+    # Scale should be capped at WATERMARK_SCALE_MAX (0.5) → 540 px.
+    assert "scale=540:-1" in f
+    # Opacity should be capped at 1.0.
+    assert "aa=1.0000" in f
+    # Margin is 2% of canvas width (1080 * 0.02 = 21.6 → 22), stamped
+    # onto the position expression.
+    assert "overlay=W-w-22:H-h-22" in f
+
+
+def test_watermark_filter_uses_real_value_when_in_range() -> None:
+    f = video_renderer._watermark_filter(
+        canvas_w=1080,
+        canvas_h=1920,
+        position="top-left",
+        scale=0.10,
+        opacity=0.5,
+    )
+    assert "scale=108:-1" in f
+    assert "aa=0.5000" in f
+    assert "overlay=22:22" in f
+
+
+def test_apply_watermark_writes_output_in_fake_mode(tmp_path: Path) -> None:
+    """End-to-end fake: ffmpeg path is stubbed; the helper must still produce
+    an output file at the requested path so downstream stages can carry on."""
+    src = tmp_path / "in.mp4"
+    src.write_bytes(b"fake")
+    wm = tmp_path / "logo.png"
+    wm.write_bytes(b"\x89PNG fake")
+    out = tmp_path / "out.mp4"
+    video_renderer.apply_watermark(
+        src,
+        out,
+        watermark_path=wm,
+        target_aspect="9:16",
+        position="bottom-right",
+        scale=0.10,
+        opacity=1.0,
+    )
+    assert out.is_file()
+
+
+def test_apply_watermark_rejects_unknown_aspect(tmp_path: Path) -> None:
+    src = tmp_path / "in.mp4"
+    src.write_bytes(b"fake")
+    wm = tmp_path / "logo.png"
+    wm.write_bytes(b"\x89PNG fake")
+    with pytest.raises(video_renderer.VideoRenderError):
+        video_renderer.apply_watermark(
+            src,
+            tmp_path / "out.mp4",
+            watermark_path=wm,
+            target_aspect="21:9",
+        )
+
+
 def test_render_end_to_end_fake(tmp_path: Path) -> None:
     src = tmp_path / "asset.mp4"
     src.write_bytes(b"fake")

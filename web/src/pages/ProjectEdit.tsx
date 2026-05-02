@@ -5,6 +5,7 @@ import BgmSourcePicker from "../components/BgmSourcePicker";
 import DraggableTimeline from "../components/DraggableTimeline";
 import ExportSheet from "../components/ExportSheet";
 import SubtitleEditor from "../components/SubtitleEditor";
+import WatermarkPicker from "../components/WatermarkPicker";
 import type {
   DraftComment,
   DraftDetail,
@@ -764,6 +765,12 @@ export default function ProjectEdit() {
             onProjectUpdated={setProject}
             disabled={triggering}
           />
+          <WatermarkPicker
+            projectId={validProjectId}
+            project={project}
+            onProjectUpdated={setProject}
+            disabled={triggering}
+          />
           <div className="edit-card__actions">
             <button
               type="button"
@@ -882,6 +889,12 @@ export default function ProjectEdit() {
             <BgmSourcePicker
               projectId={validProjectId}
               bgmPath={project?.bgm_path}
+              onProjectUpdated={setProject}
+              disabled={triggering}
+            />
+            <WatermarkPicker
+              projectId={validProjectId}
+              project={project}
               onProjectUpdated={setProject}
               disabled={triggering}
             />

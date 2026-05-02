@@ -49,6 +49,7 @@ import type {
   UploadCompleteOut,
   UploadSessionCreate,
   UploadSessionOut,
+  WatermarkSettingsPatch,
 } from "./types";
 
 const DEFAULT_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
@@ -128,6 +129,41 @@ export class ApiClient {
       method: "POST",
       body: fd,
     });
+  }
+
+  // v0.18 — brand watermark / logo overlay. PNG only, ≤5 MB. Returns
+  // the refreshed ProjectDetail so the picker can re-render against
+  // the new watermark_url (carries a cache-bust query).
+  uploadProjectWatermark(
+    projectId: number,
+    file: File,
+  ): Promise<ProjectDetail> {
+    const fd = new FormData();
+    fd.append("file", file);
+    return this.request<ProjectDetail>(`/projects/${projectId}/watermark`, {
+      method: "POST",
+      body: fd,
+    });
+  }
+
+  updateProjectWatermark(
+    projectId: number,
+    payload: WatermarkSettingsPatch,
+  ): Promise<ProjectDetail> {
+    return this.request<ProjectDetail>(`/projects/${projectId}/watermark`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteProjectWatermark(projectId: number): Promise<void> {
+    const url = `${this.baseUrl}/projects/${projectId}/watermark`;
+    const response = await this.fetchImpl(url, { method: "DELETE" });
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      throw new ApiError(response.status, url, text || response.statusText);
+    }
   }
 
   // ----- v0.15 — AI BGM gen + music library -----

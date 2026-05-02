@@ -64,6 +64,30 @@ class Project(Base):
     # uploaded audio file under ``BGM_DIR``; null means "no BGM, the bgm
     # render stage is a no-op copy".
     bgm_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    # v0.18 — optional brand watermark / logo overlay burned into the
+    # final mp4. ``watermark_path`` is the on-disk PNG under
+    # ``WATERMARK_DIR``; null means the overlay stage is a no-op. The
+    # other three columns describe the layout — they're kept even when
+    # the file is removed so a re-upload picks up the previous setup.
+    watermark_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    watermark_position: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="bottom-right",
+        server_default="bottom-right",
+    )
+    watermark_scale: Mapped[float] = mapped_column(
+        Float,
+        nullable=False,
+        default=0.10,
+        server_default="0.10",
+    )
+    watermark_opacity: Mapped[float] = mapped_column(
+        Float,
+        nullable=False,
+        default=1.0,
+        server_default="1.0",
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

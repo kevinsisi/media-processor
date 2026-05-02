@@ -1,0 +1,241 @@
+/* v0.18 — brand watermark / logo overlay picker */
+
+.watermark-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin: 0 0 var(--space-4) 0;
+}
+
+.watermark-picker__head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.watermark-picker__title {
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
+  letter-spacing: 0.16em;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.watermark-picker__current {
+  font-size: var(--t-xs);
+  color: var(--text-muted, #888);
+}
+
+.watermark-picker__upload-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.watermark-picker__upload {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.85rem;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  user-select: none;
+  background: rgba(255, 255, 255, 0.04);
+}
+.watermark-picker__upload input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.watermark-picker__upload input:disabled {
+  cursor: not-allowed;
+}
+
+.watermark-picker__delete {
+  background: transparent;
+  border: 1px solid rgba(255, 80, 80, 0.4);
+  color: #ff8a8a;
+  border-radius: 8px;
+  padding: 0.45rem 0.85rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.watermark-picker__delete:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.watermark-picker__preview-row {
+  display: flex;
+  gap: 1rem;
+  align-items: stretch;
+  flex-wrap: wrap;
+}
+
+/* 9:16 portrait preview canvas — same aspect default as the renderer
+ * so what the user sees here lines up with the deliverable. */
+.watermark-picker__canvas {
+  position: relative;
+  width: 90px;
+  height: 160px;
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.06),
+    rgba(255, 255, 255, 0.02)
+  );
+  border: 1px dashed rgba(255, 255, 255, 0.18);
+  border-radius: 6px;
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+
+.watermark-picker__placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  color: var(--text-muted, #888);
+}
+
+.watermark-picker__logo {
+  position: absolute;
+  height: auto;
+  pointer-events: none;
+  /* Scale + opacity come from inline style; position from the modifier
+   * class below so the preview matches the picker's anchor choice. */
+}
+
+/* Margin matches WATERMARK_MARGIN_RATIO=2% on a 90px-wide canvas. */
+.watermark-picker__logo--top-left {
+  top: 4%;
+  left: 4%;
+}
+.watermark-picker__logo--top-center {
+  top: 4%;
+  left: 50%;
+  transform: translateX(-50%);
+}
+.watermark-picker__logo--top-right {
+  top: 4%;
+  right: 4%;
+}
+.watermark-picker__logo--middle-left {
+  top: 50%;
+  left: 4%;
+  transform: translateY(-50%);
+}
+.watermark-picker__logo--middle-center {
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+.watermark-picker__logo--middle-right {
+  top: 50%;
+  right: 4%;
+  transform: translateY(-50%);
+}
+.watermark-picker__logo--bottom-left {
+  bottom: 4%;
+  left: 4%;
+}
+.watermark-picker__logo--bottom-center {
+  bottom: 4%;
+  left: 50%;
+  transform: translateX(-50%);
+}
+.watermark-picker__logo--bottom-right {
+  bottom: 4%;
+  right: 4%;
+}
+
+.watermark-picker__grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+  gap: 4px;
+  width: 96px;
+  height: 96px;
+  align-self: center;
+}
+
+.watermark-picker__cell {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.watermark-picker__cell:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+}
+.watermark-picker__cell:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.watermark-picker__cell--active {
+  background: rgba(120, 180, 255, 0.18);
+  border-color: rgba(120, 180, 255, 0.6);
+}
+.watermark-picker__dot {
+  display: block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.55;
+}
+.watermark-picker__cell--active .watermark-picker__dot {
+  opacity: 1;
+  background: #aacfff;
+}
+
+.watermark-picker__sliders {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.watermark-picker__slider {
+  display: grid;
+  grid-template-columns: 4rem 1fr 3rem;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.85rem;
+}
+
+.watermark-picker__slider input[type="range"] {
+  width: 100%;
+}
+
+.watermark-picker__value {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--text-secondary, #aaa);
+  text-align: right;
+}
+
+.watermark-picker__error {
+  margin: 0;
+  color: #ff8a8a;
+  font-size: 0.8rem;
+}
+
+.watermark-picker__hint {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--text-muted, #888);
+  line-height: 1.4;
+}

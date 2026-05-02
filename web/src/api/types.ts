@@ -18,6 +18,17 @@ export interface ProjectSummary {
   latest_draft_version: number | null;
 }
 
+export type WatermarkPosition =
+  | "top-left"
+  | "top-center"
+  | "top-right"
+  | "middle-left"
+  | "middle-center"
+  | "middle-right"
+  | "bottom-left"
+  | "bottom-center"
+  | "bottom-right";
+
 export interface ProjectDetail {
   id: number;
   name: string;
@@ -33,6 +44,23 @@ export interface ProjectDetail {
   // show a "BGM ✓" chip when set; null = no BGM and the bgm render stage
   // no-ops.
   bgm_path: string | null;
+  // v0.18 — brand watermark / logo overlay. ``watermark_path`` is the
+  // on-disk path; ``watermark_url`` is the public URL (with a cache-bust
+  // query so re-uploads are picked up immediately). Layout fields carry
+  // their defaults even when no PNG has been uploaded yet.
+  watermark_path?: string | null;
+  watermark_url?: string | null;
+  watermark_position?: WatermarkPosition;
+  watermark_scale?: number;
+  watermark_opacity?: number;
+}
+
+// v0.18 — PATCH /projects/{id}/watermark body. Every field optional so
+// the picker can update one slider at a time without echoing the rest.
+export interface WatermarkSettingsPatch {
+  position?: WatermarkPosition;
+  scale?: number;
+  opacity?: number;
 }
 
 export interface ProjectCreate {

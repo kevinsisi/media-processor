@@ -12,6 +12,18 @@ from media_processor.models.enums import REVIEW_ACTION_VALUES
 ReviewActionLiteral = Literal["approve", "reject", "repatch", "download"]
 TargetAspectRatioLiteral = Literal["9:16", "4:5", "1:1"]
 UploadKindLiteral = Literal["video", "script"]
+# v0.18 — 9-grid watermark anchor. Mirrors video_renderer._WATERMARK_POSITIONS.
+WatermarkPositionLiteral = Literal[
+    "top-left",
+    "top-center",
+    "top-right",
+    "middle-left",
+    "middle-center",
+    "middle-right",
+    "bottom-left",
+    "bottom-center",
+    "bottom-right",
+]
 
 
 class ProjectSummary(BaseModel):
@@ -41,6 +53,28 @@ class ProjectDetail(BaseModel):
     created_at: datetime
     asset_count: int
     draft_count: int
+    bgm_path: str | None = None
+    # v0.18 — watermark / logo overlay settings. ``watermark_path`` is
+    # null when the user hasn't uploaded a PNG yet; the layout fields
+    # carry their defaults so the UI can render the picker pre-filled.
+    watermark_path: str | None = None
+    watermark_url: str | None = None
+    watermark_position: WatermarkPositionLiteral = "bottom-right"
+    watermark_scale: float = 0.10
+    watermark_opacity: float = 1.0
+
+
+class WatermarkSettingsPatch(BaseModel):
+    """PATCH /projects/{id}/watermark — body. Every field optional.
+
+    Bounds match ``services.video_renderer.apply_watermark`` validation:
+    scale capped to 0.5 so the logo can't dominate the frame, opacity
+    capped to 1.0 (fully opaque) and floored at 0.0 (invisible).
+    """
+
+    position: WatermarkPositionLiteral | None = None
+    scale: float | None = Field(default=None, ge=0.02, le=0.5)
+    opacity: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
 class ProjectCreate(BaseModel):

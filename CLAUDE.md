@@ -81,7 +81,7 @@ CLAUDE.md is meta-rules; concrete project state lives elsewhere. When you need t
 - `skills/gemini-prompts/` — 4 個 reusable Gemini prompt skill（asset-score / scene-tag / script-coverage / llm-patcher），改 prompt 前先看這裡。
 - The code itself —
   - `services/edit_planner.py` per-asset Gemini fanout (M6) + emotion / motion / face fields on `_AssetScore` + `_assemble_plan` 3-pass dedup/top-up (M8.1)
-  - `services/video_renderer.py` xfade chain + drawtext subtitle burn-in + `_zoompan_filter` (d=1, gated on motion-OR-face) + auto-reframe sendcmd chain (v0.16) + per-asset tracking-target dispatch (v0.17)
+  - `services/video_renderer.py` xfade chain + drawtext subtitle burn-in + `_zoompan_filter` (d=1, gated on motion-OR-face) + auto-reframe sendcmd chain (v0.16) + per-asset tracking-target dispatch (v0.17) + `apply_watermark` 9-grid PNG overlay (v0.18)
   - `services/auto_reframe.py` Kalman-smoothed YOLO bbox → ffmpeg sendcmd dynamic crop (v0.16; tuned Q=120 R=80 MAX_DELTA=24 CROP_ZOOM_FACTOR=0.75 in v0.16.1) + `compute_crop_path_from_custom_roi` for CSRT user ROI (v0.17)
   - `services/object_tracking.py` YOLOv8n at 5 fps; v0.17 keeps multi-class tracks + adds `track_custom_roi` (OpenCV CSRT)
   - `services/bgm_mixer.py` voice-ducked BGM stage (M6.4) + per-segment voice/BGM gain via `SegmentVolume` + `apply_voice_volume` no-BGM fallback (v0.17)

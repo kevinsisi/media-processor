@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     # M6.4 — uploaded BGM tracks (one per project). Lives under
     # ${MEDIA_STORAGE_DIR}/bgm on the host via the existing media bind mount.
     bgm_dir: str = Field(default="/app/media/bgm")
+    # v0.18 — uploaded brand watermarks (one PNG per project). Lives under
+    # ${MEDIA_STORAGE_DIR}/watermarks; piggybacks on the same media mount
+    # so no docker-compose change is required.
+    watermark_dir: str = Field(default="/app/media/watermarks")
 
     # M4 — Whisper local STT in the worker container.
     # WHISPER_FAKE=1 swaps the engine for a deterministic canned zh-Hant

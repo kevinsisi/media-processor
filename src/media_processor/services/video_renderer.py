@@ -106,6 +106,34 @@ PER_SEGMENT_TIMEOUT_S: float = 300.0
 CONCAT_TIMEOUT_S: float = 300.0
 SUBTITLE_BURN_TIMEOUT_S: float = 600.0
 STABILIZE_TIMEOUT_S: float = 600.0  # two-pass vidstab is slow
+WATERMARK_TIMEOUT_S: float = 600.0
+
+# v0.18 — watermark / brand-logo overlay knobs. Position is one of nine
+# anchor points in a 3x3 grid; scale is the logo width as a fraction of
+# the rendered canvas width; opacity is the alpha multiplier applied via
+# colorchannelmixer. Bounds match ``schemas.WatermarkSettingsPatch`` —
+# we re-clamp here so a stale row (or a direct call from a test) can't
+# blow up ffmpeg with a degenerate size.
+WATERMARK_POSITIONS: frozenset[str] = frozenset(
+    {
+        "top-left",
+        "top-center",
+        "top-right",
+        "middle-left",
+        "middle-center",
+        "middle-right",
+        "bottom-left",
+        "bottom-center",
+        "bottom-right",
+    }
+)
+WATERMARK_DEFAULT_POSITION: str = "bottom-right"
+WATERMARK_SCALE_MIN: float = 0.02
+WATERMARK_SCALE_MAX: float = 0.5
+WATERMARK_OPACITY_MIN: float = 0.0
+WATERMARK_OPACITY_MAX: float = 1.0
+WATERMARK_MARGIN_RATIO: float = 0.02  # 2% of canvas width on each edge
+WATERMARK_MARGIN_MIN_PX: int = 12
 
 # v0.14.3 — digital stabilization (vidstabdetect + vidstabtransform).
 # Two-pass: first pass writes a transforms file describing the shake,
@@ -967,6 +995,142 @@ def render(
     )
 
 
+# ---------- watermark / logo overlay (v0.18) ----------
+
+
+def _watermark_position_xy(position: str) -> tuple[str, str]:
+    """Map a 9-grid position name to ``(x_expr, y_expr)`` for ``overlay=``.
+
+    Expressions reference the main video's ``W``/``H`` and the overlay's
+    ``w``/``h``, plus a margin variable ``${m}`` that the caller injects.
+    Falls back to ``WATERMARK_DEFAULT_POSITION`` when ``position`` is not
+    one of the nine recognised anchors so a stale row never makes ffmpeg
+    blow up — the overlay just lands in its default spot.
+    """
+    pos = position if position in WATERMARK_POSITIONS else WATERMARK_DEFAULT_POSITION
+    vert, horiz = pos.split("-", 1)
+    if horiz == "left":
+        x_expr = "${m}"
+    elif horiz == "right":
+        x_expr = "W-w-${m}"
+    else:  # center
+        x_expr = "(W-w)/2"
+    if vert == "top":
+        y_expr = "${m}"
+    elif vert == "bottom":
+        y_expr = "H-h-${m}"
+    else:  # middle
+        y_expr = "(H-h)/2"
+    return x_expr, y_expr
+
+
+def _watermark_filter(
+    *,
+    canvas_w: int,
+    canvas_h: int,
+    position: str,
+    scale: float,
+    opacity: float,
+) -> str:
+    """Build the ``filter_complex`` chain that scales + alpha-blends the
+    watermark onto the main video.
+
+    Two filter graphs separated by ``;``:
+      1. Logo prep: force RGBA, multiply alpha by ``opacity``, scale to
+         ``round(canvas_w * scale)`` keeping aspect.
+      2. Overlay: anchor the result onto ``[0:v]`` at the picked grid
+         position with a 2 %-of-canvas margin (floored at 12 px).
+
+    Both ``scale`` and ``opacity`` are clamped to their renderer bounds
+    so a degenerate row can't request a 5000 px logo or negative alpha.
+    """
+    scale = max(WATERMARK_SCALE_MIN, min(WATERMARK_SCALE_MAX, float(scale)))
+    opacity = max(WATERMARK_OPACITY_MIN, min(WATERMARK_OPACITY_MAX, float(opacity)))
+    target_w = max(1, int(round(canvas_w * scale)))
+    margin = max(WATERMARK_MARGIN_MIN_PX, int(round(canvas_w * WATERMARK_MARGIN_RATIO)))
+    x_expr, y_expr = _watermark_position_xy(position)
+    x_expr = x_expr.replace("${m}", str(margin))
+    y_expr = y_expr.replace("${m}", str(margin))
+    # ``-1`` for the scale height keeps the source aspect; ``flags=lanczos``
+    # gives a clean shrink without the moire that bilinear leaves on
+    # high-contrast logos.
+    logo_chain = (
+        f"[1:v]format=rgba,colorchannelmixer=aa={opacity:.4f},"
+        f"scale={target_w}:-1:flags=lanczos[wm]"
+    )
+    overlay_chain = (
+        f"[0:v][wm]overlay={x_expr}:{y_expr}:format=auto[vout]"
+    )
+    return f"{logo_chain};{overlay_chain}"
+
+
+def apply_watermark(
+    input_path: Path,
+    output_path: Path,
+    *,
+    watermark_path: Path,
+    target_aspect: str,
+    position: str = WATERMARK_DEFAULT_POSITION,
+    scale: float = 0.10,
+    opacity: float = 1.0,
+) -> None:
+    """Re-encode ``input_path`` with the watermark PNG overlaid.
+
+    Single ffmpeg subprocess; audio is stream-copied so this only touches
+    the video pass. Encoding knobs match the rest of the pipeline
+    (libx264 / crf 20 / faststart) so the file stays consistent with
+    what came out of subtitle / BGM stages.
+    """
+    _require_ffmpeg()
+    if target_aspect not in ASPECT_DIMENSIONS:
+        raise VideoRenderError(f"watermark: unsupported aspect {target_aspect!r}")
+    if not watermark_path.is_file():
+        raise VideoRenderError(f"watermark: PNG not found at {watermark_path}")
+    if not input_path.is_file() and not _is_fake():
+        raise VideoRenderError(f"watermark: input mp4 missing at {input_path}")
+
+    canvas_w, canvas_h = ASPECT_DIMENSIONS[target_aspect]
+    filter_complex = _watermark_filter(
+        canvas_w=canvas_w,
+        canvas_h=canvas_h,
+        position=position,
+        scale=scale,
+        opacity=opacity,
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    cmd = [
+        "ffmpeg",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-i",
+        str(input_path),
+        "-i",
+        str(watermark_path),
+        "-filter_complex",
+        filter_complex,
+        "-map",
+        "[vout]",
+        "-map",
+        "0:a?",
+        "-c:v",
+        VIDEO_CODEC,
+        "-pix_fmt",
+        VIDEO_PIX_FMT,
+        "-preset",
+        VIDEO_PRESET,
+        "-crf",
+        str(VIDEO_CRF),
+        "-c:a",
+        "copy",
+        "-movflags",
+        "+faststart",
+        str(output_path),
+    ]
+    _run(cmd, timeout_s=WATERMARK_TIMEOUT_S, stage="watermark")
+
+
 def cleanup_intermediates(intermediate_dir: Path) -> None:
     """Remove the per-draft scratch directory after a successful render."""
     if intermediate_dir.is_dir():
@@ -995,9 +1159,17 @@ __all__ = [
     "VIDEO_PRESET",
     "VideoRenderError",
     "VideoRenderTimeoutError",
+    "WATERMARK_DEFAULT_POSITION",
+    "WATERMARK_OPACITY_MAX",
+    "WATERMARK_OPACITY_MIN",
+    "WATERMARK_POSITIONS",
+    "WATERMARK_SCALE_MAX",
+    "WATERMARK_SCALE_MIN",
+    "WATERMARK_TIMEOUT_S",
     "ZOOMPAN_DYNAMIC_MOTIONS",
     "ZOOMPAN_EMOTIONS",
     "ZOOMPAN_END_ZOOM",
+    "apply_watermark",
     "aspect_filter",
     "burn_subtitles",
     "cleanup_intermediates",

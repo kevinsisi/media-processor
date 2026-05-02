@@ -814,6 +814,31 @@ async def run_render(
     else:
         await update_state(EditStep.BGM.value, "done")
 
+    # v0.18 — watermark / brand-logo overlay. Final stage. Skipped when
+    # the project has no watermark configured. A failure here is
+    # non-fatal — we keep the un-watermarked mp4 in place so the draft
+    # still ships, matching the BGM-failure semantics above.
+    if project.watermark_path and Path(project.watermark_path).is_file():
+        try:
+            tmp_wm = scratch_dir / f"draft_{handle.draft_id}_wm.mp4"
+            await asyncio.to_thread(
+                video_renderer.apply_watermark,
+                output_path,
+                tmp_wm,
+                watermark_path=Path(project.watermark_path),
+                target_aspect=handle.target_aspect,
+                position=str(project.watermark_position or video_renderer.WATERMARK_DEFAULT_POSITION),
+                scale=float(project.watermark_scale or 0.10),
+                opacity=float(project.watermark_opacity or 1.0),
+            )
+            os.replace(tmp_wm, output_path)
+        except video_renderer.VideoRenderError as exc:
+            logger.warning(
+                "watermark overlay failed for draft %d, keeping un-watermarked mp4: %s",
+                handle.draft_id,
+                exc,
+            )
+
     # M7.2 — persist subtitle cues to ``subtitle_cues`` so the editor can
     # show / patch them. We only do this on the initial generation path
     # (subtitles_from_db=False) — when re-rendering with edited cues the

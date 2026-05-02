@@ -33,6 +33,7 @@ from media_processor.api.schemas import (
     ScriptUpsert,
     TrackingSummaryOut,
     TranscriptSummaryOut,
+    WatermarkSettingsPatch,
 )
 from media_processor.models import (
     EDIT_STEP_VALUES,
@@ -47,6 +48,60 @@ from media_processor.models import (
 from media_processor.services.queue import enqueue_project_edit
 
 router = APIRouter(prefix="/projects", tags=["projects"])
+
+
+def _watermark_url(project: Project) -> str | None:
+    """Public URL for the project's watermark PNG, if any.
+
+    Built from the on-disk filename (which is ``{project_id}.png`` by
+    convention) and the ``/media/watermarks`` static mount. Returns
+    ``None`` when the project has no watermark set or the file vanished
+    out from under us — the picker UI then shows the upload prompt
+    instead of a stale thumbnail.
+    """
+    if not project.watermark_path:
+        return None
+    p = Path(project.watermark_path)
+    if not p.is_file():
+        return None
+    # Use a cache-busting query so re-uploads at the same path aren't
+    # served from a stale browser cache (mtime resolution is plenty).
+    try:
+        mtime = int(p.stat().st_mtime)
+    except OSError:
+        mtime = 0
+    return f"/api/media/watermarks/{p.name}?v={mtime}"
+
+
+def _project_detail(
+    project: Project,
+    *,
+    asset_count: int,
+    draft_count: int,
+) -> ProjectDetail:
+    """Build a ProjectDetail with every column populated.
+
+    Centralised so the watermark/BGM/etc. fields don't drift across the
+    list / get / upload / analysis endpoints.
+    """
+    return ProjectDetail(
+        id=project.id,
+        name=project.name,
+        client=project.client,
+        profile_name=project.profile_name,
+        source_dir=project.source_dir,
+        status=project.status,
+        target_aspect_ratio=project.target_aspect_ratio,
+        created_at=project.created_at,
+        asset_count=asset_count,
+        draft_count=draft_count,
+        bgm_path=project.bgm_path,
+        watermark_path=project.watermark_path,
+        watermark_url=_watermark_url(project),
+        watermark_position=project.watermark_position,  # type: ignore[arg-type]
+        watermark_scale=float(project.watermark_scale),
+        watermark_opacity=float(project.watermark_opacity),
+    )
 
 
 def _draft_summary_with_urls(draft: Draft) -> DraftSummary:
@@ -136,18 +191,7 @@ async def create_project(
     project.source_dir = str(Path(settings.assets_dir) / str(project.id))
     await session.commit()
     await session.refresh(project)
-    return ProjectDetail(
-        id=project.id,
-        name=project.name,
-        client=project.client,
-        profile_name=project.profile_name,
-        source_dir=project.source_dir,
-        status=project.status,
-        target_aspect_ratio=project.target_aspect_ratio,
-        created_at=project.created_at,
-        asset_count=0,
-        draft_count=0,
-    )
+    return _project_detail(project, asset_count=0, draft_count=0)
 
 
 @router.get("/{project_id}", response_model=ProjectDetail)
@@ -164,18 +208,10 @@ async def get_project(
     draft_count = await session.scalar(
         select(func.count(Draft.id)).where(Draft.project_id == project_id)
     )
-    return ProjectDetail(
-        id=project.id,
-        name=project.name,
-        client=project.client,
-        profile_name=project.profile_name,
-        source_dir=project.source_dir,
-        status=project.status,
-        target_aspect_ratio=project.target_aspect_ratio,
-        created_at=project.created_at,
+    return _project_detail(
+        project,
         asset_count=int(asset_count or 0),
         draft_count=int(draft_count or 0),
-        bgm_path=project.bgm_path,
     )
 
 
@@ -348,19 +384,148 @@ async def upload_project_bgm(
     draft_count = await session.scalar(
         select(func.count(Draft.id)).where(Draft.project_id == project_id)
     )
-    return ProjectDetail(
-        id=project.id,
-        name=project.name,
-        client=project.client,
-        profile_name=project.profile_name,
-        source_dir=project.source_dir,
-        status=project.status,
-        target_aspect_ratio=project.target_aspect_ratio,
-        created_at=project.created_at,
+    return _project_detail(
+        project,
         asset_count=int(asset_count or 0),
         draft_count=int(draft_count or 0),
-        bgm_path=project.bgm_path,
     )
+
+
+# v0.18 — watermark / brand-logo overlay. Same shape as the BGM upload —
+# single multipart POST, streamed to disk, capped well below the BGM
+# limit because PNG logos are tiny in practice.
+WATERMARK_MAX_BYTES = 5 * 1024 * 1024
+WATERMARK_CHUNK_BYTES = 256 * 1024
+# PNG only — keeps the alpha channel intact through the ffmpeg overlay
+# chain. JPEG / WebP would silently lose transparency or need extra
+# colorspace handling on libx264 input.
+WATERMARK_ALLOWED_EXTS = {".png"}
+
+
+@router.post("/{project_id}/watermark", response_model=ProjectDetail)
+async def upload_project_watermark(
+    project_id: int,
+    session: SessionDep,
+    file: UploadFile = File(...),  # noqa: B008
+) -> ProjectDetail:
+    """Upload (or replace) the project's brand watermark PNG.
+
+    The picker UI sends a single multipart POST. The PNG is streamed to
+    ``${WATERMARK_DIR}/{project_id}.png`` in 256 KB chunks (cap is 5 MB —
+    a brand logo never legitimately exceeds that). Existing files at the
+    same path are overwritten so re-uploading the same project replaces
+    the artwork in place.
+    """
+    project = await session.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
+
+    raw_name = (file.filename or "").lower()
+    ext = "".join(Path(raw_name).suffixes[-1:]) if raw_name else ""
+    if ext not in WATERMARK_ALLOWED_EXTS:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail=(
+                f"watermark must be PNG (one of {sorted(WATERMARK_ALLOWED_EXTS)});"
+                f" got {ext or 'no extension'!r}"
+            ),
+        )
+
+    wm_dir = Path(settings.watermark_dir)
+    wm_dir.mkdir(parents=True, exist_ok=True)
+    target = wm_dir / f"{project_id}{ext}"
+
+    written = 0
+    with target.open("wb") as fh:
+        while True:
+            chunk = await file.read(WATERMARK_CHUNK_BYTES)
+            if not chunk:
+                break
+            written += len(chunk)
+            if written > WATERMARK_MAX_BYTES:
+                fh.close()
+                target.unlink(missing_ok=True)
+                raise HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail=f"watermark exceeds {WATERMARK_MAX_BYTES // (1024 * 1024)} MB limit",
+                )
+            fh.write(chunk)
+    if written == 0:
+        target.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="empty watermark upload"
+        )
+
+    project.watermark_path = str(target)
+    await session.commit()
+    await session.refresh(project)
+
+    asset_count = await session.scalar(
+        select(func.count(Asset.id)).where(Asset.project_id == project_id)
+    )
+    draft_count = await session.scalar(
+        select(func.count(Draft.id)).where(Draft.project_id == project_id)
+    )
+    return _project_detail(
+        project,
+        asset_count=int(asset_count or 0),
+        draft_count=int(draft_count or 0),
+    )
+
+
+@router.patch("/{project_id}/watermark", response_model=ProjectDetail)
+async def update_project_watermark(
+    project_id: int,
+    payload: WatermarkSettingsPatch,
+    session: SessionDep,
+) -> ProjectDetail:
+    """Update watermark layout (position / scale / opacity) without
+    re-uploading the PNG. All three fields are independent partial
+    updates — omit a field to leave it unchanged. Defaults are kept
+    even when no PNG is uploaded so a future upload picks them up.
+    """
+    project = await session.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
+
+    if payload.position is not None:
+        project.watermark_position = payload.position
+    if payload.scale is not None:
+        project.watermark_scale = float(payload.scale)
+    if payload.opacity is not None:
+        project.watermark_opacity = float(payload.opacity)
+    await session.commit()
+    await session.refresh(project)
+
+    asset_count = await session.scalar(
+        select(func.count(Asset.id)).where(Asset.project_id == project_id)
+    )
+    draft_count = await session.scalar(
+        select(func.count(Draft.id)).where(Draft.project_id == project_id)
+    )
+    return _project_detail(
+        project,
+        asset_count=int(asset_count or 0),
+        draft_count=int(draft_count or 0),
+    )
+
+
+@router.delete("/{project_id}/watermark", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_project_watermark(
+    project_id: int,
+    session: SessionDep,
+) -> None:
+    """Remove the project's watermark PNG. Idempotent — 204 even if none
+    set. Layout settings (position / scale / opacity) are intentionally
+    preserved so a re-upload picks up the previous configuration.
+    """
+    project = await session.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
+    if project.watermark_path:
+        Path(project.watermark_path).unlink(missing_ok=True)
+        project.watermark_path = None
+        await session.commit()
 
 
 @router.delete("/{project_id}/bgm", status_code=status.HTTP_204_NO_CONTENT)
@@ -565,18 +730,10 @@ async def list_project_assets_with_analysis(
     draft_count = await session.scalar(
         select(func.count(Draft.id)).where(Draft.project_id == project_id)
     )
-    project_detail = ProjectDetail(
-        id=project.id,
-        name=project.name,
-        client=project.client,
-        profile_name=project.profile_name,
-        source_dir=project.source_dir,
-        status=project.status,
-        target_aspect_ratio=project.target_aspect_ratio,
-        created_at=project.created_at,
+    project_detail = _project_detail(
+        project,
         asset_count=int(asset_count or 0),
         draft_count=int(draft_count or 0),
-        bgm_path=project.bgm_path,
     )
 
     script_row = (

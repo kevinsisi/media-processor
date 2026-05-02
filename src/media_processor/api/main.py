@@ -48,7 +48,7 @@ class StaticCacheMiddleware(BaseHTTPMiddleware):
 
 app = FastAPI(
     title="media-processor API",
-    version="0.15.3",
+    version="0.18.0",
 )
 
 app.include_router(health.router)
@@ -64,7 +64,12 @@ app.include_router(music.router)
 # path; on the dispatch host this resolves under MEDIA_STORAGE_DIR. mkdir on
 # startup so the mount doesn't fail on a fresh deploy. Swallow OSError so
 # import still works in environments without write access (CI test runner).
-for _media_dir in (settings.thumbnails_dir, settings.drafts_dir, settings.bgm_dir):
+for _media_dir in (
+    settings.thumbnails_dir,
+    settings.drafts_dir,
+    settings.bgm_dir,
+    settings.watermark_dir,
+):
     with contextlib.suppress(OSError):
         Path(_media_dir).mkdir(parents=True, exist_ok=True)
 # v0.15 — also create the curated library subdirectory so a fresh deploy
@@ -99,4 +104,13 @@ app.mount(
     "/media/bgm",
     StaticFiles(directory=settings.bgm_dir, check_dir=False),
     name="bgm",
+)
+# v0.18 — serve uploaded brand watermark PNGs so the picker can preview
+# the current logo without a separate signed-URL endpoint. Same no-cache
+# semantics as the BGM mount: a re-upload at the same path is picked up
+# immediately.
+app.mount(
+    "/media/watermarks",
+    StaticFiles(directory=settings.watermark_dir, check_dir=False),
+    name="watermarks",
 )

@@ -93,6 +93,13 @@ def export_render(
     Audio is stream-copied; video is re-encoded with libx264 at preset
     medium / crf 22. ``-y`` overwrites previous exports of the same
     aspect+height combo so re-running is idempotent.
+
+    v0.18 note: the watermark / brand-logo overlay is baked into the
+    *source* ``v{N}.mp4`` by the orchestrator, so it travels with the
+    source through this re-encode. When the export aspect differs from
+    the source's render aspect the centre-crop here can clip the
+    watermark — the picker UI calls this out when the user opens the
+    export sheet on a watermarked draft.
     """
     if not input_path.is_file():
         raise ExportError(f"input mp4 not found: {input_path}")
