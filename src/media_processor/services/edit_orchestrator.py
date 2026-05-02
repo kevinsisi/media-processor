@@ -45,6 +45,7 @@ logger = logging.getLogger(__name__)
 _STAGES: tuple[str, ...] = (
     EditStep.PLAN.value,
     EditStep.CUT.value,
+    EditStep.STABILIZE.value,
     EditStep.CONCAT.value,
     EditStep.SUBTITLES.value,
     EditStep.BGM.value,
@@ -422,6 +423,7 @@ async def run_render(
     target_duration_ms: int | None = None,
     skip_plan: bool = False,
     subtitles_from_db: bool = False,
+    stabilize: bool = True,
 ) -> dict[str, Any]:
     """Run the full M5 pipeline for ``project_id`` and return a summary.
 
@@ -434,7 +436,10 @@ async def run_render(
     ``GET /drafts/{id}`` and the orchestrator keeps that row in sync.
     ``target_duration_ms`` overrides the auto-computed length when set
     (clamped to [10 s, 300 s] regardless of caller); ``None`` lets the
-    orchestrator pick from the source material.
+    orchestrator pick from the source material. ``stabilize`` (default
+    ``True``) toggles the v0.14.3 two-pass vidstab pipeline between cut
+    and concat — disable for speed when the source is already stable
+    (tripod / gimbal footage).
     """
     # Load the project up-front so we know the draft will have something
     # to attach to before we reserve a draft id.
@@ -530,14 +535,21 @@ async def run_render(
     scratch_dir = Path(settings.analysis_dir) / "edits"
     scratch_dir.mkdir(parents=True, exist_ok=True)
 
-    # Stages 2 + 3 + 4 — cut / concat / subtitles. The renderer batches
-    # these so the on_progress callback is the only progress hook.
+    # Stages 2-5 — cut / [stabilize] / concat / subtitles. The renderer
+    # batches these so the on_progress callback is the only progress hook.
     progress_state = {
         "cut": "pending",
+        "stabilize": "pending" if stabilize else "skipped",
         "concat": "pending",
         "subtitles": "pending",
         "bgm": "pending",
     }
+    if not stabilize:
+        # Surface the skip in the persisted state right away so the UI
+        # doesn't show "stabilize: pending" forever for tripod-stable
+        # projects that opted out.
+        await _set_stage_state(handle.draft_id, EditStep.STABILIZE.value, "skipped")
+        summary["stages"][EditStep.STABILIZE.value] = "skipped"
 
     async def update_state(stage: str, value: str) -> None:
         progress_state[stage] = value
@@ -553,13 +565,21 @@ async def run_render(
     loop = asyncio.get_running_loop()
 
     def _sync_progress(stage: str, done: int, total: int) -> None:
-        if stage == "cut" and done < total:
+        if stage in ("cut", "stabilize") and done < total:
             return  # only flip terminal state
-        # Map the renderer's three buckets to our stage names + done state.
+        # Map the renderer's stages to our stage names + done state.
         if stage == "cut":
             asyncio.run_coroutine_threadsafe(update_state(EditStep.CUT.value, "done"), loop).result(
                 timeout=10
             )
+            next_stage = EditStep.STABILIZE.value if stabilize else EditStep.CONCAT.value
+            asyncio.run_coroutine_threadsafe(
+                update_state(next_stage, "running"), loop
+            ).result(timeout=10)
+        elif stage == "stabilize":
+            asyncio.run_coroutine_threadsafe(
+                update_state(EditStep.STABILIZE.value, "done"), loop
+            ).result(timeout=10)
             asyncio.run_coroutine_threadsafe(
                 update_state(EditStep.CONCAT.value, "running"), loop
             ).result(timeout=10)
@@ -585,14 +605,20 @@ async def run_render(
             output_path=output_path,
             srt_path=srt_path if srt_text else None,
             scratch_dir=scratch_dir,
+            stabilize=stabilize,
             on_progress=_sync_progress,
         )
     except Exception as exc:  # noqa: BLE001 — record + mark failed.
         reason = _failure_reason(exc)
         logger.exception("render stages failed for draft %d", handle.draft_id)
         # Find the first non-done stage and attribute the failure to it.
-        for stage in (EditStep.CUT.value, EditStep.CONCAT.value, EditStep.SUBTITLES.value):
-            if progress_state.get(stage) != "done":
+        for stage in (
+            EditStep.CUT.value,
+            EditStep.STABILIZE.value,
+            EditStep.CONCAT.value,
+            EditStep.SUBTITLES.value,
+        ):
+            if progress_state.get(stage) not in ("done", "skipped"):
                 await _set_stage_state(handle.draft_id, stage, reason)
                 summary["stages"][stage] = reason
                 break

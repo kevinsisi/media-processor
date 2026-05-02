@@ -103,6 +103,18 @@ SUBTITLE_BOTTOM_OFFSET_PX: int = 80  # y=h-N from frame bottom
 PER_SEGMENT_TIMEOUT_S: float = 300.0
 CONCAT_TIMEOUT_S: float = 300.0
 SUBTITLE_BURN_TIMEOUT_S: float = 600.0
+STABILIZE_TIMEOUT_S: float = 600.0  # two-pass vidstab is slow
+
+# v0.14.3 — digital stabilization (vidstabdetect + vidstabtransform).
+# Two-pass: first pass writes a transforms file describing the shake,
+# second pass applies the inverse transform. Defaults are tuned for
+# handheld phone footage; raising shakiness or smoothing too high blurs
+# the image instead of stabilising it.
+STABILIZE_SHAKINESS: int = 8  # 1-10, how shaky the input is
+STABILIZE_ACCURACY: int = 9  # 1-15, more accurate = slower
+STABILIZE_STEPSIZE: int = 6  # search-step size in px
+STABILIZE_SMOOTHING: int = 10  # half-window of frames to smooth over
+STABILIZE_ZOOM: int = 0  # extra zoom % during transform; 0 = letterbox
 
 
 class VideoRenderError(RuntimeError):
@@ -342,6 +354,108 @@ def cut_segments(
     return out_paths
 
 
+# ---------- stage 1.5: digital stabilization (optional) ----------
+
+
+def _stabilize_segment(src: Path, dst: Path, scratch_dir: Path) -> None:
+    """Two-pass vidstab on ``src`` writing to ``dst``.
+
+    Pass 1 (``vidstabdetect``) walks the clip and writes a per-frame
+    transforms file describing the shake. Pass 2 (``vidstabtransform``)
+    applies the inverse transform plus a light unsharp mask to recover
+    the softness vidstab leaves behind. Both passes are sync ffmpeg
+    invocations bounded by ``STABILIZE_TIMEOUT_S``.
+
+    The transforms file lives next to the segment so a re-run can
+    inspect / reuse it; ``cleanup_intermediates`` later wipes the
+    whole scratch dir.
+    """
+    src = Path(src)
+    dst = Path(dst)
+    scratch_dir = Path(scratch_dir)
+    scratch_dir.mkdir(parents=True, exist_ok=True)
+    transforms_path = scratch_dir / f"{src.stem}.trf"
+
+    detect_filter = (
+        f"vidstabdetect=stepsize={STABILIZE_STEPSIZE}"
+        f":shakiness={STABILIZE_SHAKINESS}"
+        f":accuracy={STABILIZE_ACCURACY}"
+        f":result={transforms_path.as_posix()}"
+    )
+    detect_cmd = [
+        "ffmpeg",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-i",
+        str(src),
+        "-vf",
+        detect_filter,
+        "-f",
+        "null",
+        "-",
+    ]
+    _run(detect_cmd, timeout_s=STABILIZE_TIMEOUT_S, stage=f"stabilize-detect({src.name})")
+
+    transform_filter = (
+        f"vidstabtransform=input={transforms_path.as_posix()}"
+        f":zoom={STABILIZE_ZOOM}"
+        f":smoothing={STABILIZE_SMOOTHING}"
+        ",unsharp=5:5:0.8:3:3:0.4"
+    )
+    transform_cmd = [
+        "ffmpeg",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-i",
+        str(src),
+        "-vf",
+        transform_filter,
+        "-c:v",
+        VIDEO_CODEC,
+        "-pix_fmt",
+        VIDEO_PIX_FMT,
+        "-preset",
+        VIDEO_PRESET,
+        "-crf",
+        str(VIDEO_CRF),
+        "-c:a",
+        "copy",
+        "-movflags",
+        "+faststart",
+        str(dst),
+    ]
+    _run(transform_cmd, timeout_s=STABILIZE_TIMEOUT_S, stage=f"stabilize-apply({src.name})")
+
+
+def stabilize_segments(
+    intermediate_paths: list[Path],
+    intermediate_dir: Path,
+    *,
+    on_progress: Callable[[int, int], None] | None = None,
+) -> list[Path]:
+    """Run two-pass vidstab over each per-segment intermediate.
+
+    Replaces each ``seg_NNNN.mp4`` in-place by writing a stabilised
+    version to ``seg_NNNN.stab.mp4`` and returning the new path list.
+    The originals stay on disk until ``cleanup_intermediates`` runs so
+    a stabilize bug doesn't lose the un-stabilised render.
+    """
+    _require_ffmpeg()
+    out: list[Path] = []
+    total = len(intermediate_paths)
+    for i, src in enumerate(intermediate_paths):
+        stab_dst = intermediate_dir / f"{src.stem}.stab.mp4"
+        _stabilize_segment(src, stab_dst, intermediate_dir)
+        out.append(stab_dst)
+        if on_progress is not None:
+            on_progress(i + 1, total)
+    return out
+
+
 # ---------- stage 2: concat ----------
 
 
@@ -361,13 +475,15 @@ def _write_concat_list(intermediate_paths: list[Path], list_path: Path) -> None:
 # is the ffmpeg xfade values we promise to support; anything else from a
 # stored plan is coerced to the safe default.
 TRANSITION_DURATION_S: float = 0.5
-# Whitelist of ffmpeg xfade values we ship. Phase 8.1 added ``circlecrop``
-# as the punchy variant the planner emits on emotion shifts. Any other
-# value from a stored plan is coerced to the safe default below.
+# Whitelist of ffmpeg xfade values we ship. v0.14.3 dropped ``fade`` and
+# ``dissolve`` after operator feedback that every reel looked the same;
+# only the assertive variants survive (wipe / slide / circlecrop). Any
+# legacy value from a stored plan is coerced to TRANSITION_DEFAULT
+# inside ``_safe_transition`` so older serialised plans still render.
 VALID_TRANSITIONS: frozenset[str] = frozenset(
-    {"fade", "dissolve", "wipeleft", "slideright", "circlecrop"}
+    {"wipeleft", "slideright", "circlecrop"}
 )
-TRANSITION_DEFAULT: str = "dissolve"
+TRANSITION_DEFAULT: str = "wipeleft"
 
 
 def _safe_transition(name: str) -> str:
@@ -649,13 +765,19 @@ def render(
     output_path: Path,
     srt_path: Path | None,
     scratch_dir: Path,
+    stabilize: bool = True,
     on_progress: Callable[[str, int, int], None] | None = None,
 ) -> RenderResult:
-    """Run the three render stages end-to-end.
+    """Run the render stages end-to-end.
 
     ``on_progress(stage, done, total)`` fires after each stage advance —
     the worker uses it to update ``Draft.progress_steps_json``. ``stage``
-    is one of ``"cut" | "concat" | "subtitles"``.
+    is one of ``"cut" | "stabilize" | "concat" | "subtitles"``.
+
+    ``stabilize`` (default ``True``) enables the v0.14.3 two-pass
+    vidstab pipeline between cut and concat. Each per-segment
+    intermediate is replaced with a stabilised version. Roughly doubles
+    render time for the per-cut work but removes handheld shake.
     """
     _require_ffmpeg()
 
@@ -674,6 +796,21 @@ def render(
         target_aspect,
         on_progress=_seg_progress,
     )
+
+    # Stage 1.5 — optional digital stabilization. Replaces each
+    # intermediate with a stabilised version before concat. The two-pass
+    # vidstab is the slow part of the pipeline so we surface it as its
+    # own progress bucket.
+    if stabilize:
+        def _stab_progress(done: int, total: int) -> None:
+            if on_progress is not None:
+                on_progress("stabilize", done, total)
+
+        intermediates = stabilize_segments(
+            intermediates,
+            intermediate_dir,
+            on_progress=_stab_progress,
+        )
 
     # Stage 2 — concat into the final output path. If we're going to burn
     # subtitles we still concat first so a subtitle failure leaves a
@@ -730,6 +867,7 @@ __all__ = [
     "FFmpegMissingError",
     "PER_SEGMENT_TIMEOUT_S",
     "RenderResult",
+    "STABILIZE_TIMEOUT_S",
     "SUBTITLE_BURN_TIMEOUT_S",
     "SUBTITLE_FORCE_STYLE",
     "subtitle_force_style",
@@ -752,4 +890,5 @@ __all__ = [
     "concat_segments",
     "cut_segments",
     "render",
+    "stabilize_segments",
 ]

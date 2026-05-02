@@ -265,6 +265,7 @@ async def trigger_project_edit(
         draft_id=new_draft.id,
         force=payload.force,
         target_duration_ms=target_duration_ms,
+        stabilize=payload.stabilize,
     )
     return EditTriggerResponse(
         project_id=project_id,

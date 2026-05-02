@@ -296,6 +296,31 @@ function DurationPicker({ value, onChange, disabled }: DurationPickerProps) {
   );
 }
 
+interface StabilizeToggleProps {
+  value: boolean;
+  onChange: (next: boolean) => void;
+  disabled?: boolean;
+}
+
+function StabilizeToggle({ value, onChange, disabled }: StabilizeToggleProps) {
+  return (
+    <label className="stabilize-toggle">
+      <input
+        type="checkbox"
+        checked={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.currentTarget.checked)}
+      />
+      <span className="stabilize-toggle__label">
+        數位防抖（兩階段 vidstab）
+      </span>
+      <span className="stabilize-toggle__hint mono">
+        手機 / 手持鏡頭建議開啟；腳架或穩定器拍攝可關閉以縮短渲染時間。
+      </span>
+    </label>
+  );
+}
+
 interface ProgressTrackerProps {
   steps: Record<string, string> | null | undefined;
 }
@@ -348,6 +373,9 @@ export default function ProjectEdit() {
   const [cancelling, setCancelling] = useState<boolean>(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
   const [durationSec, setDurationSec] = useState<number>(DEFAULT_DURATION_S);
+  // v0.14.3 — digital stabilization toggle. Default on; user opts out
+  // for tripod / gimbal projects to halve render time.
+  const [stabilize, setStabilize] = useState<boolean>(true);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
@@ -418,6 +446,7 @@ export default function ProjectEdit() {
         const resp = await apiClient.triggerProjectEdit(validProjectId, {
           force,
           target_duration_seconds: target,
+          stabilize,
         });
         // The API now creates the Draft row synchronously, so resp.draft_id
         // is always a real id. Switch the selected version to it immediately
@@ -442,7 +471,7 @@ export default function ProjectEdit() {
         setTriggering(false);
       }
     },
-    [validProjectId, durationSec, refreshDrafts],
+    [validProjectId, durationSec, stabilize, refreshDrafts],
   );
 
   const handleCancel = useCallback(async () => {
@@ -541,6 +570,11 @@ export default function ProjectEdit() {
           <DurationPicker
             value={durationSec}
             onChange={setDurationSec}
+            disabled={triggering}
+          />
+          <StabilizeToggle
+            value={stabilize}
+            onChange={setStabilize}
             disabled={triggering}
           />
           <div className="edit-card__actions">
@@ -645,6 +679,11 @@ export default function ProjectEdit() {
             <DurationPicker
               value={durationSec}
               onChange={setDurationSec}
+              disabled={triggering}
+            />
+            <StabilizeToggle
+              value={stabilize}
+              onChange={setStabilize}
               disabled={triggering}
             />
             <DraggableTimeline

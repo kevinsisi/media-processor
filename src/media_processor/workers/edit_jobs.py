@@ -31,6 +31,7 @@ def render_draft(
     target_duration_ms: int | None = None,
     skip_plan: bool = False,
     subtitles_from_db: bool = False,
+    stabilize: bool = True,
 ) -> dict[str, Any]:
     """RQ job — produce the next-version draft mp4 for ``project_id``.
 
@@ -47,18 +48,23 @@ def render_draft(
         Used by the subtitle re-burn endpoint. ``skip_plan`` should also
         be true here (the plan didn't change).
 
+    v0.14.3 added ``stabilize`` (default ``True``) for the two-pass
+    vidstab digital stabilization stage between cut and concat.
+
     The return value is a small summary dict so RQ persists something
     debuggable. All status persistence lives in Postgres on the Draft
     row; this dict is for ops, not the UI.
     """
     logger.info(
-        "render_draft: project_id=%d draft_id=%s force=%s target_duration_ms=%s skip_plan=%s subtitles_from_db=%s",
+        "render_draft: project_id=%d draft_id=%s force=%s target_duration_ms=%s "
+        "skip_plan=%s subtitles_from_db=%s stabilize=%s",
         project_id,
         draft_id,
         force,
         target_duration_ms,
         skip_plan,
         subtitles_from_db,
+        stabilize,
     )
     # Local import keeps the api container free of ffmpeg / heavy deps.
     from media_processor.services.edit_orchestrator import run_render
@@ -71,6 +77,7 @@ def render_draft(
             target_duration_ms=target_duration_ms,
             skip_plan=skip_plan,
             subtitles_from_db=subtitles_from_db,
+            stabilize=stabilize,
         )
     )
 

@@ -90,7 +90,12 @@ def fake_enqueue(
         draft_id: int,
         force: bool = False,
         target_duration_ms: int | None = None,
+        stabilize: bool = True,
+        **_extra: object,
     ) -> str:
+        # ``stabilize`` was added in v0.14.3; tests that don't care about it
+        # rely on the default. Extra kwargs are absorbed so future toggles
+        # don't break unrelated assertions.
         calls.append((project_id, draft_id, force, target_duration_ms))
         return f"job-{project_id}"
 

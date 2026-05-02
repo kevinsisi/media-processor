@@ -320,6 +320,37 @@
   gap: var(--space-3);
 }
 
+/* ---- Stabilize toggle (v0.14.3 — vidstab on/off) ---- */
+
+.stabilize-toggle {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  gap: 4px var(--space-2);
+  align-items: center;
+  margin: 0 0 var(--space-4) 0;
+  padding: var(--space-2) 0;
+  cursor: pointer;
+  user-select: none;
+}
+.stabilize-toggle input[type="checkbox"] {
+  grid-row: 1 / 3;
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  margin: 0;
+}
+.stabilize-toggle__label {
+  font-size: var(--t-sm);
+  color: var(--text-primary);
+}
+.stabilize-toggle__hint {
+  grid-column: 2;
+  font-size: var(--t-xs, 0.75rem);
+  color: var(--text-muted, #888);
+  letter-spacing: 0;
+}
+
 .duration-picker__label {
   font-family: var(--font-mono);
   font-size: var(--t-xs);

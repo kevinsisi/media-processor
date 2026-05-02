@@ -69,6 +69,7 @@ def enqueue_project_edit(
     target_duration_ms: int | None = None,
     skip_plan: bool = False,
     subtitles_from_db: bool = False,
+    stabilize: bool = True,
 ) -> str:
     """Schedule ``render_draft(project_id, draft_id=…, force=…, target_duration_ms=…)``.
 
@@ -97,18 +98,25 @@ def enqueue_project_edit(
         job_kwargs["skip_plan"] = True
     if subtitles_from_db:
         job_kwargs["subtitles_from_db"] = True
+    # stabilize defaults to True both here and in run_render so we only
+    # explicitly pass it when the caller opted out — keeps the kwargs
+    # blob minimal for legacy job records.
+    if not stabilize:
+        job_kwargs["stabilize"] = False
     job = queue.enqueue(
         RENDER_DRAFT_FN,
         args=(project_id,),
         kwargs=job_kwargs,
     )
     logger.info(
-        "enqueued render_draft(project_id=%d, draft_id=%d, force=%s, skip_plan=%s, subtitles_from_db=%s, target_duration_ms=%s) as job %s",
+        "enqueued render_draft(project_id=%d, draft_id=%d, force=%s, skip_plan=%s, "
+        "subtitles_from_db=%s, stabilize=%s, target_duration_ms=%s) as job %s",
         project_id,
         draft_id,
         force,
         skip_plan,
         subtitles_from_db,
+        stabilize,
         target_duration_ms,
         job.id,
     )

@@ -84,6 +84,7 @@ class EditStep(StrEnum):
 
     PLAN = "plan"
     CUT = "cut"
+    STABILIZE = "stabilize"  # v0.14.3 — vidstabdetect + vidstabtransform two-pass
     CONCAT = "concat"
     SUBTITLES = "subtitles"
     BGM = "bgm"  # M6.4 — voice-ducked background music mix; no-op without bgm_path

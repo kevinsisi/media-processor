@@ -148,6 +148,10 @@ export interface EditTriggerRequest {
   // User-configurable render length in seconds. Backend clamps to 10–300;
   // omit to let the orchestrator pick from source duration.
   target_duration_seconds?: number;
+  // v0.14.3 — toggle the two-pass vidstab digital stabilization stage.
+  // Default true on the backend; the UI exposes a switch so tripod /
+  // gimbal projects can opt out to halve render time.
+  stabilize?: boolean;
 }
 
 export interface EditTriggerResponse {

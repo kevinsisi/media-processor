@@ -102,7 +102,7 @@ async def test_plan_happy_path(session: AsyncSession, monkeypatch: pytest.Monkey
         "position": "opening",
         "best_span_ms": [0, 4000],
         "source_kind": "scripted",
-        "transition_to_next": "fade",
+        "transition_to_next": "wipeleft",
         "summary": "片段一介紹主題",
         "reason": "matches line 1",
     }
@@ -138,7 +138,7 @@ async def test_plan_happy_path(session: AsyncSession, monkeypatch: pytest.Monkey
     assert seg.asset_start_ms == 0
     assert seg.asset_end_ms == 4000
     assert seg.source_kind == "scripted"
-    assert seg.transition_to_next == "fade"
+    assert seg.transition_to_next == "wipeleft"
     # Phase 8.1: with no emotion tags on the asset, dominant_emotion
     # falls back to the canonical default.
     assert seg.dominant_emotion == edit_planner.EMOTION_DEFAULT
@@ -181,7 +181,7 @@ def test_emotion_shift_escalates_transition_to_circlecrop() -> None:
             source_kind="improv",
             reason="",
             dominant_motion="static",
-            transition_to_next="dissolve",
+            transition_to_next="slideright",
             dominant_emotion="serious",
         ),
     ]
@@ -190,7 +190,7 @@ def test_emotion_shift_escalates_transition_to_circlecrop() -> None:
     # First cut transitions across an emotion-bucket boundary → circlecrop.
     assert cuts[0].transition_to_next == "circlecrop"
     # Last cut's transition is unused; left as Gemini's suggestion.
-    assert cuts[1].transition_to_next == "dissolve"
+    assert cuts[1].transition_to_next == "slideright"
 
 
 def test_serialise_round_trip_preserves_dominant_emotion() -> None:

@@ -74,14 +74,29 @@ _EMOTION_SHIFT_TRANSITION: str = "circlecrop"
 
 # xfade transition whitelist — must match ffmpeg xfade filter values.
 # Any other suggestion from Gemini gets coerced to TRANSITION_DEFAULT so a
-# typo / hallucination doesn't crash the render stage. Phase 8.1 added
-# ``circlecrop`` as the strong-transition variant the renderer applies on
-# emotion shifts.
+# typo / hallucination doesn't crash the render stage. v0.14.3 dropped
+# ``fade`` and ``dissolve`` after operator feedback that every reel
+# looked the same; only the assertive variants survive (wipe / slide /
+# circlecrop). Old serialised plans that still carry ``dissolve`` get
+# coerced to TRANSITION_DEFAULT on load — see ``_safe_transition``.
 VALID_TRANSITIONS: frozenset[str] = frozenset(
-    {"fade", "dissolve", "wipeleft", "slideright", "circlecrop"}
+    {"wipeleft", "slideright", "circlecrop"}
 )
-TRANSITION_DEFAULT: str = "dissolve"
+TRANSITION_DEFAULT: str = "wipeleft"
 TRANSITION_DURATION_S: float = 0.5
+
+
+def _coerce_legacy_transition(name: str) -> str:
+    """Map legacy ``fade`` / ``dissolve`` to the v0.14.3 default.
+
+    Drafts rendered before the dissolve / fade removal still have those
+    values stored in ``Draft.cut_plan_json``. Coerce on load so the M7.1
+    skip-plan re-render uses the new whitelist without forcing a
+    backfill migration.
+    """
+    if name in VALID_TRANSITIONS:
+        return name
+    return TRANSITION_DEFAULT
 # Each xfade between adjacent cuts shortens the timeline by this much, so
 # the planner aims a touch higher than the raw target so the rendered
 # reel actually lands at target_duration_ms. Mirrors
@@ -132,9 +147,10 @@ class CutPlanSegment:
     source_kind: str  # "scripted" | "improv"
     reason: str
     # xfade transition into the NEXT cut. The last cut's value is unused
-    # (no next). Defaults are safe so older serialised plans without this
-    # field stay loadable.
-    transition_to_next: str = "dissolve"
+    # (no next). Default is the post-v0.14.3 ``TRANSITION_DEFAULT``;
+    # legacy plans that stored ``"dissolve"`` get coerced through
+    # ``_safe_transition`` at render time.
+    transition_to_next: str = TRANSITION_DEFAULT
     # Phase 8.1 — dominant face emotion across this cut's best span.
     # Read by ``video_renderer`` to decide whether to apply zoompan
     # (DYNAMIC_EMOTIONS get a slow zoom-in; STATIC stays locked off).
@@ -347,11 +363,12 @@ _ASSET_SCORE_PROMPT = (
     "[start_ms, end_ms]，必須在 [0, {duration_ms}] 之內\n"
     " 4. source_kind：scripted（照腳本講的部分）或 improv（自然發揮 / 情緒亮點）\n"
     " 5. transition_to_next：這段播完後若銜接「下一段」適合的轉場效果，"
-    "從 fade / dissolve / wipeleft / slideright / circlecrop 擇一。\n"
-    "    指引：情緒延續或同場景用 dissolve；情緒平緩接同類用 fade；"
-    "    場景大跳（室內↔戶外、人物↔產品）用 wipeleft 或 slideright；"
-    "    情緒大跳（平靜↔激動 / 嚴肅↔驚喜）用 circlecrop；"
-    "    避免整支片只用一種。\n\n"
+    "從 wipeleft / slideright / circlecrop 擇一。請避免 dissolve / fade —"
+    "  系統已停用這兩種轉場。\n"
+    "    指引：場景大跳（室內↔戶外、人物↔產品、不同地點）用 wipeleft 或 slideright；"
+    "    情緒大跳（平靜↔激動 / 嚴肅↔驚喜 / 開頭↔結尾）用 circlecrop；"
+    "    每兩三段之間切換方向（wipeleft ↔ slideright）讓視覺節奏不單調，"
+    "    避免整支片連續用同一種。\n\n"
     "嚴格輸出 JSON：\n"
     "{{\n"
     f'  "schema_version": "{ASSET_SCORE_SCHEMA_VERSION}",\n'
@@ -359,7 +376,7 @@ _ASSET_SCORE_PROMPT = (
     '  "position": "opening" | "middle" | "closing" | "skip",\n'
     '  "best_span_ms": [<start_ms>, <end_ms>],\n'
     '  "source_kind": "scripted" | "improv",\n'
-    '  "transition_to_next": "fade" | "dissolve" | "wipeleft" | "slideright" | "circlecrop",\n'
+    '  "transition_to_next": "wipeleft" | "slideright" | "circlecrop",\n'
     '  "reason": "<一句話原因>"\n'
     "}}\n"
 )
@@ -1239,7 +1256,9 @@ def deserialise_plan(blob: dict[str, Any]) -> CutPlan:
                 asset_end_ms=int(seg["asset_end_ms"]),
                 source_kind=str(seg["source_kind"]),
                 reason=str(seg.get("reason", "")),
-                transition_to_next=str(seg.get("transition_to_next", "dissolve")),
+                transition_to_next=_coerce_legacy_transition(
+                    str(seg.get("transition_to_next", TRANSITION_DEFAULT))
+                ),
                 dominant_emotion=str(seg.get("dominant_emotion", EMOTION_DEFAULT)),
                 dominant_motion=str(seg.get("dominant_motion", _MOTION_DEFAULT)),
                 has_face=bool(seg.get("has_face", False)),

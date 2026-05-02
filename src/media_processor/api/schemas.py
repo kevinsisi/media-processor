@@ -171,6 +171,11 @@ class EditTriggerRequest(BaseModel):
     # short) and 300 s (5 min) ceiling so a single Gemini call stays
     # within the prompt + response budget.
     target_duration_seconds: int | None = Field(default=None, ge=10, le=300)
+    # v0.14.3 — toggle the two-pass vidstab digital stabilization stage.
+    # Default is on because phone footage almost always benefits; the
+    # frontend exposes a switch so tripod / gimbal projects can opt out
+    # to halve render time.
+    stabilize: bool = True
 
 
 class EditTriggerResponse(BaseModel):
