@@ -123,6 +123,7 @@ def _summarise_transcripts(transcripts: list[AssetTranscript]) -> str:
 _PROMPT_TEMPLATE = (
     "你是專業影片配樂顧問。根據以下分析資料，為這支影片建議一段「明確匹配主題與情緒」"
     "的背景音樂風格描述，讓 AI 音樂生成器（MusicGen）據此生成 30 秒配樂。\n\n"
+    "{style_preset_block}"
     "【影片基本資訊】\n"
     "專案名稱：{project_name}\n\n"
     "【腳本】\n{script_excerpt}\n\n"
@@ -165,6 +166,7 @@ async def suggest(
     api_keys: tuple[str, ...],
     model: str,
     timeout_s: float = PROMPT_TIMEOUT_S,
+    style_hint: str = "",
 ) -> str:
     """Compose a 50–100 char zh-Hant music description for ``project_id``.
 
@@ -215,7 +217,15 @@ async def suggest(
             .all()
         )
 
+    style_block = ""
+    if style_hint.strip():
+        style_block = (
+            "【剪輯風格預設提示 — 請優先遵守】\n"
+            f"{style_hint.strip()}\n\n"
+        )
+
     prompt = _PROMPT_TEMPLATE.format(
+        style_preset_block=style_block,
         project_name=project.name or f"project-{project_id}",
         script_excerpt=_excerpt_script(script_body),
         transcript_excerpt=_summarise_transcripts(transcripts),

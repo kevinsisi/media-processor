@@ -329,6 +329,86 @@
   margin: 0 0 var(--space-3) 0;
 }
 
+/* ---- Style preset picker (v0.18 — fast / slow / commercial / artistic / custom) ---- */
+
+.style-preset-picker {
+  border: 0;
+  padding: 0;
+  margin: 0 0 var(--space-4) 0;
+}
+
+.style-preset-picker__legend {
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
+  letter-spacing: 0.16em;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-2);
+  padding: 0;
+}
+
+.style-preset-picker__hint {
+  font-size: var(--t-xs, 0.75rem);
+  color: var(--text-muted, #888);
+  letter-spacing: 0;
+  margin: 0 0 var(--space-2) 0;
+}
+
+.style-preset-picker__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--space-2);
+}
+
+.style-preset-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: var(--space-3);
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+  transition:
+    border-color 0.15s ease-out,
+    background 0.15s ease-out,
+    transform 0.1s ease-out;
+}
+
+.style-preset-card:hover:not(:disabled) {
+  border-color: rgba(255, 255, 255, 0.32);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.style-preset-card:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.style-preset-card--selected {
+  border-color: var(--accent, #f6c177);
+  background: rgba(246, 193, 119, 0.08);
+}
+
+.style-preset-card__icon {
+  font-size: 1.4rem;
+  line-height: 1;
+}
+
+.style-preset-card__label {
+  font-size: var(--t-sm);
+  font-weight: 600;
+}
+
+.style-preset-card__hint {
+  font-size: var(--t-xs, 0.75rem);
+  color: var(--text-muted, #888);
+  letter-spacing: 0;
+  line-height: 1.5;
+}
+
 /* ---- BGM uploader (v0.14.5 — explicit "上傳配樂" entry point) ---- */
 
 .bgm-uploader {

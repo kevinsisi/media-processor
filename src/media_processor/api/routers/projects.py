@@ -74,6 +74,7 @@ def _draft_summary_with_urls(draft: Draft) -> DraftSummary:
         progress_steps=dict(draft.progress_steps_json or {}) or None,
         mp4_url=_url_for("mp4", draft.mp4_preview_path),
         subtitle_url=_url_for("srt", draft.subtitle_path),
+        style_preset=getattr(draft, "style_preset", "custom") or "custom",
     )
 
 
@@ -251,6 +252,7 @@ async def trigger_project_edit(
         version=next_version,
         status=DraftStatus.PENDING.value,
         progress_steps_json=dict.fromkeys(EDIT_STEP_VALUES, "pending"),
+        style_preset=payload.style_preset,
     )
     session.add(new_draft)
     await session.commit()
@@ -270,6 +272,7 @@ async def trigger_project_edit(
         subtitles=payload.subtitles,
         transitions=payload.transitions,
         auto_reframe=payload.auto_reframe,
+        style_preset=payload.style_preset,
     )
     return EditTriggerResponse(
         project_id=project_id,

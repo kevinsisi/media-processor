@@ -20,7 +20,12 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from media_processor.models.base import Base
-from media_processor.models.enums import DRAFT_STATUS_VALUES, DraftStatus
+from media_processor.models.enums import (
+    CLIP_STYLE_PRESET_VALUES,
+    DRAFT_STATUS_VALUES,
+    ClipStylePreset,
+    DraftStatus,
+)
 
 if TYPE_CHECKING:
     from media_processor.models.draft_comment import DraftComment
@@ -59,6 +64,16 @@ class Draft(Base):
     # generates a new AI track on the project, so each draft keeps
     # whichever BGM it actually shipped with.
     bgm_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    # v0.18 — clip-style preset that biased the planner. ``custom`` keeps
+    # legacy behaviour (no preset). The four named presets bias span
+    # length, transition allowlist, and the music-suggestion prompt so
+    # operators can dial a coherent rhythm without hand-tuning each knob.
+    style_preset: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default=ClipStylePreset.CUSTOM.value,
+        server_default=ClipStylePreset.CUSTOM.value,
+    )
     ai_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     prompt_feedback: Mapped[str | None] = mapped_column(Text, nullable=True)
     progress_steps_json: Mapped[Any] = mapped_column(JSON, nullable=True)
@@ -104,6 +119,10 @@ class Draft(Base):
         CheckConstraint(
             "status IN " + _in_list(DRAFT_STATUS_VALUES),
             name="ck_drafts_status",
+        ),
+        CheckConstraint(
+            "style_preset IN " + _in_list(CLIP_STYLE_PRESET_VALUES),
+            name="ck_drafts_style_preset",
         ),
     )
 

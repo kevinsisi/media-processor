@@ -12,6 +12,7 @@ from media_processor.models.enums import REVIEW_ACTION_VALUES
 ReviewActionLiteral = Literal["approve", "reject", "repatch", "download"]
 TargetAspectRatioLiteral = Literal["9:16", "4:5", "1:1"]
 UploadKindLiteral = Literal["video", "script"]
+ClipStylePresetLiteral = Literal["fast", "slow", "commercial", "artistic", "custom"]
 
 
 class ProjectSummary(BaseModel):
@@ -134,6 +135,10 @@ class DraftSummary(BaseModel):
     progress_steps: dict[str, str] | None = None
     mp4_url: str | None = None
     subtitle_url: str | None = None
+    # v0.18 — preset that biased the planner for this draft. Default
+    # ``custom`` keeps legacy behaviour for old rows that pre-date the
+    # column.
+    style_preset: ClipStylePresetLiteral = "custom"
 
 
 class DraftSegmentOut(BaseModel):
@@ -195,6 +200,10 @@ class EditTriggerRequest(BaseModel):
     # output aspect. Assets without tracking data quietly fall back
     # to the static centered crop.
     auto_reframe: bool = True
+    # v0.18 — clip-style preset that biases planner span / transition /
+    # BGM hint. ``custom`` keeps the legacy free-form behaviour; the
+    # four named presets steer the model toward a coherent rhythm.
+    style_preset: ClipStylePresetLiteral = "custom"
 
 
 class EditTriggerResponse(BaseModel):

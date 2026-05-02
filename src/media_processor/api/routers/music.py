@@ -40,6 +40,7 @@ from media_processor.api.schemas import (
 )
 from media_processor.models import BgmGenerationJob, Project
 from media_processor.services import music_suggest
+from media_processor.services.edit_planner import resolve_style_preset
 from media_processor.services.queue import enqueue_bgm_generation
 from media_processor.services.settings_store import get_llm_api_keys
 
@@ -158,6 +159,7 @@ async def list_music_library() -> MusicLibraryOut:
 async def project_music_suggestion(
     project_id: int,
     session: SessionDep,
+    style_preset: str = "custom",
 ) -> MusicSuggestionOut:
     """Compose a Gemini-driven music description for ``project_id``.
 
@@ -165,12 +167,18 @@ async def project_music_suggestion(
     keys are configured, when every key returns 429, or when Gemini
     keeps emitting malformed JSON. The response always carries a
     non-empty ``description`` so the UI textarea is never blank.
+
+    The optional ``style_preset`` query param feeds the preset's
+    ``bgm_hint`` into the suggestion prompt so the suggested BGM
+    matches the rhythm the user picked on the edit screen.
     """
     project = await session.get(Project, project_id)
     if project is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="project not found"
         )
+
+    style_hint = resolve_style_preset(style_preset).bgm_hint
 
     api_keys = await get_llm_api_keys(session)
     if not api_keys:
@@ -186,6 +194,7 @@ async def project_music_suggestion(
             api_keys=api_keys,
             model=settings.llm_model,
             timeout_s=settings.llm_timeout_s,
+            style_hint=style_hint,
         )
         return MusicSuggestionOut(description=description, used_fallback=False)
     except music_suggest.MusicSuggestError as exc:

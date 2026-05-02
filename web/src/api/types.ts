@@ -112,6 +112,13 @@ export type EditStep =
   | "subtitles"
   | "bgm";
 
+export type ClipStylePreset =
+  | "fast"
+  | "slow"
+  | "commercial"
+  | "artistic"
+  | "custom";
+
 export interface DraftSummary {
   id: number;
   project_id: number;
@@ -126,6 +133,9 @@ export interface DraftSummary {
   progress_steps?: Partial<Record<EditStep, string>> | null;
   mp4_url?: string | null;
   subtitle_url?: string | null;
+  // v0.18 — clip-style preset that biased the planner for this draft.
+  // Old rows that pre-date the column come back as "custom".
+  style_preset?: ClipStylePreset;
 }
 
 export interface DraftSegmentOut {
@@ -185,6 +195,10 @@ export interface EditTriggerRequest {
   // back to the static centered crop so leaving this on is safe even
   // on partially analyzed projects.
   auto_reframe?: boolean;
+  // v0.18 — clip-style preset. ``custom`` (default) keeps legacy
+  // free-form behaviour; the four named presets steer span / transition
+  // / BGM hint together so the user gets a coherent rhythm.
+  style_preset?: ClipStylePreset;
 }
 
 export interface EditTriggerResponse {

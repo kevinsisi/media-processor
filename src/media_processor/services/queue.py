@@ -75,6 +75,7 @@ def enqueue_project_edit(
     subtitles: bool = True,
     transitions: bool = True,
     auto_reframe: bool = True,
+    style_preset: str = "custom",
 ) -> str:
     """Schedule ``render_draft(project_id, draft_id=…, force=…, target_duration_ms=…)``.
 
@@ -114,6 +115,10 @@ def enqueue_project_edit(
         job_kwargs["transitions"] = False
     if not auto_reframe:
         job_kwargs["auto_reframe"] = False
+    # Only emit style_preset on the wire when it differs from the default
+    # so legacy job-record dumps stay readable.
+    if style_preset and style_preset != "custom":
+        job_kwargs["style_preset"] = style_preset
     job = queue.enqueue(
         RENDER_DRAFT_FN,
         args=(project_id,),
@@ -122,7 +127,7 @@ def enqueue_project_edit(
     logger.info(
         "enqueued render_draft(project_id=%d, draft_id=%d, force=%s, skip_plan=%s, "
         "subtitles_from_db=%s, stabilize=%s, subtitles=%s, transitions=%s, "
-        "auto_reframe=%s, target_duration_ms=%s) as job %s",
+        "auto_reframe=%s, style_preset=%s, target_duration_ms=%s) as job %s",
         project_id,
         draft_id,
         force,
@@ -132,6 +137,7 @@ def enqueue_project_edit(
         subtitles,
         transitions,
         auto_reframe,
+        style_preset,
         target_duration_ms,
         job.id,
     )

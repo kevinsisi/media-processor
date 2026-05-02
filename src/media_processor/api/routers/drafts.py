@@ -156,6 +156,7 @@ def serialise_draft_detail(draft: Draft) -> DraftDetail:
         subtitle_url=_resolve_draft_url(draft, suffix="srt", stored_path=draft.subtitle_path),
         cut_plan=_cut_plan_out(draft.cut_plan_json),
         prompt_feedback=draft.prompt_feedback,
+        style_preset=getattr(draft, "style_preset", "custom") or "custom",
         segments=[
             DraftSegmentOut(
                 id=s.id,
