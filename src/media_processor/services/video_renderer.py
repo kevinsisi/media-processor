@@ -59,15 +59,15 @@ def subtitle_force_style(target_aspect: str) -> str:
     """
     width, _ = ASPECT_DIMENSIONS[target_aspect]
     if target_aspect == "9:16":
-        font_size = 56
+        font_size = 28
         margin_v = 180
     elif target_aspect == "4:5":
-        font_size = 52
+        font_size = 26
         margin_v = 120
     else:  # "1:1"
-        font_size = 48
+        font_size = 24
         margin_v = 80
-    margin_lr = max(60, width // 14)  # ~7% padding each side, min 60 px
+    margin_lr = 60
     return (
         "FontName=Noto Sans CJK TC,"
         f"Fontsize={font_size},"
