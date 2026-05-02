@@ -197,22 +197,19 @@ def generate(
     max_new_tokens = duration_s * DEFAULT_TOKENS_PER_SECOND
 
     # v0.15.3 — force the LM to actually fill ``max_new_tokens`` by
-    # setting ``min_new_tokens`` to the same value, AND by banning the
-    # PAD token from the sampling distribution. Symptoms before this
-    # change: 30 s wav files whose first ~1 s contained music followed
-    # by 29 s of silence. Root cause was the LM hitting EOS very early
-    # (``pad_token_id=2048`` doubles as EOS for MusicGen-small) — the
-    # remainder of the codebook stream was filled with PAD tokens that
-    # the audio decoder turns into silence. Banning PAD via
-    # ``bad_words_ids`` keeps the sampler away from that token entirely,
-    # and ``min_new_tokens`` removes the early-stop path so the model
-    # commits to the full duration.
-    pad_token_id: int | None = None
-    try:
-        pad_token_id = int(model.generation_config.pad_token_id)  # type: ignore[union-attr]
-    except (AttributeError, TypeError, ValueError):
-        pad_token_id = None
-    bad_words_ids = [[pad_token_id]] if pad_token_id is not None else None
+    # setting ``min_new_tokens`` to the same value. Symptoms before
+    # this change: 30 s wav files whose first ~1 s contained music
+    # followed by 29 s of silence. Root cause: HF generate's default
+    # min_length is 0 so it can stop as soon as it likes; the
+    # remainder of the 30-s codebook stream was filled with the
+    # special pad sentinel (token id 2048, which is OUTSIDE the
+    # 0..2047 codebook range — confirmed by the
+    # ``ValueError: model vocabulary size is 2048, but the following
+    # tokens were being biased: [2048]`` we hit when we tried to
+    # ``bad_words_ids=[[2048]]``). The Encodec decoder turns those
+    # sentinel positions into silence. Forcing ``min_new_tokens``
+    # makes the LM commit to a full 1500-token codebook stream so
+    # every decoded sample is real audio.
 
     # v0.15.2 — three-attempt sampling chain. The previous greedy
     # fallback was a foot-gun: ``do_sample=False`` produced byte-
@@ -254,7 +251,6 @@ def generate(
                     **inputs,
                     max_new_tokens=max_new_tokens,
                     min_new_tokens=max_new_tokens,
-                    bad_words_ids=bad_words_ids,
                     **params,
                 )
             if attempt_idx > 1:
