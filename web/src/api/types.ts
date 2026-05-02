@@ -104,7 +104,13 @@ export interface CutPlanOut {
   segments: CutPlanSegmentOut[];
 }
 
-export type EditStep = "plan" | "cut" | "concat" | "subtitles" | "bgm";
+export type EditStep =
+  | "plan"
+  | "cut"
+  | "stabilize"
+  | "concat"
+  | "subtitles"
+  | "bgm";
 
 export interface DraftSummary {
   id: number;

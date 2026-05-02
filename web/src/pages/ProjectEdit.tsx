@@ -13,13 +13,14 @@ import {
 } from "../i18n/tags";
 import "./ProjectEdit.css";
 
-const EDIT_STEP_ORDER: ("plan" | "cut" | "concat" | "subtitles" | "bgm")[] = [
-  "plan",
-  "cut",
-  "concat",
-  "subtitles",
-  "bgm",
-];
+const EDIT_STEP_ORDER: (
+  | "plan"
+  | "cut"
+  | "stabilize"
+  | "concat"
+  | "subtitles"
+  | "bgm"
+)[] = ["plan", "cut", "stabilize", "concat", "subtitles", "bgm"];
 
 // Quick-pick lengths offered alongside the free-form input. Matches the
 // IG/TikTok short-form sweet spots; backend clamps the final value to
@@ -325,28 +326,53 @@ interface ProgressTrackerProps {
   steps: Record<string, string> | null | undefined;
 }
 
+// Per-stage notes shown when a stage is *running* so the user knows the
+// expected duration and stops thinking the worker is stuck.
+const RUNNING_STAGE_HINTS: Record<string, string> = {
+  plan: "Gemini 為每段素材打分中（約 30–60 秒）。",
+  cut: "FFmpeg 把每段素材切片並轉成 9:16（約 30–60 秒）。",
+  stabilize:
+    "兩階段 vidstab 數位防抖中，每段都跑 detect + transform 兩次，整體約需 2–3 分鐘。這是預期的；沒有卡住。",
+  concat: "用 xfade 把每段拼接成完整影片（約 30 秒）。",
+  subtitles: "把字幕燒進影片（約 20 秒）。",
+  bgm: "與背景音樂混音；沒有 BGM 時直接通過。",
+};
+
 function ProgressTracker({ steps }: ProgressTrackerProps) {
+  // Find the currently-running stage so we can surface its hint below
+  // the chip row. ``EDIT_STEP_ORDER`` walks plan → bgm so the first
+  // running stage is the one the user is actually waiting on.
+  const runningStage = EDIT_STEP_ORDER.find(
+    (step) => steps?.[step] === "running",
+  );
   return (
-    <div className="edit-progress" role="list" aria-label="剪輯進度">
-      {EDIT_STEP_ORDER.map((step) => {
-        const raw = steps?.[step];
-        const cls = classifyStepState(raw);
-        return (
-          <div
-            key={step}
-            className={`edit-progress__step edit-progress__step--${cls}`}
-            role="listitem"
-            title={raw ?? "pending"}
-          >
-            <span className="edit-progress__step-name">
-              {EDIT_STEP_LABELS[step]}
-            </span>
-            <span className="edit-progress__step-state">
-              {labelForStepState(raw)}
-            </span>
-          </div>
-        );
-      })}
+    <div className="edit-progress-wrap">
+      <div className="edit-progress" role="list" aria-label="剪輯進度">
+        {EDIT_STEP_ORDER.map((step) => {
+          const raw = steps?.[step];
+          const cls = classifyStepState(raw);
+          return (
+            <div
+              key={step}
+              className={`edit-progress__step edit-progress__step--${cls}`}
+              role="listitem"
+              title={raw ?? "pending"}
+            >
+              <span className="edit-progress__step-name">
+                {EDIT_STEP_LABELS[step]}
+              </span>
+              <span className="edit-progress__step-state">
+                {labelForStepState(raw)}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+      {runningStage && RUNNING_STAGE_HINTS[runningStage] && (
+        <p className="edit-progress__hint" aria-live="polite">
+          {RUNNING_STAGE_HINTS[runningStage]}
+        </p>
+      )}
     </div>
   );
 }

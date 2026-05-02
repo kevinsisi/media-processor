@@ -493,10 +493,28 @@
 
 /* ---- Stage progress chips ---- */
 
+.edit-progress-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
 .edit-progress {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: var(--space-3);
+}
+
+/* Per-stage hint that appears under the chip row while a stage is
+   running. Critical for stabilize because the two-pass vidstab takes
+   2-3 minutes during which the cut chip is already done — without
+   this the user thinks the worker has crashed. */
+.edit-progress__hint {
+  font-size: var(--t-xs, 0.75rem);
+  color: var(--text-muted, #888);
+  line-height: 1.5;
+  margin: 0;
+  padding: var(--space-2) 0 0;
 }
 
 .edit-progress__step {
