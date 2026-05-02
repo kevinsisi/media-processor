@@ -94,7 +94,7 @@ SUBTITLE_FORCE_STYLE: str = subtitle_force_style("9:16")
 # Fontsize is pixel-accurate against the actual render canvas instead of
 # relying on the SRT→ASS conversion picking a sane PlayRes).
 SUBTITLE_FONT_PATH: str = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
-SUBTITLE_FONT_SIZE: int = 24
+SUBTITLE_FONT_SIZE: int = 42
 SUBTITLE_BORDER_W: int = 2
 SUBTITLE_BOTTOM_OFFSET_PX: int = 80  # y=h-N from frame bottom
 
