@@ -102,6 +102,7 @@ def _cut_plan_out(blob: Any | None) -> CutPlanOut | None:
                     asset_end_ms=int(seg["asset_end_ms"]),
                     source_kind=str(seg["source_kind"]),  # type: ignore[arg-type]
                     reason=str(seg.get("reason", "")),
+                    transition_to_next=str(seg.get("transition_to_next", "dissolve")),
                 )
             )
         except (KeyError, ValueError, TypeError):

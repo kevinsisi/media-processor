@@ -88,6 +88,9 @@ export interface CutPlanSegmentOut {
   asset_end_ms: number;
   source_kind: CutSourceKind;
   reason: string;
+  // M6.3 — xfade transition into the next cut. Defaults to "dissolve"
+  // for older drafts whose stored cut_plan_json predates the field.
+  transition_to_next: string;
 }
 
 export interface CutPlanOut {
@@ -101,7 +104,7 @@ export interface CutPlanOut {
   segments: CutPlanSegmentOut[];
 }
 
-export type EditStep = "plan" | "cut" | "concat" | "subtitles";
+export type EditStep = "plan" | "cut" | "concat" | "subtitles" | "bgm";
 
 export interface DraftSummary {
   id: number;

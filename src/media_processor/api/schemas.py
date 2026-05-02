@@ -100,6 +100,10 @@ class CutPlanSegmentOut(BaseModel):
     asset_end_ms: int
     source_kind: Literal["scripted", "improv"]
     reason: str
+    # M6.3 — xfade transition into the next cut. Default coerce keeps
+    # older drafts (pre-M6) renderable since their stored blobs lack
+    # this field.
+    transition_to_next: str = "dissolve"
 
 
 class CutPlanOut(BaseModel):
