@@ -38,6 +38,13 @@ interface DraggableTimelineProps {
   // — cells just render without a thumbnail.
   assetThumbs?: Map<number, AssetThumbInfo>;
   onReorderStart?: () => void;
+  // Fires after the PATCH /drafts/{id}/order succeeds. Receives the
+  // server's fresh DraftDetail (the PATCH renumbers segments + enqueues
+  // a skip-plan render synchronously, so the response already shows
+  // status=processing + reset progress_steps_json). The parent feeds
+  // this into the polling hook so the status pill flips from 已完成 →
+  // 剪輯中 immediately, without a one-tick lag.
+  onReorderCommitted?: (next: DraftDetail) => void;
   onReorderError?: (msg: string) => void;
 }
 
@@ -214,6 +221,7 @@ export default function DraggableTimeline({
   videoRef,
   assetThumbs,
   onReorderStart,
+  onReorderCommitted,
   onReorderError,
 }: DraggableTimelineProps) {
   const segments = useMemo(
@@ -301,11 +309,19 @@ export default function DraggableTimeline({
     onReorderStart?.();
     try {
       const ids = localRows.map((r) => r.segment.id);
-      await apiClient.reorderDraftSegments(draft.id, { orders: ids });
+      const fresh = await apiClient.reorderDraftSegments(draft.id, {
+        orders: ids,
+      });
       // Locally reflect the commit by updating the server snapshot —
       // when the parent re-fetches the new draft (with status=pending)
       // the snapshot syncs again via the segments effect above.
       setServerIds(ids);
+      // The PATCH synchronously enqueues a fresh skip-plan render on
+      // the backend, so the draft is now processing again. Hand the
+      // fresh DraftDetail to the parent so it can flip the status pill
+      // / progress chips immediately rather than waiting for the next
+      // polling tick to refresh state.
+      onReorderCommitted?.(fresh);
     } catch (err) {
       const msg =
         err instanceof ApiError
@@ -324,6 +340,7 @@ export default function DraggableTimeline({
     localRows,
     draft.id,
     onReorderStart,
+    onReorderCommitted,
     onReorderError,
   ]);
 

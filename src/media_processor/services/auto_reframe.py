@@ -45,20 +45,33 @@ ASPECT_RATIOS: dict[str, tuple[int, int]] = {
 # once per output frame.
 RENDER_FPS: int = 30
 
-# Kalman process / measurement noise. Hand-tuned:
+# Kalman process / measurement noise. Hand-tuned for v0.16.1 — the
+# initial tuning lagged the subject so the car never re-centered after
+# a quick pan; raising Q + dropping R lets the filter follow real
+# motion without re-adding YOLO's frame-to-frame jitter.
 # - Q (process noise): how much the subject "wants" to wander.
 #   Lower → smoother but lazier; higher → tracks abrupt moves better.
 # - R (measurement noise): how noisy the YOLO bbox center is. Higher
 #   means we trust predictions over measurements (smoother but laggier).
-KALMAN_Q: float = 25.0
-KALMAN_R: float = 200.0
+KALMAN_Q: float = 120.0
+KALMAN_R: float = 80.0
 
 # Hard ceiling on how far the crop window can move per output frame.
 # Prevents the camera from snapping when a 5 Hz YOLO detection
-# disagrees with the smoothed prediction. 8 px/frame at 30fps =
-# 240 px/sec — fast enough to follow a passing car, slow enough to
-# avoid jitter.
-MAX_DELTA_PX_PER_FRAME: float = 8.0
+# disagrees with the smoothed prediction. v0.16.1 raised from 8 → 24
+# px/frame so a passing car at highway speed isn't visibly trailing
+# the crop window. 24 px/frame at 30fps ≈ 720 px/sec — well above any
+# realistic phone-shoot pan rate.
+MAX_DELTA_PX_PER_FRAME: float = 24.0
+
+# v0.16.1 — fraction of the maximum target-aspect window we actually
+# use for the dynamic crop. Shrinking below 1.0 zooms the subject in
+# (it fills more of the output frame) AND gives the crop window slack
+# to translate inside the source — the previous always-maximal window
+# left no room to track the subject left/right when source already
+# matched target aspect. 0.75 keeps subjects 33 % larger in the output
+# while still leaving 25 % source margin to chase a moving subject.
+CROP_ZOOM_FACTOR: float = 0.75
 
 
 @dataclass(frozen=True)
@@ -80,21 +93,34 @@ class CropPath:
 def _crop_dimensions(
     src_w: int, src_h: int, target_aspect: str
 ) -> tuple[int, int]:
-    """Compute the largest ``(w, h)`` window inside ``(src_w, src_h)``
-    that has aspect ``target_aspect``. Returns ints (ffmpeg crop wants
-    integers — sub-pixel cropping isn't a thing).
+    """Compute the dynamic crop window for ``target_aspect`` inside
+    ``(src_w, src_h)``.
+
+    Two factors stack:
+      1. The largest target-aspect window that fits inside the source
+         (the geometric maximum — for a 1920×1080 → 9:16 we'd get
+         606×1080).
+      2. ``CROP_ZOOM_FACTOR`` (default 0.75) — shrinks below the
+         maximum so the subject takes up more of the output frame AND
+         the crop window has slack to slide left/right as the subject
+         moves. Critical for sources that already match the target
+         aspect — without the zoom there is literally no margin in
+         which to translate the crop, and ``compute_crop_path`` would
+         have to bail.
     """
     aw, ah = ASPECT_RATIOS[target_aspect]
     # Two candidates: keep src_w (height limited by aspect) or keep src_h.
     # Pick the one that fits — i.e. the limiting axis.
     by_width = (src_w, src_w * ah // aw)
     by_height = (src_h * aw // ah, src_h)
-    # If keeping src_w would exceed src_h, fall back to keeping src_h.
     if by_width[1] <= src_h:
         cw, ch = by_width
     else:
         cw, ch = by_height
-    # Even values; libx264 prefers even widths/heights.
+    # Apply the zoom factor and round to even values; libx264 prefers
+    # even widths/heights.
+    cw = int(round(cw * CROP_ZOOM_FACTOR))
+    ch = int(round(ch * CROP_ZOOM_FACTOR))
     cw = cw - (cw % 2)
     ch = ch - (ch % 2)
     return max(2, cw), max(2, ch)
@@ -198,10 +224,11 @@ def compute_crop_path(
         return None
 
     crop_w, crop_h = _crop_dimensions(sw, sh, target_aspect)
-    # If source already matches target aspect within a pixel, the crop
-    # window is essentially the whole source — nothing useful to track.
-    if crop_w >= sw - 1 and crop_h >= sh - 1:
-        return None
+    # ``CROP_ZOOM_FACTOR`` shrinks the crop window below the maximum
+    # target-aspect rectangle, so even when source matches target
+    # aspect the window is smaller than the source and has room to
+    # translate around the subject. The earlier "bail when full-frame"
+    # guard is no longer needed.
 
     frames = tracking.get("frames") or []
     # Only frames inside the cut's [asset_start_ms, asset_end_ms) window
@@ -318,6 +345,7 @@ def build_filter_chain(
 
 __all__ = [
     "ASPECT_RATIOS",
+    "CROP_ZOOM_FACTOR",
     "KALMAN_Q",
     "KALMAN_R",
     "MAX_DELTA_PX_PER_FRAME",

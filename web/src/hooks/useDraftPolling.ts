@@ -13,6 +13,11 @@ export interface UseDraftPolling {
   pollIntervalMs: number;
   isPolling: boolean;
   refresh: () => void;
+  // v0.16 — apply a server-fresh DraftDetail (e.g. the response body of
+  // a synchronous PATCH that mutated the draft) without waiting for the
+  // next poll tick. Resets the settle timer so polling resumes at the
+  // fast interval if the new state is back to processing.
+  applyDraft: (next: DraftDetail) => void;
 }
 
 function isProcessing(data: DraftDetail | null): boolean {
@@ -95,5 +100,13 @@ export function useDraftPolling(draftId: number | null): UseDraftPolling {
     void fetchOnce();
   }, [fetchOnce]);
 
-  return { data, error, loading, pollIntervalMs, isPolling, refresh };
+  const applyDraft = useCallback((next: DraftDetail) => {
+    setData(next);
+    setError(null);
+    settleStartRef.current = null;
+    setPollIntervalMs(FAST_INTERVAL_MS);
+    setIsPolling(true);
+  }, []);
+
+  return { data, error, loading, pollIntervalMs, isPolling, refresh, applyDraft };
 }

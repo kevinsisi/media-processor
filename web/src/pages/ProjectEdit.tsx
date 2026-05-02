@@ -890,6 +890,15 @@ export default function ProjectEdit() {
               videoRef={videoRef as React.RefObject<HTMLVideoElement>}
               assetThumbs={assetThumbs}
               onReorderStart={() => void refreshDrafts().catch(() => {})}
+              onReorderCommitted={(fresh) => {
+                // The PATCH already returned the fresh DraftDetail
+                // (status=processing, reset progress_steps_json). Pump
+                // it into the polling hook so the UI flips from 已完成
+                // → 剪輯中 immediately. Also nudge the drafts list so
+                // the version chip mirrors the new state.
+                polling.applyDraft(fresh);
+                void refreshDrafts().catch(() => {});
+              }}
               onReorderError={(msg) => setTriggerError(msg)}
             />
             {draft.cut_plan?.notes && (
