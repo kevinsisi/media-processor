@@ -79,7 +79,8 @@ def subtitle_force_style(target_aspect: str) -> str:
         "Alignment=2,"
         f"MarginL={margin_lr},"
         f"MarginR={margin_lr},"
-        f"MarginV={margin_v}"
+        f"MarginV={margin_v},"
+        "WrapStyle=0"
     )
 
 
