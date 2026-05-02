@@ -393,13 +393,21 @@ async def patch_asset_tracking_target(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="mode=object requires object_index",
             )
-        # Validate the index exists in tracking_json["tracks"].
+        # Validate the index exists in tracking_json["tracks"]. Pre-v0.17
+        # blobs only carry the legacy single-track ``frames`` field; the
+        # GET endpoint synthesises one bbox at object_index=0 for those,
+        # so accept that same index here. The renderer's
+        # ``_frames_for_object`` already falls back to ``frames`` when the
+        # requested track id isn't in ``tracks``.
         blob = getattr(asset, "tracking_json", None)
-        tracks = (blob or {}).get("tracks") if isinstance(blob, dict) else None
-        if not tracks or not any(
+        blob_dict = blob if isinstance(blob, dict) else {}
+        tracks = blob_dict.get("tracks") or []
+        legacy_frames = blob_dict.get("frames") or []
+        index_ok = any(
             isinstance(t, dict) and int(t.get("object_index", -1)) == payload.object_index
             for t in tracks
-        ):
+        ) or (not tracks and bool(legacy_frames) and payload.object_index == 0)
+        if not index_ok:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"object_index={payload.object_index} not in tracking_json[\"tracks\"]",
