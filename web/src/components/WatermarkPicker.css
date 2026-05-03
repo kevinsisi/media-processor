@@ -1,5 +1,146 @@
 /* v0.18 — brand watermark / logo overlay picker */
 
+/* v0.21.6 — saved preset gallery shown above the upload row.
+   Horizontal grid of small (~64 px square) thumbnails so a long
+   preset list still fits on a 6-inch landscape phone without
+   reflowing the rest of the picker. */
+.watermark-presets {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.6rem 0.7rem;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  margin-bottom: 0.5rem;
+}
+.watermark-presets__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.watermark-presets__title {
+  font-family: var(--font-mono);
+  font-size: var(--t-xs, 0.72rem);
+  letter-spacing: 0.16em;
+  color: var(--text-secondary);
+}
+.watermark-presets__save {
+  background: transparent;
+  border: 1px dashed rgba(132, 217, 196, 0.45);
+  color: rgba(190, 240, 220, 0.95);
+  font-size: 0.78rem;
+  padding: 0.25rem 0.55rem;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.watermark-presets__save:hover:not(:disabled) {
+  background: rgba(132, 217, 196, 0.10);
+}
+.watermark-presets__save:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.watermark-presets__saving {
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.7);
+}
+.watermark-presets__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.watermark-presets__item {
+  position: relative;
+}
+.watermark-presets__card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  width: 5.5rem;
+  padding: 0.35rem 0.3rem;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 6px;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.watermark-presets__card:hover:not(:disabled) {
+  border-color: rgba(132, 217, 196, 0.4);
+  background: rgba(132, 217, 196, 0.08);
+}
+.watermark-presets__card:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.watermark-presets__thumb {
+  width: 4rem;
+  height: 4rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: repeating-conic-gradient(
+      rgba(255, 255, 255, 0.04) 0% 25%,
+      rgba(255, 255, 255, 0.10) 25% 50%
+    ) 50% / 14px 14px;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.watermark-presets__thumb img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+.watermark-presets__thumb-blank {
+  font-size: 1.4rem;
+  color: rgba(255, 255, 255, 0.45);
+}
+.watermark-presets__name {
+  font-size: 0.72rem;
+  color: rgba(255, 255, 255, 0.85);
+  text-align: center;
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.watermark-presets__remove {
+  position: absolute;
+  top: -0.4rem;
+  right: -0.4rem;
+  width: 1.3rem;
+  height: 1.3rem;
+  border-radius: 50%;
+  border: 1px solid rgba(180, 80, 60, 0.6);
+  background: rgba(20, 20, 20, 0.95);
+  color: rgba(255, 200, 200, 0.95);
+  font-size: 0.85rem;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.watermark-presets__item:hover .watermark-presets__remove,
+.watermark-presets__remove:focus {
+  opacity: 1;
+}
+.watermark-presets__remove:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.watermark-presets__empty {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--text-muted, #888);
+}
+
 .watermark-picker {
   display: flex;
   flex-direction: column;

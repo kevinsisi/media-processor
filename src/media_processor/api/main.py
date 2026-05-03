@@ -20,6 +20,7 @@ from media_processor.api.routers import (
     projects,
     reviews,
     uploads,
+    watermark_presets,
 )
 from media_processor.api.routers import settings as settings_router
 
@@ -48,7 +49,7 @@ class StaticCacheMiddleware(BaseHTTPMiddleware):
 
 app = FastAPI(
     title="media-processor API",
-    version="0.21.5",
+    version="0.21.6",
 )
 
 app.include_router(health.router)
@@ -59,6 +60,7 @@ app.include_router(reviews.router)
 app.include_router(settings_router.router)
 app.include_router(uploads.router)
 app.include_router(music.router)
+app.include_router(watermark_presets.router)
 
 # Static-serve generated thumbnail JPEGs. The directory is the in-container
 # path; on the dispatch host this resolves under MEDIA_STORAGE_DIR. mkdir on

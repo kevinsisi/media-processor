@@ -112,6 +112,44 @@ class WatermarkSettingsPatch(BaseModel):
     opacity: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
+class WatermarkPresetSaveRequest(BaseModel):
+    """v0.21.6 — POST /watermark-presets body.
+
+    Captures the named preset; the PNG file + position / scale /
+    opacity are copied from ``project_id``'s current watermark on
+    the server side. The endpoint refuses with 400 when the project
+    has no watermark file set yet.
+    """
+
+    project_id: int
+    name: str = Field(..., min_length=1, max_length=255)
+
+
+class WatermarkPresetOut(BaseModel):
+    """v0.21.6 — one row in GET /watermark-presets."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    position: WatermarkPositionLiteral
+    scale: float
+    opacity: float
+    created_at: datetime
+    # Public URL the preset thumbnail / preview can render against.
+    preview_url: str | None = None
+
+
+class WatermarkPresetApplyRequest(BaseModel):
+    """v0.21.6 — POST /projects/{id}/watermark/apply-preset body.
+
+    Copies the preset's PNG into the project's watermark slot and
+    overwrites the four ``Project.watermark_*`` columns to match.
+    """
+
+    preset_id: int
+
+
 class SubtitleStylePatch(BaseModel):
     """Body for PATCH /projects/{id}/subtitle-style.
 

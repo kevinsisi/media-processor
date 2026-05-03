@@ -113,6 +113,32 @@ export interface WatermarkSettingsPatch {
   opacity?: number;
 }
 
+// v0.21.6 — saved watermark presets that can be applied to any
+// project. ``preview_url`` carries a cache-bust query so a re-saved
+// preset (same id) shows the new file immediately.
+export interface WatermarkPresetOut {
+  id: number;
+  name: string;
+  position: WatermarkPosition;
+  scale: number;
+  opacity: number;
+  created_at: string;
+  preview_url: string | null;
+}
+
+// POST /watermark-presets body — captures the named preset; the PNG
+// file + position / scale / opacity are copied from this project's
+// current watermark on the server side.
+export interface WatermarkPresetSaveRequest {
+  project_id: number;
+  name: string;
+}
+
+// POST /projects/{id}/watermark/apply-preset body.
+export interface WatermarkPresetApplyRequest {
+  preset_id: number;
+}
+
 export interface ProjectCreate {
   name: string;
   client?: string | null;

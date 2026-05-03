@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, apiClient } from "../api/client";
-import type { ProjectDetail, WatermarkPosition } from "../api/types";
+import type {
+  ProjectDetail,
+  WatermarkPosition,
+  WatermarkPresetOut,
+} from "../api/types";
 import "./WatermarkPicker.css";
 
 // 3x3 grid order for the position picker — matches the on-screen layout.
@@ -73,6 +77,11 @@ export default function WatermarkPicker({
   // project.watermark_url lands (server URL is authoritative + carries
   // the cache-bust query). Also revoked on unmount to avoid leaking.
   const [localPreviewUrl, setLocalPreviewUrl] = useState<string | null>(null);
+  // v0.21.6 — saved preset gallery. Loaded once on mount + after every
+  // save / delete so the list stays current. ``null`` until the first
+  // fetch resolves so we can distinguish "loading" from "empty".
+  const [presets, setPresets] = useState<WatermarkPresetOut[] | null>(null);
+  const [presetBusy, setPresetBusy] = useState<number | "saving" | null>(null);
 
   useEffect(() => {
     return () => {
@@ -268,6 +277,101 @@ export default function WatermarkPicker({
     }
   }, [projectId, onProjectUpdated]);
 
+  // v0.21.6 — preset gallery handlers.
+  const refreshPresets = useCallback(async () => {
+    try {
+      const list = await apiClient.fetchWatermarkPresets();
+      setPresets(list);
+    } catch (err) {
+      // Don't surface as a top-level error — presets are an aux
+      // feature, the main upload flow keeps working without them.
+      // eslint-disable-next-line no-console
+      console.warn("watermark presets fetch failed:", err);
+      setPresets([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshPresets();
+  }, [refreshPresets]);
+
+  const handleApplyPreset = useCallback(
+    async (preset: WatermarkPresetOut) => {
+      setError(null);
+      setPresetBusy(preset.id);
+      try {
+        const updated = await apiClient.applyWatermarkPreset(projectId, {
+          preset_id: preset.id,
+        });
+        onProjectUpdated(updated);
+      } catch (err) {
+        setError(
+          err instanceof ApiError
+            ? `${err.status}: ${err.message}`
+            : err instanceof Error
+              ? err.message
+              : String(err),
+        );
+      } finally {
+        setPresetBusy(null);
+      }
+    },
+    [projectId, onProjectUpdated],
+  );
+
+  const handleSavePreset = useCallback(async () => {
+    if (!filename) return;
+    const raw = window.prompt(
+      "輸入這組浮水印設定的名稱（之後可以套用到其他專案）",
+      `預設 ${(presets?.length ?? 0) + 1}`,
+    );
+    if (raw === null) return; // user cancelled
+    const name = raw.trim();
+    if (!name) {
+      setError("浮水印名稱不可空白");
+      return;
+    }
+    setError(null);
+    setPresetBusy("saving");
+    try {
+      await apiClient.saveWatermarkPreset({ project_id: projectId, name });
+      await refreshPresets();
+    } catch (err) {
+      setError(
+        err instanceof ApiError
+          ? `${err.status}: ${err.message}`
+          : err instanceof Error
+            ? err.message
+            : String(err),
+      );
+    } finally {
+      setPresetBusy(null);
+    }
+  }, [filename, projectId, presets, refreshPresets]);
+
+  const handleDeletePreset = useCallback(
+    async (preset: WatermarkPresetOut, ev: React.MouseEvent) => {
+      ev.stopPropagation();
+      if (!window.confirm(`刪除預設「${preset.name}」？`)) return;
+      setPresetBusy(preset.id);
+      try {
+        await apiClient.deleteWatermarkPreset(preset.id);
+        await refreshPresets();
+      } catch (err) {
+        setError(
+          err instanceof ApiError
+            ? `${err.status}: ${err.message}`
+            : err instanceof Error
+              ? err.message
+              : String(err),
+        );
+      } finally {
+        setPresetBusy(null);
+      }
+    },
+    [refreshPresets],
+  );
+
   const interactive = !disabled && !busy;
 
   return (
@@ -295,6 +399,83 @@ export default function WatermarkPicker({
           <span className="watermark-picker__current">尚未上傳</span>
         )}
       </header>
+
+      {/* v0.21.6 — saved preset gallery. Click a thumbnail to apply
+         that preset's PNG + position / scale / opacity to this
+         project; "💾 儲存目前設定為預設" snapshots the current
+         project's watermark for later reuse. */}
+      {presets !== null && (presets.length > 0 || filename) ? (
+        <section
+          className="watermark-presets"
+          aria-label="已儲存的浮水印預設"
+        >
+          <header className="watermark-presets__head">
+            <span className="watermark-presets__title">
+              已儲存的浮水印（{presets.length}）
+            </span>
+            {filename && presetBusy !== "saving" ? (
+              <button
+                type="button"
+                className="watermark-presets__save"
+                onClick={() => void handleSavePreset()}
+                disabled={!interactive || presetBusy !== null}
+                title="把目前的浮水印 + 位置 / 大小 / 透明度存成可重用的預設"
+              >
+                💾 儲存目前設定為預設
+              </button>
+            ) : null}
+            {presetBusy === "saving" ? (
+              <span className="watermark-presets__saving">儲存中…</span>
+            ) : null}
+          </header>
+          {presets.length > 0 ? (
+            <ul className="watermark-presets__list">
+              {presets.map((p) => {
+                const applying = presetBusy === p.id;
+                return (
+                  <li key={p.id} className="watermark-presets__item">
+                    <button
+                      type="button"
+                      className="watermark-presets__card"
+                      onClick={() => void handleApplyPreset(p)}
+                      disabled={
+                        !interactive || presetBusy !== null
+                      }
+                      title={`套用「${p.name}」（${POSITION_LABEL[p.position]}、${Math.round(p.scale * 100)}%、不透明度 ${Math.round(p.opacity * 100)}%）`}
+                    >
+                      <span className="watermark-presets__thumb">
+                        {p.preview_url ? (
+                          <img src={p.preview_url} alt={p.name} />
+                        ) : (
+                          <span className="watermark-presets__thumb-blank">
+                            ?
+                          </span>
+                        )}
+                      </span>
+                      <span className="watermark-presets__name">
+                        {applying ? "套用中…" : p.name}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className="watermark-presets__remove"
+                      aria-label={`刪除預設「${p.name}」`}
+                      onClick={(ev) => void handleDeletePreset(p, ev)}
+                      disabled={presetBusy !== null}
+                    >
+                      ×
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <p className="watermark-presets__empty">
+              還沒有預設。上傳浮水印後可按上方「💾 儲存目前設定為預設」存成可重用的版本。
+            </p>
+          )}
+        </section>
+      ) : null}
 
       <div className="watermark-picker__upload-row">
         <label className="watermark-picker__upload">

@@ -44,6 +44,7 @@ from media_processor.models.script import Script
 from media_processor.models.subtitle_cue import SubtitleCueRow
 from media_processor.models.transcript import AssetTranscript
 from media_processor.models.upload_session import UploadSession
+from media_processor.models.watermark_preset import WatermarkPreset
 
 __all__ = [
     "ANALYSIS_STEP_VALUES",
@@ -87,4 +88,5 @@ __all__ = [
     "UploadKind",
     "UploadSession",
     "UploadStatus",
+    "WatermarkPreset",
 ]
