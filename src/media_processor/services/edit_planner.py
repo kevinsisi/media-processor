@@ -636,6 +636,100 @@ def _has_face_in_span(asset: Asset, span_ms: tuple[int, int]) -> bool:
     return False
 
 
+# v0.21 — subject-class filter padding. Each side of the asset's
+# subject-present window is widened by this amount before clamping the
+# planner's chosen span, so a cut doesn't begin / end exactly on the
+# first / last YOLO detection (those edge frames are typically lower-
+# confidence with the subject only partially in frame).
+SUBJECT_PADDING_MS: int = 500
+
+
+def _subject_presence_range_ms(
+    asset: Asset, subject_class: str
+) -> tuple[int, int] | None:
+    """Earliest/latest timestamps (ms) where ``subject_class`` appears in
+    this asset's ``tracking_json``, padded ±``SUBJECT_PADDING_MS`` and
+    clamped to ``[0, asset.duration_ms]``.
+
+    Returns ``None`` when the class never appears or tracking never ran.
+    Reads the v0.17 ``tracks`` array; falls back to the legacy top-level
+    ``frames`` field iff its ``subject_class`` matches (so pre-v0.17
+    assets without a per-class tracks list still work).
+    """
+    tracking = asset.tracking_json
+    if not isinstance(tracking, dict):
+        return None
+    matched_t_ms: list[int] = []
+    tracks = tracking.get("tracks")
+    if isinstance(tracks, list):
+        for t in tracks:
+            if not isinstance(t, dict):
+                continue
+            if t.get("cls_name") != subject_class:
+                continue
+            for f in t.get("frames", []) or []:
+                if not isinstance(f, dict):
+                    continue
+                t_ms = f.get("t_ms")
+                if isinstance(t_ms, int):
+                    matched_t_ms.append(t_ms)
+    if not matched_t_ms and tracking.get("subject_class") == subject_class:
+        for f in tracking.get("frames", []) or []:
+            if not isinstance(f, dict):
+                continue
+            t_ms = f.get("t_ms")
+            if isinstance(t_ms, int):
+                matched_t_ms.append(t_ms)
+    if not matched_t_ms:
+        return None
+    asset_end = max(0, int(asset.duration_ms))
+    start = max(0, min(matched_t_ms) - SUBJECT_PADDING_MS)
+    end = min(asset_end, max(matched_t_ms) + SUBJECT_PADDING_MS)
+    if end <= start:
+        return None
+    return start, end
+
+
+def _apply_subject_filter(
+    scores: list[_AssetScore],
+    *,
+    assets: tuple[Asset, ...],
+    subject_class: str | None,
+) -> list[_AssetScore]:
+    """Drop assets where ``subject_class`` never appears; clamp the
+    survivors' ``best_span_ms`` to the subject-presence window.
+
+    ``None`` for ``subject_class`` is the no-op. When the LLM-picked
+    span and the presence window have zero overlap we snap the span to
+    the full presence window (preserves footage when the planner would
+    otherwise have picked a useful clip but missed the subject's exact
+    appearance window).
+    """
+    if not subject_class:
+        return scores
+    by_id = {a.id: a for a in assets}
+    out: list[_AssetScore] = []
+    for s in scores:
+        asset = by_id.get(s.asset_id)
+        if asset is None:
+            continue
+        presence = _subject_presence_range_ms(asset, subject_class)
+        if presence is None:
+            logger.info(
+                "edit-planner: dropping asset %d — subject_class=%r never appears",
+                s.asset_id,
+                subject_class,
+            )
+            continue
+        span_start, span_end = s.best_span_ms
+        new_start = max(span_start, presence[0])
+        new_end = min(span_end, presence[1])
+        if new_end <= new_start:
+            new_start, new_end = presence
+        out.append(replace(s, best_span_ms=(new_start, new_end)))
+    return out
+
+
 def _dominant_motion_for_span(asset: Asset, span_ms: tuple[int, int]) -> str:
     """Pick the motion tag whose time_ranges_ms most overlap ``span_ms``.
 
@@ -1355,6 +1449,18 @@ async def plan(
             f"(quota={quota_failures}, invalid={invalid_failures}, other={other_failures})"
         )
 
+    pre_filter_count = len(scores)
+    scores = _apply_subject_filter(
+        scores,
+        assets=ctx.assets,
+        subject_class=ctx.project.subject_class,
+    )
+    if not scores:
+        raise EditPlanInvalidError(
+            f"subject_class={ctx.project.subject_class!r} never appeared in any "
+            f"of {pre_filter_count} scored assets"
+        )
+
     cut_segments = _assemble_plan(scores, target_duration_ms, style=style)
     if not cut_segments:
         raise EditPlanInvalidError(
@@ -1397,11 +1503,33 @@ async def heuristic_fallback(
     a draft the operator can preview and re-roll.
     """
     ctx = await _load_project_context(session, project_id)
+    subject_class = ctx.project.subject_class
+
+    def _clamp_to_presence(
+        start: int, end: int, presence: tuple[int, int] | None
+    ) -> tuple[int, int] | None:
+        """Intersect ``(start, end)`` with the asset's subject-presence
+        window. Returns ``None`` when there's no overlap; the caller
+        skips that segment (heuristic fallback prefers many short cuts
+        over one long snapped span)."""
+        if presence is None:
+            return start, end
+        new_start = max(start, presence[0])
+        new_end = min(end, presence[1])
+        if new_end <= new_start:
+            return None
+        return new_start, new_end
 
     segments: list[CutPlanSegment] = []
     accumulated_ms = 0
     order = 0
     for asset in ctx.assets:
+        if subject_class:
+            presence = _subject_presence_range_ms(asset, subject_class)
+            if presence is None:
+                continue
+        else:
+            presence = None
         tx = ctx.transcripts.get(asset.id)
         raw = list(tx.segments_json or []) if tx is not None else []
         if not raw:
@@ -1410,41 +1538,48 @@ async def heuristic_fallback(
             mid = max(0, asset.duration_ms // 2 - 1500)
             end = min(asset.duration_ms, mid + 3000)
             if end > mid:
-                segments.append(
-                    CutPlanSegment(
-                        order=order,
-                        asset_id=asset.id,
-                        asset_start_ms=mid,
-                        asset_end_ms=end,
-                        source_kind="improv",
-                        reason="fallback: middle slice",
-                        dominant_emotion=_dominant_emotion_for_asset(asset),
-                        dominant_motion=_dominant_motion_for_span(asset, (mid, end)),
-                        has_face=_has_face_in_span(asset, (mid, end)),
+                clamped = _clamp_to_presence(mid, end, presence)
+                if clamped is not None:
+                    cs, ce = clamped
+                    segments.append(
+                        CutPlanSegment(
+                            order=order,
+                            asset_id=asset.id,
+                            asset_start_ms=cs,
+                            asset_end_ms=ce,
+                            source_kind="improv",
+                            reason="fallback: middle slice",
+                            dominant_emotion=_dominant_emotion_for_asset(asset),
+                            dominant_motion=_dominant_motion_for_span(asset, (cs, ce)),
+                            has_face=_has_face_in_span(asset, (cs, ce)),
+                        )
                     )
-                )
-                accumulated_ms += end - mid
-                order += 1
+                    accumulated_ms += ce - cs
+                    order += 1
         else:
             for seg in raw:
                 start = int(seg.get("start_ms", 0))
                 end = int(seg.get("end_ms", 0))
                 if end <= start:
                     continue
+                clamped = _clamp_to_presence(start, end, presence)
+                if clamped is None:
+                    continue
+                cs, ce = clamped
                 segments.append(
                     CutPlanSegment(
                         order=order,
                         asset_id=asset.id,
-                        asset_start_ms=start,
-                        asset_end_ms=end,
+                        asset_start_ms=cs,
+                        asset_end_ms=ce,
                         source_kind="improv",
                         reason="fallback: transcript segment",
                         dominant_emotion=_dominant_emotion_for_asset(asset),
-                        dominant_motion=_dominant_motion_for_span(asset, (start, end)),
-                        has_face=_has_face_in_span(asset, (start, end)),
+                        dominant_motion=_dominant_motion_for_span(asset, (cs, ce)),
+                        has_face=_has_face_in_span(asset, (cs, ce)),
                     )
                 )
-                accumulated_ms += end - start
+                accumulated_ms += ce - cs
                 order += 1
                 if accumulated_ms >= target_duration_ms:
                     break

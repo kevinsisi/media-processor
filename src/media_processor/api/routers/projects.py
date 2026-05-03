@@ -18,6 +18,7 @@ from media_processor.api.routers.drafts import _draft_url, _expected_draft_path
 from media_processor.api.schemas import (
     AssetAnalysisItem,
     CoverageSummaryOut,
+    DetectedClassOut,
     DraftSummary,
     EditTriggerRequest,
     EditTriggerResponse,
@@ -32,6 +33,7 @@ from media_processor.api.schemas import (
     ScriptOut,
     ScriptUpsert,
     SecondarySubtitleSummaryOut,
+    SubjectClassPatch,
     SubtitleStylePatch,
     TrackingSummaryOut,
     TranscriptSummaryOut,
@@ -47,6 +49,7 @@ from media_processor.models import (
     Script,
     ScriptCoverage,
 )
+from media_processor.services.object_tracking import aggregate_detected_classes
 from media_processor.services.queue import enqueue_project_edit
 
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -148,6 +151,7 @@ def _project_detail(
         subtitle_position=project.subtitle_position,  # type: ignore[arg-type]
         subtitle_size=project.subtitle_size,  # type: ignore[arg-type]
         subtitle_outline_width=project.subtitle_outline_width,  # type: ignore[arg-type]
+        subject_class=project.subject_class,
     )
 
 
@@ -559,6 +563,70 @@ async def delete_project_bgm(
         Path(project.bgm_path).unlink(missing_ok=True)
         project.bgm_path = None
         await session.commit()
+
+
+# v0.21 — list classes detected across this project's assets. Powers
+# the SubjectClassPicker dropdown so the user only sees classes that
+# actually appear in their footage, sorted by total frame count so the
+# most common subject is the natural first pick. Empty list when no
+# asset has been tracked yet — the UI surfaces "complete tracking
+# first" rather than offering a hard-coded 80-class menu.
+@router.get(
+    "/{project_id}/detected-classes",
+    response_model=list[DetectedClassOut],
+)
+async def list_detected_classes(
+    project_id: int,
+    session: SessionDep,
+) -> list[DetectedClassOut]:
+    project = await session.get(Project, project_id)
+    if project is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="project not found"
+        )
+    rows = (
+        (
+            await session.execute(
+                select(Asset.tracking_json).where(Asset.project_id == project_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    summaries = aggregate_detected_classes(list(rows))
+    return [DetectedClassOut(**s) for s in summaries]
+
+
+# v0.21 — subject-class PATCH. ``subject_class=None`` clears the filter
+# (planner uses every asset at full duration); a non-null value is
+# validated against the COCO-80 class list by SubjectClassPatch so we
+# don't store strings the renderer's tracking_json lookup will miss.
+@router.patch("/{project_id}/subject-class", response_model=ProjectDetail)
+async def patch_project_subject_class(
+    project_id: int,
+    payload: SubjectClassPatch,
+    session: SessionDep,
+) -> ProjectDetail:
+    project = await session.get(Project, project_id)
+    if project is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="project not found"
+        )
+    project.subject_class = payload.subject_class
+    await session.commit()
+    await session.refresh(project)
+
+    asset_count = await session.scalar(
+        select(func.count(Asset.id)).where(Asset.project_id == project_id)
+    )
+    draft_count = await session.scalar(
+        select(func.count(Draft.id)).where(Draft.project_id == project_id)
+    )
+    return _project_detail(
+        project,
+        asset_count=int(asset_count or 0),
+        draft_count=int(draft_count or 0),
+    )
 
 
 # v0.18 — subtitle style PATCH. Every field is optional so the UI can

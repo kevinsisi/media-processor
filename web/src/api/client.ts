@@ -12,6 +12,7 @@ import type {
   AssetDetail,
   AssetThumbnailsOut,
   BgmGenerationStatus,
+  DetectedClassOut,
   DraftComment,
   DraftCommentCreate,
   DraftDetail,
@@ -39,6 +40,7 @@ import type {
   SegmentVolumeOut,
   SegmentVolumePatch,
   SettingsOut,
+  SubjectClassPatch,
   SubtitleCueOut,
   SubtitleCuePatch,
   SubtitleStylePatch,
@@ -137,6 +139,35 @@ export class ApiClient {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       },
+    );
+  }
+
+  // v0.21 — set / clear the auto-edit subject-class filter. ``null``
+  // restores the historical "every asset eligible at full duration"
+  // behaviour; a non-null value must be one of the 80 COCO class
+  // names (server-side validation rejects others with HTTP 422).
+  patchProjectSubjectClass(
+    projectId: number,
+    payload: SubjectClassPatch,
+  ): Promise<ProjectDetail> {
+    return this.request<ProjectDetail>(
+      `/projects/${projectId}/subject-class`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  // v0.21 — class summary across this project's tracking_json blobs.
+  // Empty list when no asset has been tracked yet — UI surfaces a
+  // hint to run analysis first instead of offering a fake menu.
+  fetchProjectDetectedClasses(
+    projectId: number,
+  ): Promise<DetectedClassOut[]> {
+    return this.get<DetectedClassOut[]>(
+      `/projects/${projectId}/detected-classes`,
     );
   }
 

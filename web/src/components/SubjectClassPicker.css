@@ -1,0 +1,56 @@
+/* v0.21 — auto-edit subject-class picker (COCO-80 dropdown). */
+
+.subject-class {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0 0 var(--space-4) 0;
+}
+
+.subject-class__head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.subject-class__title {
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
+  letter-spacing: 0.16em;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.subject-class__saving {
+  font-size: var(--t-xs);
+  color: var(--text-muted, #888);
+}
+
+.subject-class__hint {
+  font-size: var(--t-xs);
+  color: var(--text-muted, #888);
+  margin: 0;
+}
+
+.subject-class__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.subject-class__select {
+  flex: 1 1 14rem;
+  min-width: 12rem;
+  padding: 0.4rem 0.5rem;
+  font-family: inherit;
+  font-size: var(--t-sm);
+}
+
+.subject-class__error {
+  color: var(--danger, #c0392b);
+  font-size: var(--t-xs);
+  margin: 0;
+}
