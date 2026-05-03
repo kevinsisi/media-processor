@@ -308,6 +308,16 @@ async def trigger_project_edit(
         status=DraftStatus.PENDING.value,
         progress_steps_json=dict.fromkeys(EDIT_STEP_VALUES, "pending"),
         style_preset=payload.style_preset,
+        # v0.21.1 — snapshot the operator's render-flag choices so the
+        # skip-plan re-render endpoints (PATCH /drafts/{id}/order,
+        # POST /drafts/{id}/rebuild-subtitles) can replay them instead
+        # of silently defaulting every flag back to True.
+        render_flags_json={
+            "transitions": payload.transitions,
+            "stabilize": payload.stabilize,
+            "subtitles": payload.subtitles,
+            "auto_reframe": payload.auto_reframe,
+        },
     )
     session.add(new_draft)
     await session.commit()

@@ -78,6 +78,17 @@ class Draft(Base):
     prompt_feedback: Mapped[str | None] = mapped_column(Text, nullable=True)
     progress_steps_json: Mapped[Any] = mapped_column(JSON, nullable=True)
     cut_plan_json: Mapped[Any] = mapped_column(JSON, nullable=True)
+    # v0.21.1 — snapshot of the user-toggled render flags
+    # (``transitions`` / ``stabilize`` / ``subtitles`` / ``auto_reframe``)
+    # captured on the initial trigger. The skip-plan re-render paths
+    # (timeline reorder, subtitle re-burn) read this back so a re-render
+    # respects whatever the operator chose first time round, instead of
+    # silently defaulting every flag back to True. ``None`` keeps legacy
+    # behaviour for pre-v0.21.1 rows (skip-plan re-render falls through
+    # to the all-True defaults, same as before this column existed).
+    # Shape: ``{"transitions": bool, "stabilize": bool, "subtitles": bool,
+    # "auto_reframe": bool}`` — extra keys are ignored.
+    render_flags_json: Mapped[Any] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
