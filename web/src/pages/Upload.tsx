@@ -495,9 +495,32 @@ export default function Upload() {
           <Link to="/" className="summary-back">
             ← 返回專案清單
           </Link>
-          <Link to={`/projects/${projectId}/assets`} className="summary-next">
-            進入素材分析 →
-          </Link>
+          {/* v0.22 — disable the next-step CTA until at least one
+              video has been uploaded, since the analysis page is
+              empty without assets. ``pendingUploadCount`` keeps it
+              dimmed while uploads are still flowing too, so users
+              don't navigate away mid-upload by mistake. */}
+          {assetCount === 0 ? (
+            <span
+              className="summary-next summary-next--disabled"
+              aria-disabled="true"
+              title="請先上傳至少一個影片，才能進入素材分析。"
+            >
+              進入素材分析 →
+            </span>
+          ) : pendingUploadCount > 0 ? (
+            <Link
+              to={`/projects/${projectId}/assets`}
+              className="summary-next summary-next--warning"
+              title={`還有 ${pendingUploadCount} 個影片未上傳完，前往分析頁可能看不到全部素材。`}
+            >
+              進入素材分析（{pendingUploadCount} 個還在上傳）→
+            </Link>
+          ) : (
+            <Link to={`/projects/${projectId}/assets`} className="summary-next">
+              進入素材分析 →
+            </Link>
+          )}
         </div>
       </section>
     </main>

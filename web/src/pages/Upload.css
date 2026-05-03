@@ -344,6 +344,32 @@
   transform: translateY(-1px);
 }
 
+/* v0.22 — disabled / warning variants for the next-step CTA. The
+   disabled variant looks dim and ungrabbable so users see "I can't
+   click yet"; the warning variant stays clickable but flags that
+   uploads are still in flight. */
+.summary-next--disabled {
+  background: transparent;
+  color: var(--text-disabled);
+  border-color: var(--ink-line);
+  cursor: not-allowed;
+}
+
+.summary-next--disabled:hover {
+  background: transparent;
+  transform: none;
+}
+
+.summary-next--warning {
+  background: var(--ink-elevated);
+  color: var(--text-primary);
+  border-color: var(--gold);
+}
+
+.summary-next--warning:hover {
+  background: var(--ink-elevated);
+}
+
 .summary-back {
   font-family: var(--font-mono);
   font-size: var(--t-xs);

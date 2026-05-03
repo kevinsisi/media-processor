@@ -18,25 +18,29 @@ function formatCreatedAt(iso: string): string {
 }
 
 const STATUS_LABEL: Record<string, string> = {
-  drafted: "剪輯就緒",
+  drafted: "可預覽",
   analyzing: "分析中",
-  approved: "成品就緒",
+  approved: "已採用",
   rejected: "已退回",
-  pending: "待處理",
+  pending: "待上傳",
 };
 
 function StatusCell({ project }: { project: ProjectSummary }) {
+  // v0.22 — drafted/approved both mean "there is at least one rendered
+  // mp4 ready"; ProjectEdit is the page that actually plays it (the
+  // legacy /review route still exists but renders a placeholder). Send
+  // both states there so users always land on the working preview UI.
   if (project.status === "drafted" && project.latest_draft_version != null) {
     return (
       <div className="status-cell status-cell--ready">
         <div className="status-line">
           <span className="dot dot--gold" />
           <span className="status-text">
-            剪輯 v{project.latest_draft_version} 已就緒
+            剪輯 v{project.latest_draft_version} 可預覽
           </span>
         </div>
-        <Link to={`/projects/${project.id}/review`} className="cta cta--primary">
-          檢視 →
+        <Link to={`/projects/${project.id}/edit`} className="cta cta--primary">
+          預覽 / 下載 →
         </Link>
       </div>
     );
@@ -47,10 +51,14 @@ function StatusCell({ project }: { project: ProjectSummary }) {
       <div className="status-cell status-cell--processing">
         <div className="status-line">
           <span className="dot dot--processing" />
-          <span className="status-text">處理流程執行中</span>
+          <span className="status-text">分析進行中</span>
         </div>
-        <div className="progress-track" aria-hidden>
-          <div className="progress-bar" style={{ width: "55%" }} />
+        {/* v0.22 — replaced the fake 55% bar with an indeterminate
+            shimmer so we don't lie about progress. The actual per-step
+            % lives on the analysis page; the row is just a status
+            chip. */}
+        <div className="progress-track progress-track--indeterminate" aria-hidden>
+          <div className="progress-bar progress-bar--indeterminate" />
         </div>
       </div>
     );
@@ -61,9 +69,9 @@ function StatusCell({ project }: { project: ProjectSummary }) {
       <div className="status-cell status-cell--approved">
         <div className="status-line">
           <span className="dot dot--up" />
-          <span className="status-text">成品就緒</span>
+          <span className="status-text">已採用</span>
         </div>
-        <Link to={`/projects/${project.id}/review`} className="cta cta--quiet">
+        <Link to={`/projects/${project.id}/edit`} className="cta cta--quiet">
           開啟 →
         </Link>
       </div>
@@ -87,13 +95,25 @@ export default function ProjectList() {
   const navigate = useNavigate();
   const list = projects ?? [];
 
-  const goToProject = (projectId: number, ev: React.SyntheticEvent) => {
+  const goToProject = (project: ProjectSummary, ev: React.SyntheticEvent) => {
     // Bail out if the click landed on an interactive child (status-cell CTA
     // <Link> or button) — React Router refuses nested anchors so we render
     // the row as a clickable container, not an anchor itself.
     const target = ev.target as HTMLElement;
     if (target.closest("a, button")) return;
-    navigate(`/projects/${projectId}/assets`);
+    // v0.22 — destination matches the CTA in the status cell so the
+    // whole row behaves predictably: drafted / approved go to the
+    // edit page (where the rendered mp4 lives), everything else goes
+    // to analysis. Avoids the previous footgun where clicking a row
+    // marked "剪輯就緒" sent you back to the analysis page.
+    if (
+      (project.status === "drafted" && project.latest_draft_version != null) ||
+      project.status === "approved"
+    ) {
+      navigate(`/projects/${project.id}/edit`);
+      return;
+    }
+    navigate(`/projects/${project.id}/assets`);
   };
 
   return (
@@ -149,11 +169,11 @@ export default function ProjectList() {
               role="link"
               tabIndex={0}
               aria-label={`開啟專案 ${p.name}`}
-              onClick={(e) => goToProject(p.id, e)}
+              onClick={(e) => goToProject(p, e)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
-                  goToProject(p.id, e);
+                  goToProject(p, e);
                 }
               }}
               style={{ animationDelay: `${100 + i * 90}ms` }}

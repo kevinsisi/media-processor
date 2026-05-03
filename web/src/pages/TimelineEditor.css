@@ -66,6 +66,59 @@
   50% { box-shadow: 0 0 0 6px rgba(74, 122, 217, 0); }
 }
 
+/* v0.22 — Apply button with explicit text label (icon-only was
+   ambiguous). Pulses when dirty; collapses to icon-only on very
+   narrow viewports. */
+.timeline-editor__apply-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 500;
+  flex: 0 0 auto;
+  transition: background-color 120ms ease, border-color 120ms ease, opacity 120ms ease;
+}
+
+.timeline-editor__apply-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.10);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.timeline-editor__apply-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.timeline-editor__apply-btn.is-active {
+  background: var(--accent, #4a7ad9);
+  border-color: var(--accent, #4a7ad9);
+  color: #fff;
+  animation: timeline-editor-pulse 1.6s ease-in-out infinite;
+}
+
+.timeline-editor__apply-icon {
+  font-size: 1rem;
+  line-height: 1;
+}
+
+@media (max-width: 480px) {
+  .timeline-editor__apply-label {
+    display: none;
+  }
+  .timeline-editor__apply-btn {
+    width: 36px;
+    padding: 0;
+    justify-content: center;
+  }
+}
+
 .timeline-editor__title {
   flex: 1 1 auto;
   font-weight: 600;

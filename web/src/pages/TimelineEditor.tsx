@@ -304,6 +304,10 @@ export default function TimelineEditor() {
     : dirty
       ? "套用變更並重新渲染"
       : "尚無待套用的變更";
+  // v0.22 — short label shown next to the icon so the button reads as
+  // "套用 ↻" instead of just an emoji. ``applying`` keeps the dots
+  // visible for spinner intent.
+  const applyLabel = applying ? "套用中…" : dirty ? "套用變更" : "已套用";
 
   return (
     <main className="timeline-editor">
@@ -334,7 +338,7 @@ export default function TimelineEditor() {
         <div className="timeline-editor__actions">
           <button
             type="button"
-            className={`timeline-editor__icon-btn timeline-editor__icon-btn--accent ${
+            className={`timeline-editor__apply-btn ${
               dirty && !applying ? "is-active" : ""
             }`}
             onClick={() => void handleApply()}
@@ -342,7 +346,10 @@ export default function TimelineEditor() {
             title={applyTitle}
             aria-label={applyTitle}
           >
-            {applying ? "…" : "🔄"}
+            <span className="timeline-editor__apply-icon" aria-hidden>
+              {applying ? "…" : "🔄"}
+            </span>
+            <span className="timeline-editor__apply-label">{applyLabel}</span>
           </button>
           <div
             className="timeline-editor__more"
