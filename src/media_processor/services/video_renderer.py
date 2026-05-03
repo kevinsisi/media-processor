@@ -132,6 +132,20 @@ SUBTITLE_OUTLINE_WIDTH_CHOICES: dict[str, int] = {
 SUBTITLE_POSITION_CHOICES: tuple[str, ...] = ("top", "middle", "bottom")
 SUBTITLE_TOP_OFFSET_PX: int = 80
 
+# v0.18 — secondary-language subtitle layer (dual-language rendering).
+# Same font file (Noto CJK ships Latin glyphs with Roman fallback) and
+# stroke; smaller font and stacked above the primary cue with a
+# vertical gap so the two never overlap. Sized so a 2-line zh-Hant
+# primary at 42 px + 2 px border + 28 px secondary fits inside the
+# 9:16 safe area on a 1920 h canvas.
+SUBTITLE_SECONDARY_FONT_SIZE: int = 28
+SUBTITLE_SECONDARY_BORDER_W: int = 2
+# Vertical gap between the top of the primary cue's bounding box and
+# the bottom of the secondary cue. Computed at render time using the
+# primary's text_h variable so multi-line primary cues still leave the
+# secondary visible above them.
+SUBTITLE_SECONDARY_GAP_PX: int = 12
+
 
 @dataclass(frozen=True)
 class SubtitleStyle:
@@ -884,14 +898,19 @@ def _resolve_subtitle_style(
 def _build_drawtext_chain(
     cues: list[tuple[float, float, str]],
     style: SubtitleStyle | None = None,
+    secondary_cues: list[tuple[float, float, str]] | None = None,
 ) -> str:
-    """Build a comma-chained drawtext filtergraph, one filter per cue.
+    """Build a comma-chained drawtext filtergraph for primary (+ optional secondary) cues.
 
     Each filter is gated by ``enable=between(t,start,end)`` so only the
-    active cue draws on any given frame. Style values are resolved off
-    a SubtitleStyle (font / size / colour / outline / position); when
-    ``style`` is None the historic white-on-black bottom-anchored look
-    is used so callers can opt out of customisation by passing nothing.
+    active cue draws on any given frame. Primary style values are
+    resolved off ``style`` (font / size / colour / outline / position);
+    when ``style`` is None the historic white-on-black bottom-anchored
+    look is used. The optional secondary cue (v0.18 dual-language)
+    stacks above the primary using the fixed Noto Sans CJK font in a
+    smaller size so a two-line primary still leaves the secondary
+    visible above it. Filter ordering: primary first, then secondary,
+    so the secondary is the last layer drawn.
     """
     font_path, font_size, font_color, outline_color, border_w, y_expr = (
         _resolve_subtitle_style(style)
@@ -916,15 +935,40 @@ def _build_drawtext_chain(
             f":text='{escaped}'"
             f":enable=between(t\\,{start_s:.3f}\\,{end_s:.3f})"
         )
+
+    # Compute the secondary baseline once: the primary cue uses up to
+    # MAX_LINES * SUBTITLE_FONT_SIZE px of vertical real estate above
+    # h - SUBTITLE_BOTTOM_OFFSET_PX. Secondary text_h is variable
+    # (drawtext expression), so subtract it dynamically.
+    primary_height_px = SUBTITLE_FONT_SIZE * 2  # MAX_LINES = 2 in subtitles.py
+    secondary_baseline_px = (
+        SUBTITLE_BOTTOM_OFFSET_PX + primary_height_px + SUBTITLE_SECONDARY_GAP_PX
+    )
+    if secondary_cues:
+        for start_s, end_s, text in secondary_cues:
+            escaped = _drawtext_escape(text)
+            parts.append(
+                f"drawtext=fontfile={SUBTITLE_FONT_PATH}"
+                f":fontsize={SUBTITLE_SECONDARY_FONT_SIZE}"
+                f":fontcolor=white"
+                f":borderw={SUBTITLE_SECONDARY_BORDER_W}"
+                f":bordercolor=black"
+                f":x=(w-text_w)/2"
+                f":y=h-{secondary_baseline_px}-text_h"
+                f":text='{escaped}'"
+                f":enable=between(t\\,{start_s:.3f}\\,{end_s:.3f})"
+            )
     return ",".join(parts)
 
 
 def burn_subtitles(
     concat_path: Path,
-    srt_path: Path,
+    srt_path: Path | None,
     output_path: Path,
     target_aspect: str = "9:16",
+    *,
     subtitle_style: SubtitleStyle | None = None,
+    secondary_srt_path: Path | None = None,
 ) -> None:
     """Re-encode ``concat_path`` with subtitles burned in via drawtext.
 
@@ -938,6 +982,11 @@ def burn_subtitles(
     ``target_aspect`` is accepted for signature compatibility — drawtext
     sizing is uniform across canvases now. ``subtitle_style`` is the
     v0.18 user-customised style; ``None`` keeps the historic look.
+
+    v0.18 — when ``secondary_srt_path`` is supplied and present on disk
+    we layer a second drawtext chain (smaller font, positioned above
+    the primary cue) so the rendered mp4 carries dual-language
+    subtitles. Missing or empty secondary file = primary-only burn.
     """
     _require_ffmpeg()
     if target_aspect not in ASPECT_DIMENSIONS:
@@ -947,11 +996,26 @@ def burn_subtitles(
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     cues: list[tuple[float, float, str]] = []
-    if srt_path.is_file():
+    if srt_path is not None and srt_path.is_file():
         try:
             cues = _parse_srt_cues(srt_path.read_text(encoding="utf-8"))
         except OSError as exc:
             raise VideoRenderError(f"burn: cannot read SRT at {srt_path}: {exc}") from exc
+
+    secondary_cues: list[tuple[float, float, str]] = []
+    if secondary_srt_path is not None and secondary_srt_path.is_file():
+        try:
+            secondary_cues = _parse_srt_cues(
+                secondary_srt_path.read_text(encoding="utf-8")
+            )
+        except OSError as exc:
+            # Non-fatal: primary still burns. Log and skip the secondary
+            # layer rather than failing the whole subtitles stage.
+            logger.warning(
+                "burn: cannot read secondary SRT at %s: %s — skipping",
+                secondary_srt_path,
+                exc,
+            )
 
     cmd = [
         "ffmpeg",
@@ -962,8 +1026,11 @@ def burn_subtitles(
         "-i",
         str(concat_path),
     ]
-    if cues:
-        cmd += ["-vf", _build_drawtext_chain(cues, subtitle_style)]
+    if cues or secondary_cues:
+        cmd += [
+            "-vf",
+            _build_drawtext_chain(cues, subtitle_style, secondary_cues or None),
+        ]
     cmd += [
         "-c:v",
         VIDEO_CODEC,
@@ -994,6 +1061,7 @@ def render(
     output_path: Path,
     srt_path: Path | None,
     scratch_dir: Path,
+    secondary_srt_path: Path | None = None,
     stabilize: bool = True,
     transitions_enabled: bool = True,
     tracking_by_asset: dict[int, dict[str, Any]] | None = None,
@@ -1068,7 +1136,12 @@ def render(
     # ≥2 cuts; a single-cut plan still goes through the demuxer copy
     # path automatically.
     list_path = intermediate_dir / "concat.txt"
-    concat_path = intermediate_dir / "concat.mp4" if srt_path is not None else output_path
+    # Burn pass needs an intermediate concat output if EITHER subtitle
+    # layer is going to be added. Without that, the burn step would try
+    # to read and write the same path. v0.18 widened this from
+    # primary-only to (primary OR secondary).
+    will_burn = srt_path is not None or secondary_srt_path is not None
+    concat_path = intermediate_dir / "concat.mp4" if will_burn else output_path
     # Hand the xfade lists to ``concat_segments`` only when the user
     # actually asked for transitions; passing ``transitions=None`` makes
     # the helper fall through to the plain concat-demuxer ``-c copy``
@@ -1094,18 +1167,32 @@ def render(
         on_progress("concat", 1, 1)
 
     used_subs = False
-    if srt_path is not None and srt_path.is_file() and srt_path.stat().st_size > 0:
+    has_primary_srt = (
+        srt_path is not None and srt_path.is_file() and srt_path.stat().st_size > 0
+    )
+    has_secondary_srt = (
+        secondary_srt_path is not None
+        and secondary_srt_path.is_file()
+        and secondary_srt_path.stat().st_size > 0
+    )
+    if has_primary_srt or has_secondary_srt:
+        # When only the secondary track has cues, pass srt_path=None so
+        # ``burn_subtitles`` parses an empty primary cue list and emits
+        # just the secondary drawtext layer.
         burn_subtitles(
             concat_path,
-            srt_path,
+            srt_path if has_primary_srt else None,
             output_path,
             target_aspect,
             subtitle_style=subtitle_style,
+            secondary_srt_path=secondary_srt_path if has_secondary_srt else None,
         )
         used_subs = True
-    elif srt_path is not None:
-        # No subtitle file produced (transcript-less project); fall back
-        # to copying the concat output to the final path.
+    elif will_burn:
+        # Caller asked for subtitles but neither SRT exists on disk
+        # (transcript-less project, or translation never ran). Fall
+        # back to copying the concat output to the final path so the
+        # mp4 is still delivered.
         if concat_path != output_path:
             output_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(concat_path, output_path)

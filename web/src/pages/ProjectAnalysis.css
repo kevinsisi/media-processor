@@ -518,6 +518,27 @@
   gap: var(--space-3);
 }
 
+/* v0.18 — secondary-language subtitle (Whisper translate) toggle. Sits
+   under the transcript editor block; chip on the left, button on the
+   right so the layout matches asset-card__transcript-toggle. */
+.secondary-subtitle-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}
+
+.secondary-subtitle-chip {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  padding: 2px 8px;
+  border: 1px solid var(--ink-line);
+  color: var(--text-secondary);
+  border-radius: 999px;
+}
+
 .transcript-summary {
   font-family: var(--font-mono);
   font-size: var(--t-xs);

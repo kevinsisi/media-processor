@@ -583,4 +583,61 @@ async def _dispatch(
     raise ValueError(f"unknown step: {step}")
 
 
-__all__ = ["VALID_STEPS", "run_pipeline"]
+# ---------- v0.18 — secondary-language subtitle (Whisper translate) ----------
+
+
+SUPPORTED_SECONDARY_LANGS: tuple[str, ...] = ("en",)
+
+
+async def run_translate_subtitle(asset_id: int, *, lang: str = "en") -> dict[str, Any]:
+    """Run Whisper task="translate" for ``asset_id`` and persist the result.
+
+    Writes ``Asset.subtitle_secondary_lang`` + ``subtitle_secondary_segments_json``.
+    Returns ``{"asset_id", "lang", "segment_count", "model"}`` — the API
+    polls the asset row directly so this is just for RQ's result store.
+
+    Re-runs overwrite any existing translation (no force flag — the user
+    triggered the endpoint expressly so they want a fresh run).
+    """
+    if lang not in SUPPORTED_SECONDARY_LANGS:
+        raise ValueError(
+            f"unsupported secondary subtitle lang: {lang!r}; "
+            f"supported: {SUPPORTED_SECONDARY_LANGS}"
+        )
+
+    async with async_session_maker() as session:
+        asset = await session.get(Asset, asset_id)
+        if asset is None:
+            raise RuntimeError(f"asset {asset_id} not found")
+        media_path = Path(asset.file_path)
+
+    result = await asyncio.to_thread(whisper_stt.translate, media_path, target_lang=lang)
+    segments_json = [
+        {"idx": s.idx, "start_ms": s.start_ms, "end_ms": s.end_ms, "text": s.text}
+        for s in result.segments
+    ]
+
+    async with async_session_maker() as session:
+        asset = await session.get(Asset, asset_id)
+        if asset is None:
+            raise RuntimeError(f"asset {asset_id} not found")
+        asset.subtitle_secondary_lang = lang
+        asset.subtitle_secondary_segments_json = segments_json
+        await session.commit()
+
+    logger.info(
+        "translate_subtitle: asset %d → lang=%s segments=%d model=%s",
+        asset_id,
+        lang,
+        len(segments_json),
+        result.model,
+    )
+    return {
+        "asset_id": asset_id,
+        "lang": lang,
+        "segment_count": len(segments_json),
+        "model": result.model,
+    }
+
+
+__all__ = ["SUPPORTED_SECONDARY_LANGS", "VALID_STEPS", "run_pipeline", "run_translate_subtitle"]

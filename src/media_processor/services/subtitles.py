@@ -19,6 +19,12 @@ MAX_LINE_CHARS = 12
 MAX_LINES = 2
 MIN_DISPLAY_MS = 700
 
+# v0.18 — secondary-language cues use looser per-line caps because
+# English is wider per character than zh-Hant; matching the primary
+# 12-char cap would force premature line-wraps and overflow vertically.
+SECONDARY_MAX_LINE_CHARS = 28
+SECONDARY_MAX_LINES = 2
+
 # M6.3 introduced xfade transitions between adjacent cuts: each pair
 # overlaps by ``video_renderer.TRANSITION_DURATION_S`` on the rendered
 # timeline, so cut N starts at ``sum(d_i for i<N) - N * TRANSITION_MS``
@@ -66,6 +72,48 @@ def _wrap_text(raw: str) -> str:
     if cursor < len(text) and lines:
         # Trim the last line and append an ellipsis.
         lines[-1] = lines[-1][: max(0, MAX_LINE_CHARS - 1)] + "…"
+    return "\n".join(lines)
+
+
+def _wrap_secondary(raw: str) -> str:
+    """Wrap an English (secondary) cue at word boundaries.
+
+    Different from :func:`_wrap_text`: English needs word-aware breaks
+    or a wrap mid-word looks broken. Falls back to a hard char-count
+    break only when a single word exceeds ``SECONDARY_MAX_LINE_CHARS``.
+    """
+    text = raw.strip().replace("\n", " ")
+    if not text:
+        return ""
+    words = text.split()
+    lines: list[str] = []
+    current = ""
+    for word in words:
+        if len(lines) >= SECONDARY_MAX_LINES:
+            break
+        candidate = (current + " " + word).strip() if current else word
+        if len(candidate) <= SECONDARY_MAX_LINE_CHARS:
+            current = candidate
+            continue
+        if current:
+            lines.append(current)
+            current = ""
+        if len(lines) >= SECONDARY_MAX_LINES:
+            break
+        if len(word) > SECONDARY_MAX_LINE_CHARS:
+            # Pathological single token (URL, token-glob): hard split.
+            current = word[: SECONDARY_MAX_LINE_CHARS - 1] + "…"
+            continue
+        current = word
+    if current and len(lines) < SECONDARY_MAX_LINES:
+        lines.append(current)
+    if not lines:
+        return ""
+    # Ellipsise if there were words we couldn't fit.
+    consumed_chars = sum(len(line) for line in lines) + len(lines) - 1
+    if consumed_chars < len(text) and lines:
+        last = lines[-1]
+        lines[-1] = last[: max(0, SECONDARY_MAX_LINE_CHARS - 1)].rstrip() + "…"
     return "\n".join(lines)
 
 
@@ -256,14 +304,98 @@ def build_srt(plan: CutPlan, transcripts: dict[int, AssetTranscript]) -> str:
     return render_srt(build_cues(plan, transcripts))
 
 
+# ---------- v0.18 — secondary-language subtitle support ----------
+
+
+def build_secondary_cues(
+    plan: CutPlan,
+    secondary_segments_by_asset: dict[int, list[dict[str, Any]]],
+) -> list[SubtitleCue]:
+    """Build timeline-anchored cues from per-asset translated segments.
+
+    Mirrors :func:`build_cues` but reads from
+    ``Asset.subtitle_secondary_segments_json`` instead of
+    ``AssetTranscript.segments_json`` and uses the English-friendly
+    word-boundary wrapper. Cuts whose source asset has no translation
+    contribute zero secondary cues but still advance the timeline cursor
+    (so primary + secondary stay in sync on the rendered timeline).
+    """
+    cues: list[SubtitleCue] = []
+    timeline_cursor = 0
+    sequence = 1
+    is_first = True
+    for cut in sorted(plan.segments, key=lambda s: s.order):
+        cut_duration = cut.asset_end_ms - cut.asset_start_ms
+        if cut_duration <= 0:
+            continue
+        if not is_first:
+            timeline_cursor = max(0, timeline_cursor - TRANSITION_OVERLAP_MS)
+        is_first = False
+        raw_segments = list(secondary_segments_by_asset.get(cut.asset_id) or [])
+        clipped = _clip_transcript_to_cut(raw_segments, cut)
+        for local_start, local_end, text in clipped:
+            tl_start = timeline_cursor + local_start
+            tl_end = timeline_cursor + local_end
+            if tl_end - tl_start < MIN_DISPLAY_MS:
+                tl_end = tl_start + MIN_DISPLAY_MS
+            wrapped = _wrap_secondary(text)
+            if not wrapped:
+                continue
+            cues.append(
+                SubtitleCue(
+                    sequence=sequence,
+                    timeline_start_ms=tl_start,
+                    timeline_end_ms=min(tl_end, timeline_cursor + cut_duration),
+                    text=wrapped,
+                )
+            )
+            sequence += 1
+        timeline_cursor += cut_duration
+
+    cues.sort(key=lambda c: c.timeline_start_ms)
+    return [
+        SubtitleCue(
+            sequence=i + 1,
+            timeline_start_ms=c.timeline_start_ms,
+            timeline_end_ms=c.timeline_end_ms,
+            text=c.text,
+        )
+        for i, c in enumerate(cues)
+    ]
+
+
+def secondary_text_for_cut(
+    cut: CutPlanSegment,
+    asset_secondary_segments: list[dict[str, Any]] | None,
+) -> str | None:
+    """Join all secondary segments overlapping ``cut`` into a single line.
+
+    Used by the orchestrator to populate
+    ``DraftSegment.subtitle_secondary_text`` — a per-cut snapshot the
+    SubtitleEditor can show without re-clipping per cue. Returns
+    ``None`` when no overlapping segments exist (so the column stays
+    NULL and the UI renders nothing).
+    """
+    if not asset_secondary_segments:
+        return None
+    clipped = _clip_transcript_to_cut(list(asset_secondary_segments), cut)
+    if not clipped:
+        return None
+    return " ".join(text for _, _, text in clipped if text).strip() or None
+
+
 __all__ = [
     "MAX_LINE_CHARS",
     "MAX_LINES",
     "MIN_DISPLAY_MS",
+    "SECONDARY_MAX_LINES",
+    "SECONDARY_MAX_LINE_CHARS",
     "TRANSITION_OVERLAP_MS",
     "SubtitleCue",
     "build_cues",
+    "build_secondary_cues",
     "build_srt",
     "parse_srt",
     "render_srt",
+    "secondary_text_for_cut",
 ]

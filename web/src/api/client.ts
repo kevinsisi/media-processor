@@ -47,6 +47,8 @@ import type {
   TrackingTargetResponse,
   TranscriptOut,
   TranscriptUpsert,
+  TranslateSubtitleRequest,
+  TranslateSubtitleResponse,
   UploadCompleteOut,
   UploadSessionCreate,
   UploadSessionOut,
@@ -320,6 +322,22 @@ export class ApiClient {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
+  }
+
+  // ----- v0.18 — secondary-language subtitle (Whisper translate) -----
+
+  triggerSubtitleTranslate(
+    assetId: number,
+    payload: TranslateSubtitleRequest = {},
+  ): Promise<TranslateSubtitleResponse> {
+    return this.request<TranslateSubtitleResponse>(
+      `/assets/${assetId}/translate-subtitle`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lang: payload.lang ?? "en" }),
+      },
+    );
   }
 
   // ----- v0.17 — tracking-target picker -----

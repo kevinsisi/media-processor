@@ -26,6 +26,8 @@ logger = logging.getLogger(__name__)
 JOB_TIMEOUT_SECONDS = 60 * 60 * 2  # 2 h ceiling for the whole pipeline.
 EDIT_JOB_TIMEOUT_SECONDS = 60 * 60  # 1 h ceiling for the M5 render pipeline.
 ANALYZE_ASSET_FN = "media_processor.workers.analysis_jobs.analyze_asset"
+TRANSLATE_ASSET_FN = "media_processor.workers.analysis_jobs.translate_asset_subtitle"
+TRANSLATE_JOB_TIMEOUT_SECONDS = 60 * 30  # 30 min — single Whisper pass
 RENDER_DRAFT_FN = "media_processor.workers.edit_jobs.render_draft"
 EXPORT_DRAFT_FN = "media_processor.workers.edit_jobs.export_draft"
 EXPORT_JOB_TIMEOUT_SECONDS = 60 * 30  # 30 min — single ffmpeg pass
@@ -58,6 +60,28 @@ def enqueue_asset_analysis(
         asset_id,
         steps if steps is not None else "all",
         force,
+        job.id,
+    )
+    return job.id
+
+
+def enqueue_asset_translate(asset_id: int, *, lang: str = "en") -> str:
+    """Schedule ``translate_asset_subtitle(asset_id, lang=…)`` on the analysis queue.
+
+    Runs on the same worker as STT (shares the loaded faster-whisper
+    model) so we re-use the analysis queue rather than carve out a new
+    one. Returns the RQ job id.
+    """
+    queue = Queue(
+        ANALYSIS_QUEUE,
+        connection=_redis(),
+        default_timeout=TRANSLATE_JOB_TIMEOUT_SECONDS,
+    )
+    job = queue.enqueue(TRANSLATE_ASSET_FN, args=(asset_id,), kwargs={"lang": lang})
+    logger.info(
+        "enqueued translate_asset_subtitle(asset_id=%d, lang=%s) as job %s",
+        asset_id,
+        lang,
         job.id,
     )
     return job.id
