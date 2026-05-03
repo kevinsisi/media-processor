@@ -598,6 +598,22 @@ export class ApiClient {
     );
   }
 
+  // v0.22.1 — re-render an existing draft against the current
+  // project settings without letting the AI re-shuffle segments.
+  // Body shape is shared with rebuildDraftSubtitles since both
+  // endpoints take the same render-flag override.
+  reRenderDraft(
+    draftId: number,
+    payload?: DraftRebuildSubtitlesRequest,
+  ): Promise<DraftDetail> {
+    const init: RequestInit = { method: "POST" };
+    if (payload) {
+      init.headers = { "Content-Type": "application/json" };
+      init.body = JSON.stringify(payload);
+    }
+    return this.request<DraftDetail>(`/drafts/${draftId}/re-render`, init);
+  }
+
   exportDraft(
     draftId: number,
     payload: DraftExportRequest,

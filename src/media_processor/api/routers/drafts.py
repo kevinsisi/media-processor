@@ -893,6 +893,60 @@ async def patch_subtitle(
     return SubtitleCueOut.model_validate(cue)
 
 
+# v0.22.1 — re-render with the current project settings, preserving
+# the existing DraftSegment order + subtitle cues. Functionally a
+# superset of /rebuild-subtitles (same skip-plan + subtitles-from-db
+# flags) but the endpoint name + button copy make the operator's
+# intent explicit: "I tweaked BGM / watermark / transitions / style
+# and want a new render WITHOUT the AI re-shuffling my segments."
+# The body shape is shared with /rebuild-subtitles so the FE doesn't
+# need a separate type.
+@router.post("/{draft_id}/re-render", response_model=DraftDetail)
+async def re_render_draft(
+    draft_id: int,
+    session: SessionDep,
+    payload: DraftRebuildSubtitlesRequest | None = Body(default=None),  # noqa: B008
+) -> DraftDetail:
+    """Re-run the render stages (cut → concat → subtitles → watermark
+    → BGM) against the existing plan, picking up any project-level
+    setting changes (BGM track / watermark / subtitle style /
+    transitions toggle / etc.). Segments + subtitle cues stay
+    verbatim. ``render_flags`` body field overrides the snapshotted
+    toggles (same priority as /rebuild-subtitles + /order)."""
+    stmt = select(Draft).where(Draft.id == draft_id).options(selectinload(Draft.segments))
+    draft = (await session.execute(stmt)).scalar_one_or_none()
+    if draft is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="draft not found"
+        )
+    if not draft.cut_plan_json:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="draft has no plan to re-render against",
+        )
+    draft.status = DraftStatus.PENDING.value
+    draft.progress_steps_json = {}
+    draft.prompt_feedback = None
+    override = payload.render_flags if payload is not None else None
+    flags = _draft_render_flags(draft, override)
+    draft.render_flags_json = flags
+    await session.commit()
+
+    enqueue_project_edit(
+        draft.project_id,
+        draft_id=draft.id,
+        force=True,
+        skip_plan=True,
+        subtitles_from_db=True,
+        transitions=flags["transitions"],
+        stabilize=flags["stabilize"],
+        subtitles=flags["subtitles"],
+        auto_reframe=flags["auto_reframe"],
+    )
+    await session.refresh(draft, attribute_names=["segments"])
+    return serialise_draft_detail(draft)
+
+
 @router.post("/{draft_id}/rebuild-subtitles", response_model=DraftDetail)
 async def rebuild_subtitles(
     draft_id: int,

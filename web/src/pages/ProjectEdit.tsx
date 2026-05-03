@@ -1061,6 +1061,47 @@ export default function ProjectEdit() {
     ],
   );
 
+  // v0.22.1 — re-render the currently selected draft against the
+  // current project settings without letting the AI re-shuffle
+  // segments. Maps to POST /drafts/{id}/re-render. Operator's
+  // toggle state on this page wins via render_flags override (same
+  // priority as reorder + rebuild-subtitles).
+  const handleReRender = useCallback(async () => {
+    if (selectedDraftId === null) return;
+    setTriggering(true);
+    setTriggerError(null);
+    try {
+      const fresh = await apiClient.reRenderDraft(selectedDraftId, {
+        render_flags: {
+          transitions: transitionsOn,
+          stabilize,
+          subtitles: subtitlesOn,
+          auto_reframe: autoReframe,
+        },
+      });
+      // The endpoint resets status to pending + reset progress and
+      // synchronously enqueues the worker. Push the fresh detail
+      // into the polling hook so the status pill flips to 剪輯中
+      // immediately, and refresh the draft list so the chip mirrors.
+      polling.applyDraft(fresh);
+      void refreshDrafts().catch(() => {});
+    } catch (err) {
+      setTriggerError(
+        err instanceof Error ? err.message : String(err ?? "unknown error"),
+      );
+    } finally {
+      setTriggering(false);
+    }
+  }, [
+    selectedDraftId,
+    transitionsOn,
+    stabilize,
+    subtitlesOn,
+    autoReframe,
+    polling,
+    refreshDrafts,
+  ]);
+
   const handleCancel = useCallback(async () => {
     if (selectedDraftId === null) return;
     if (!window.confirm("確定要停止這次剪輯？已跑的時間會丟掉。")) return;
@@ -1319,6 +1360,22 @@ export default function ProjectEdit() {
                     下載字幕
                   </a>
                 )}
+                {/* v0.22.1 — paired re-render buttons. Left preserves
+                   the operator's segment order (only re-runs the
+                   FFmpeg stages with the current settings); right
+                   asks the AI to start over with a fresh plan.
+                   Wording deliberately spells out the OBJECT the
+                   action affects ("片段" vs "渲染") so a glance
+                   tells the operator which one is destructive. */}
+                <button
+                  type="button"
+                  className="cta cta--primary"
+                  onClick={() => void handleReRender()}
+                  disabled={triggering}
+                  title="保留目前片段順序，只用最新的配樂 / 字幕 / 浮水印 / 轉場設定重跑渲染"
+                >
+                  {triggering ? "排隊中…" : "重新渲染"}
+                </button>
                 <button
                   type="button"
                   className="cta"
@@ -1329,15 +1386,15 @@ export default function ProjectEdit() {
                   }
                   title={
                     analysisStatus !== null && !analysisStatus.allDone
-                      ? "等待分析全部完成後即可重新剪輯"
-                      : undefined
+                      ? "等待分析全部完成後即可重新挑選片段"
+                      : "重新讓 AI 從零挑選片段；目前的順序會被覆蓋"
                   }
                 >
                   {triggering
                     ? "排隊中…"
                     : analysisStatus !== null && !analysisStatus.allDone
                       ? `分析中（剩 ${analysisStatus.inFlight} 步驟）`
-                      : `重新剪輯（${durationSec} 秒）`}
+                      : `AI 重新選片段（${durationSec} 秒）`}
                 </button>
               </div>
             </div>
@@ -1445,7 +1502,7 @@ export default function ProjectEdit() {
               onClick={() => void handleStartEdit(true)}
               disabled={triggering}
             >
-              {triggering ? "排隊中…" : "重新剪輯"}
+              {triggering ? "排隊中…" : "AI 重新選片段"}
             </button>
           </div>
         </section>
