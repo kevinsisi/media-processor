@@ -92,9 +92,6 @@ class ProjectDetail(BaseModel):
     subtitle_position: SubtitlePositionLiteral = "bottom"
     subtitle_size: SubtitleSizeLiteral = "medium"
     subtitle_outline_width: SubtitleOutlineWidthLiteral = "thin"
-    # v0.21 — optional COCO-80 subject class the planner biases toward.
-    # ``None`` (default) = 不限; legacy behaviour with no subject filter.
-    subject_class: str | None = None
 
 
 class WatermarkSettingsPatch(BaseModel):
@@ -108,19 +105,6 @@ class WatermarkSettingsPatch(BaseModel):
     position: WatermarkPositionLiteral | None = None
     scale: float | None = Field(default=None, ge=0.02, le=0.5)
     opacity: float | None = Field(default=None, ge=0.0, le=1.0)
-
-
-class SubjectClassPatch(BaseModel):
-    """Body for PATCH /projects/{id}/subject-class.
-
-    ``subject_class`` is the COCO-80 class name (e.g. ``"person"``) the
-    planner should bias toward. Send an explicit ``null`` to clear the
-    setting (= 不限, legacy behaviour). The endpoint validates the value
-    against ``services.object_tracking.COCO80_CLASSES`` so a typo can't
-    silently slip into a column the planner expects to match exactly.
-    """
-
-    subject_class: str | None = Field(default=None, max_length=64)
 
 
 class SubtitleStylePatch(BaseModel):
@@ -592,12 +576,6 @@ class TrackingSummaryOut(BaseModel):
     confidence: float
     frame_count: int
     sampled_frames: int
-    # v0.21 — every COCO class name that YOLO detected on this asset
-    # (deduped). Lets the analysis page show "本片含主角 ✓" / "本片不含主角"
-    # next to the project's configured subject without a second round
-    # trip to the per-asset tracking detail endpoint. Empty list when
-    # tracking_json had no detections at all.
-    class_names: list[str] = Field(default_factory=list)
 
 
 # v0.17 — one entry per detected object class (`tracks` in tracking_json).

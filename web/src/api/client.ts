@@ -39,7 +39,6 @@ import type {
   SegmentVolumeOut,
   SegmentVolumePatch,
   SettingsOut,
-  SubjectClassPatch,
   SubtitleCueOut,
   SubtitleCuePatch,
   SubtitleStylePatch,
@@ -133,23 +132,6 @@ export class ApiClient {
   ): Promise<ProjectDetail> {
     return this.request<ProjectDetail>(
       `/projects/${projectId}/subtitle-style`,
-      {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      },
-    );
-  }
-
-  // v0.21 — patch the project-level subject class. Send ``null`` to
-  // clear (= 不限). Backend validates against COCO-80 and returns the
-  // refreshed ProjectDetail so the UI can sync its local state.
-  patchProjectSubjectClass(
-    projectId: number,
-    payload: SubjectClassPatch,
-  ): Promise<ProjectDetail> {
-    return this.request<ProjectDetail>(
-      `/projects/${projectId}/subject-class`,
       {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },

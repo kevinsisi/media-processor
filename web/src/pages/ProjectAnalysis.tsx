@@ -610,48 +610,6 @@ function ThumbnailGallery({ assetId, filename, thumbnails }: ThumbnailGalleryPro
   );
 }
 
-// v0.21 — small chip shown next to the tracking chip when the project
-// has a subject class configured. Tells the user at a glance whether
-// THIS asset contains the requested subject (drives the auto-trim and
-// priority demotion in edit_planner._assemble_plan).
-interface SubjectCoverageChipProps {
-  subjectClass: string;
-  classNames: string[] | undefined;
-}
-
-function SubjectCoverageChip({
-  subjectClass,
-  classNames,
-}: SubjectCoverageChipProps) {
-  const detected = (classNames ?? []).includes(subjectClass);
-  const subjectLabel =
-    labelForTrackingSubject(subjectClass) || subjectClass;
-  return (
-    <div
-      className={
-        "subject-coverage-chip" +
-        (detected
-          ? " subject-coverage-chip--present"
-          : " subject-coverage-chip--missing")
-      }
-      title={
-        detected
-          ? `本片含主角「${subjectLabel}」，剪輯時會優先採用並裁切到主角實際出現的範圍。`
-          : `本片未偵測到主角「${subjectLabel}」，剪輯時會被排到最後選用。`
-      }
-    >
-      <span className="subject-coverage-chip__icon" aria-hidden>
-        {detected ? "✓" : "—"}
-      </span>
-      <span className="subject-coverage-chip__label">
-        {detected
-          ? `含主角：${subjectLabel}`
-          : `不含主角：${subjectLabel}`}
-      </span>
-    </div>
-  );
-}
-
 interface AssetCardProps {
   asset: AssetAnalysisItem;
   onAnalyze: (assetId: number, force: boolean) => void;
@@ -661,10 +619,6 @@ interface AssetCardProps {
   translating: boolean;
   selected: boolean;
   onToggleSelect: (assetId: number, next: boolean) => void;
-  // v0.21 — project's configured subject class (or null = 不限) so the
-  // card can render a "本片含主角" / "本片不含主角" chip alongside the
-  // existing tracking-summary chip.
-  subjectClass: string | null | undefined;
 }
 
 interface SecondarySubtitleToggleProps {
@@ -726,7 +680,6 @@ function AssetCard({
   translating,
   selected,
   onToggleSelect,
-  subjectClass,
 }: AssetCardProps) {
   const [expanded, setExpanded] = useState(false);
   return (
@@ -832,13 +785,6 @@ function AssetCard({
         <AssetTrackingTarget
           assetId={asset.id}
           thumbnailUrl={asset.thumbnail_urls[0] ?? null}
-        />
-      )}
-
-      {subjectClass && asset.tracking_summary && (
-        <SubjectCoverageChip
-          subjectClass={subjectClass}
-          classNames={asset.tracking_summary.class_names}
         />
       )}
 
@@ -1220,7 +1166,6 @@ export default function ProjectAnalysis() {
             translating={translatingIds.has(asset.id)}
             selected={selectedIds.has(asset.id)}
             onToggleSelect={toggleSelect}
-            subjectClass={project?.subject_class ?? null}
           />
         ))}
       </section>

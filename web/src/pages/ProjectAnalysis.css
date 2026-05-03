@@ -674,36 +674,6 @@
   font-size: 0.95em;
 }
 
-/* ---- v0.21 subject-coverage chip (sits next to tracking-chip) ---- */
-
-.subject-coverage-chip {
-  align-self: flex-start;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  border-radius: 999px;
-  font-size: var(--t-xs);
-  letter-spacing: 0.04em;
-  border: 1px solid var(--ink-line);
-}
-
-.subject-coverage-chip--present {
-  background: rgba(80, 200, 120, 0.14);
-  border-color: rgba(80, 200, 120, 0.55);
-  color: #267e4d;
-}
-
-.subject-coverage-chip--missing {
-  background: rgba(220, 130, 80, 0.10);
-  border-color: rgba(220, 130, 80, 0.45);
-  color: #8a4a1f;
-}
-
-.subject-coverage-chip__icon {
-  font-size: 0.95em;
-}
-
 /* ---- Motion timeline ---- */
 
 .motion-timeline {
