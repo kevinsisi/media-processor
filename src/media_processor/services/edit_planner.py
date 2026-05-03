@@ -225,6 +225,14 @@ def _coerce_legacy_transition(name: str) -> str:
 # ``video_renderer.TRANSITION_DURATION_S`` and the M8.1 subtitle anchor.
 _TRANSITION_OVERLAP_MS: int = 500
 
+# v0.21 — subject-class auto-trim knobs. ``SUBJECT_TOLERANCE_MS`` is the
+# padding added around each detected appearance range before intersecting
+# with the chosen span — a 0.5 s buffer reads more naturally than a hard
+# cut at the exact frame the subject enters / leaves the shot. The
+# minimum kept length after trim is the planner's per-style ``min_span_ms``
+# so a short appearance can't shrink a cut below the renderer's tolerance.
+SUBJECT_TOLERANCE_MS: int = 500
+
 # Prompt-budget caps so very long shoots don't blow the context window.
 MAX_TRANSCRIPT_SEGMENTS_VERBATIM = 60
 TRANSCRIPT_BUCKET_SIZE = 8
@@ -755,6 +763,140 @@ def _parse_asset_score(
     )
 
 
+def _subject_appearance_ranges_ms(
+    tracking_json: Any,
+    subject_class: str,
+) -> list[tuple[int, int]]:
+    """Return contiguous [start_ms, end_ms] windows where ``subject_class``
+    is detected in ``tracking_json``.
+
+    Reads the v0.17 ``tracks`` array preferentially. Falls back to the
+    pre-v0.17 flat ``frames`` shape when ``tracking_json["subject_class"]``
+    matches the requested class — this keeps assets analysed before the
+    multi-track migration usable without a backfill.
+
+    Each YOLO detection lands on a single sampled frame; we widen each
+    detection to the surrounding sample period (1 / fps) and merge
+    contiguous frames so a steady appearance becomes one range rather
+    than 50 of them. Returns an empty list when the class isn't seen.
+    """
+    if not tracking_json or not subject_class:
+        return []
+    if not isinstance(tracking_json, dict):
+        return []
+
+    fps_raw = tracking_json.get("fps")
+    try:
+        fps = float(fps_raw) if fps_raw else 5.0
+    except (TypeError, ValueError):
+        fps = 5.0
+    if fps <= 0:
+        fps = 5.0
+    period_ms = max(1, int(1000 / fps))
+    half_period_ms = max(1, period_ms // 2)
+
+    detection_t_ms: list[int] = []
+
+    tracks = tracking_json.get("tracks") or []
+    if isinstance(tracks, list) and tracks:
+        for track in tracks:
+            if not isinstance(track, dict):
+                continue
+            if track.get("cls_name") != subject_class:
+                continue
+            for f in track.get("frames") or []:
+                if not isinstance(f, dict):
+                    continue
+                try:
+                    detection_t_ms.append(int(f.get("t_ms", 0)))
+                except (TypeError, ValueError):
+                    continue
+
+    # Legacy fallback: pre-v0.17 tracking_json had only the flat ``frames``
+    # array plus a single ``subject_class`` field. Use it only when that
+    # field matches the requested class so we don't accidentally mis-tag
+    # an asset whose dominant class differs from what the user asked for.
+    if not detection_t_ms:
+        legacy_class = tracking_json.get("subject_class")
+        if legacy_class == subject_class:
+            for f in tracking_json.get("frames") or []:
+                if not isinstance(f, dict):
+                    continue
+                try:
+                    detection_t_ms.append(int(f.get("t_ms", 0)))
+                except (TypeError, ValueError):
+                    continue
+
+    if not detection_t_ms:
+        return []
+
+    detection_t_ms.sort()
+    # Merge frames into ranges. A gap larger than 2 sample periods means
+    # the subject left and re-entered — emit two separate ranges.
+    gap_threshold = period_ms * 2
+    ranges: list[tuple[int, int]] = []
+    range_start = max(0, detection_t_ms[0] - half_period_ms)
+    range_end = detection_t_ms[0] + half_period_ms
+    for t in detection_t_ms[1:]:
+        if t - range_end > gap_threshold:
+            ranges.append((range_start, range_end))
+            range_start = max(0, t - half_period_ms)
+            range_end = t + half_period_ms
+        else:
+            range_end = t + half_period_ms
+    ranges.append((range_start, range_end))
+    return ranges
+
+
+def _trim_to_subject_appearance(
+    span: tuple[int, int],
+    appearance_ranges: list[tuple[int, int]],
+    *,
+    tolerance_ms: int = SUBJECT_TOLERANCE_MS,
+    min_span_ms: int,
+) -> tuple[int, int]:
+    """Shrink ``span`` to the bounding box of subject appearances inside it.
+
+    The trim is the intersection of ``span`` with the union of appearance
+    ranges, padded by ``tolerance_ms`` on both sides so a tight cut
+    doesn't clip the subject's first / last frame. Returns the original
+    span unchanged when:
+      * ``appearance_ranges`` is empty (caller's choice — usually means
+        the asset doesn't contain the class at all);
+      * none of the appearance ranges overlap ``span``;
+      * the trimmed window is shorter than ``min_span_ms`` (better to
+        keep the original cut than ship a 200 ms flicker).
+    """
+    start, end = span
+    if end <= start:
+        return span
+    if not appearance_ranges:
+        return span
+    matched: list[tuple[int, int]] = []
+    for r0, r1 in appearance_ranges:
+        if r1 <= r0:
+            continue
+        # Overlap test against the span widened by tolerance — we want to
+        # accept appearances that *bracket* the span as well as ones that
+        # sit inside it.
+        widened_start = start - tolerance_ms
+        widened_end = end + tolerance_ms
+        if min(r1, widened_end) <= max(r0, widened_start):
+            continue
+        matched.append((r0, r1))
+    if not matched:
+        return span
+    # Bounding box of all matched ranges, padded with tolerance, then
+    # clamped back into the original span — never widen, only shrink.
+    new_start = min(r0 for r0, _ in matched) - tolerance_ms
+    new_end = max(r1 for _, r1 in matched) + tolerance_ms
+    new_start = max(start, min(new_start, end))
+    new_end = max(start, min(new_end, end))
+    if new_end - new_start < min_span_ms:
+        return span
+    return new_start, new_end
+
+
 def _bucket_motion_preference(bucket: str) -> str | None:
     """Per-bucket preferred motion class for the rhythm-aware picker.
 
@@ -864,6 +1006,8 @@ def _assemble_plan(
     target_duration_ms: int,
     *,
     style: StylePresetParams = STYLE_PRESET_CUSTOM,
+    subject_class: str | None = None,
+    subject_ranges_by_asset_id: dict[int, list[tuple[int, int]]] | None = None,
 ) -> list[CutPlanSegment]:
     """Local cut-plan assembly with rhythm-aware motion ordering.
 
@@ -882,8 +1026,22 @@ def _assemble_plan(
     The stop threshold accounts for the renderer's xfade overlap so
     the rendered timeline lands at ``target_duration_ms`` rather than
     ``target_duration_ms - (N-1) * 500ms``.
+
+    v0.21 — when ``subject_class`` is set, assets that don't contain the
+    class are demoted to last-resort priority (processed only when the
+    primary picker exhausts the assets that DO contain it). After
+    selection the chosen ``[asset_start_ms, asset_end_ms)`` is shrunk to
+    the subject's appearance range with ``SUBJECT_TOLERANCE_MS`` padding,
+    so a 6 s span becomes the 3 s where the subject is actually on
+    screen rather than the surrounding b-roll.
     """
     scores = _dedup_by_asset(scores)
+    subject_ranges_by_asset_id = subject_ranges_by_asset_id or {}
+    use_subject_filter = bool(subject_class)
+
+    def _has_subject(asset_id: int) -> bool:
+        return bool(subject_ranges_by_asset_id.get(asset_id))
+
     usable = [s for s in scores if s.position != "skip" and s.score >= MIN_KEEP_SCORE]
     if not usable:
         # Loosen: if everything got skipped or scored low, take the best 4
@@ -909,10 +1067,31 @@ def _assemble_plan(
     # long reel that still feels under-curated.
     max_target = int(_effective_target_ms(target_duration_ms, num_chosen=8) * 1.2)
 
-    # ---- Primary pass: bucketed rhythm-aware picker.
-    for bucket in _POSITION_ORDER:
-        candidates = list(by_pos[bucket])
-        position_pref = _bucket_motion_preference(bucket)
+    # v0.21 — when a subject class is configured, partition each bucket
+    # into [present, missing] and process them in two sub-passes so a
+    # missing-subject candidate never crowds out one that contains the
+    # subject. Without a subject filter the legacy flat list is used.
+    def _split_by_subject(
+        candidates: list[_AssetScore],
+    ) -> tuple[list[_AssetScore], list[_AssetScore]]:
+        if not use_subject_filter:
+            return candidates, []
+        present = [c for c in candidates if _has_subject(c.asset_id)]
+        missing = [c for c in candidates if not _has_subject(c.asset_id)]
+        return present, missing
+
+    def _drain_picker(
+        candidates: list[_AssetScore],
+        position_pref: str | None,
+    ) -> None:
+        """Pop the best-ranked candidate until the pool / budget is empty.
+
+        Closes over ``chosen`` / ``chosen_ids`` / ``accumulated`` /
+        ``max_target`` / ``target_duration_ms`` so the body stays
+        identical to the legacy single-list loop. Returns when the
+        accumulated total reaches the xfade-aware stop threshold.
+        """
+        nonlocal accumulated
         while candidates:
             prev_motion = chosen[-1].dominant_motion if chosen else None
             best_idx = max(
@@ -935,9 +1114,25 @@ def _assemble_plan(
             chosen.append(s)
             chosen_ids.add(s.asset_id)
             accumulated += span_dur
-            stop_at = _effective_target_ms(target_duration_ms, num_chosen=len(chosen))
+            stop_at = _effective_target_ms(
+                target_duration_ms, num_chosen=len(chosen)
+            )
             if accumulated >= stop_at:
-                break
+                return
+
+    # ---- Primary pass: bucketed rhythm-aware picker. With a subject
+    # class set, drain present-subject candidates first; only fall
+    # through to missing-subject ones when the present pool is empty
+    # AND we're still under target.
+    for bucket in _POSITION_ORDER:
+        present_candidates, missing_candidates = _split_by_subject(by_pos[bucket])
+        position_pref = _bucket_motion_preference(bucket)
+        _drain_picker(present_candidates, position_pref)
+        stop_at = _effective_target_ms(target_duration_ms, num_chosen=len(chosen))
+        if accumulated >= stop_at:
+            break
+        if missing_candidates:
+            _drain_picker(missing_candidates, position_pref)
         stop_at = _effective_target_ms(target_duration_ms, num_chosen=len(chosen))
         if accumulated >= stop_at:
             break
@@ -958,7 +1153,19 @@ def _assemble_plan(
             (s for s in leftovers if s.position == "skip"),
             key=lambda x: -x.score,
         )
-        for s in [*below, *skips]:
+        # v0.21 — same partition as the primary pass: present-subject
+        # leftovers come first so a low-score asset that contains the
+        # subject ranks above a high-score one that doesn't.
+        ordered_leftovers: list[_AssetScore] = []
+        if use_subject_filter:
+            for pool in (below, skips):
+                present = [s for s in pool if _has_subject(s.asset_id)]
+                missing = [s for s in pool if not _has_subject(s.asset_id)]
+                ordered_leftovers.extend(present)
+                ordered_leftovers.extend(missing)
+        else:
+            ordered_leftovers = [*below, *skips]
+        for s in ordered_leftovers:
             span_dur = s.best_span_ms[1] - s.best_span_ms[0]
             if accumulated + span_dur > max_target and chosen:
                 continue
@@ -997,6 +1204,10 @@ def _assemble_plan(
     # vs static), so the visual jolt mirrors the emotional jolt — but
     # only if the style preset's allowlist permits it (slow / artistic
     # presets that ban circlecrop fall back to the style default).
+    # v0.21 — when a subject_class is set, shrink each chosen span to
+    # the subject's appearance range (with SUBJECT_TOLERANCE_MS padding)
+    # before emitting the segment so the reel keeps the requested
+    # subject on screen instead of the surrounding b-roll.
     out: list[CutPlanSegment] = []
     for i, s in enumerate(chosen):
         next_emotion = chosen[i + 1].dominant_emotion if i + 1 < len(chosen) else None
@@ -1010,6 +1221,14 @@ def _assemble_plan(
         if transition not in style.transition_allowlist:
             transition = style.default_transition
         start, end = extended_spans[i]
+        if use_subject_filter:
+            ranges = subject_ranges_by_asset_id.get(s.asset_id) or []
+            start, end = _trim_to_subject_appearance(
+                (start, end),
+                ranges,
+                tolerance_ms=SUBJECT_TOLERANCE_MS,
+                min_span_ms=style.min_span_ms,
+            )
         out.append(
             CutPlanSegment(
                 order=i,
@@ -1056,6 +1275,13 @@ class _ProjectContext:
     # Gemini prompt so the model can adjust scoring based on what the
     # operator told it last time.
     prior_feedback: str = ""
+    # v0.21 — per-asset subject-appearance ranges for the project's
+    # configured ``subject_class`` (empty when the project has no
+    # subject filter set). Computed at context-load time so the
+    # assembler doesn't need to re-walk tracking_json blobs.
+    subject_ranges_by_asset_id: dict[int, list[tuple[int, int]]] = field(
+        default_factory=dict
+    )
 
 
 async def _load_prior_feedback(session: AsyncSession, project_id: int) -> str:
@@ -1163,6 +1389,20 @@ async def _load_project_context(session: AsyncSession, project_id: int) -> _Proj
 
     prior_feedback = await _load_prior_feedback(session, project_id)
 
+    # v0.21 — precompute appearance ranges for the project's configured
+    # subject class so the assembler can demote / trim without each call
+    # site re-walking the tracking_json blob. Empty dict when the project
+    # has no subject filter, when no asset has tracking_json, or when no
+    # tracking row contains the requested class.
+    subject_ranges_by_asset_id: dict[int, list[tuple[int, int]]] = {}
+    if project.subject_class:
+        for a in assets:
+            ranges = _subject_appearance_ranges_ms(
+                a.tracking_json, project.subject_class
+            )
+            if ranges:
+                subject_ranges_by_asset_id[a.id] = ranges
+
     return _ProjectContext(
         project=project,
         script_body=script_body,
@@ -1171,6 +1411,7 @@ async def _load_project_context(session: AsyncSession, project_id: int) -> _Proj
         coverage=coverage,
         asset_bounds={a.id: int(a.duration_ms) for a in assets},
         prior_feedback=prior_feedback,
+        subject_ranges_by_asset_id=subject_ranges_by_asset_id,
     )
 
 
@@ -1355,19 +1596,30 @@ async def plan(
             f"(quota={quota_failures}, invalid={invalid_failures}, other={other_failures})"
         )
 
-    cut_segments = _assemble_plan(scores, target_duration_ms, style=style)
+    cut_segments = _assemble_plan(
+        scores,
+        target_duration_ms,
+        style=style,
+        subject_class=ctx.project.subject_class,
+        subject_ranges_by_asset_id=ctx.subject_ranges_by_asset_id,
+    )
     if not cut_segments:
         raise EditPlanInvalidError(
             f"assembly produced no segments from {len(scores)} scored assets "
             f"(all skipped or below threshold)"
         )
 
+    subject_label = ctx.project.subject_class or "any"
+    subject_present_count = sum(
+        1 for c in cut_segments if c.asset_id in ctx.subject_ranges_by_asset_id
+    )
     notes = (
         f"per-asset fanout: {len(scores)}/{len(results)} assets scored "
         f"(quota_fails={quota_failures}, invalid={invalid_failures}); "
         f"chose {len(cut_segments)} cuts totalling "
         f"{sum(s.asset_end_ms - s.asset_start_ms for s in cut_segments)}ms; "
-        f"style={style.name}"
+        f"style={style.name}; subject={subject_label} "
+        f"(present_in={subject_present_count}/{len(cut_segments)})"
     )
     logger.info("edit-planner: %s", notes)
 

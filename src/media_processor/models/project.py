@@ -134,6 +134,13 @@ class Project(Base):
         default="thin",
         server_default="thin",
     )
+    # v0.21 — optional "subject class" the planner should bias toward.
+    # ``None`` = 不限 (legacy behaviour, no subject filtering). When set
+    # to a COCO-80 class name (e.g. ``"person"``) the edit_planner shrinks
+    # each chosen segment's [asset_start_ms, asset_end_ms) window to where
+    # the subject actually appears (with a ±500ms tolerance) and demotes
+    # assets that don't contain the class to last-resort priority.
+    subject_class: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

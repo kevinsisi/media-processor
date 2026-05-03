@@ -484,8 +484,8 @@ def test_assemble_plan_tops_up_to_target() -> None:
     """
     from media_processor.services.edit_planner import (
         TRANSITION_DEFAULT,
-        _AssetScore,
         _assemble_plan,
+        _AssetScore,
     )
 
     scores: list[_AssetScore] = []
@@ -532,3 +532,292 @@ def test_serialise_plan_roundtrip() -> None:
     data = edit_planner.serialise_plan(plan)
     assert data["schema_version"] == SCHEMA_VERSION
     assert data["segments"][0]["asset_id"] == 42
+
+
+# ---------- v0.21 — subject_class auto-trim + demotion ----------
+
+
+def test_subject_appearance_ranges_reads_v017_tracks_shape() -> None:
+    """``_subject_appearance_ranges_ms`` should pull ``person`` frames out
+    of the v0.17 ``tracks`` array and merge them into contiguous ranges,
+    ignoring tracks of other classes.
+    """
+    from media_processor.services.edit_planner import (
+        _subject_appearance_ranges_ms,
+    )
+
+    tracking_json = {
+        "subject_class": "car",  # dominant track
+        "fps": 5.0,
+        "tracks": [
+            {
+                "object_index": 0,
+                "cls_name": "car",
+                "frames": [
+                    {"t_ms": 0}, {"t_ms": 200}, {"t_ms": 400}, {"t_ms": 600},
+                ],
+            },
+            {
+                "object_index": 1,
+                "cls_name": "person",
+                "frames": [
+                    # Person appears 1.0–1.4s and again 3.0–3.4s — two
+                    # distinct ranges with a gap larger than the merge
+                    # threshold (2 sample periods = 400ms).
+                    {"t_ms": 1000}, {"t_ms": 1200}, {"t_ms": 1400},
+                    {"t_ms": 3000}, {"t_ms": 3200}, {"t_ms": 3400},
+                ],
+            },
+        ],
+    }
+    ranges = _subject_appearance_ranges_ms(tracking_json, "person")
+    assert len(ranges) == 2
+    # Each range covers the detection frames widened by the half-period.
+    assert ranges[0][0] <= 1000 and ranges[0][1] >= 1400
+    assert ranges[1][0] <= 3000 and ranges[1][1] >= 3400
+    # And the two ranges don't overlap.
+    assert ranges[0][1] < ranges[1][0]
+
+
+def test_subject_appearance_ranges_falls_back_to_legacy_frames() -> None:
+    """Pre-v0.17 tracking_json has only flat ``frames`` + a single
+    ``subject_class`` field. The helper should still return ranges when
+    that legacy class matches the requested one, so analysis runs from
+    before the multi-track migration don't need a backfill.
+    """
+    from media_processor.services.edit_planner import (
+        _subject_appearance_ranges_ms,
+    )
+
+    legacy = {
+        "subject_class": "dog",
+        "fps": 5.0,
+        "frames": [{"t_ms": 0}, {"t_ms": 200}, {"t_ms": 400}],
+        # No "tracks" key at all — old format.
+    }
+    ranges = _subject_appearance_ranges_ms(legacy, "dog")
+    assert len(ranges) == 1
+    assert ranges[0][0] <= 0
+    assert ranges[0][1] >= 400
+    # Different class request → empty.
+    assert _subject_appearance_ranges_ms(legacy, "person") == []
+
+
+def test_subject_appearance_ranges_returns_empty_when_class_absent() -> None:
+    from media_processor.services.edit_planner import (
+        _subject_appearance_ranges_ms,
+    )
+
+    blob = {
+        "subject_class": "car",
+        "fps": 5.0,
+        "tracks": [
+            {"cls_name": "car", "frames": [{"t_ms": 0}, {"t_ms": 200}]},
+        ],
+    }
+    assert _subject_appearance_ranges_ms(blob, "person") == []
+    assert _subject_appearance_ranges_ms(None, "person") == []
+    assert _subject_appearance_ranges_ms({}, "person") == []
+
+
+def test_trim_to_subject_appearance_shrinks_to_intersection() -> None:
+    """When the subject appears for 2.0–4.0s inside a 0–6s span, the trim
+    should snap to roughly [1.5s, 4.5s] (range ± SUBJECT_TOLERANCE_MS),
+    clamped to the span bounds.
+    """
+    from media_processor.services.edit_planner import (
+        SUBJECT_TOLERANCE_MS,
+        _trim_to_subject_appearance,
+    )
+
+    span = (0, 6_000)
+    appearance = [(2_000, 4_000)]
+    trimmed = _trim_to_subject_appearance(
+        span,
+        appearance,
+        tolerance_ms=SUBJECT_TOLERANCE_MS,
+        min_span_ms=1_500,
+    )
+    new_start, new_end = trimmed
+    assert new_start >= 0
+    assert new_end <= 6_000
+    # Tolerance is 500ms, so the trim widens [2000, 4000] to [1500, 4500].
+    assert new_start <= 1_500
+    assert new_end >= 4_500
+    assert new_end - new_start < 6_000  # actually shrank
+
+
+def test_trim_to_subject_appearance_keeps_span_when_below_min() -> None:
+    """If the trimmed result would be shorter than min_span_ms, keep the
+    original — better to ship a slightly off-subject cut than a 200ms
+    flicker.
+    """
+    from media_processor.services.edit_planner import (
+        SUBJECT_TOLERANCE_MS,
+        _trim_to_subject_appearance,
+    )
+
+    span = (0, 6_000)
+    # Subject blinks for 100ms only — way under min_span.
+    appearance = [(2_950, 3_050)]
+    trimmed = _trim_to_subject_appearance(
+        span,
+        appearance,
+        tolerance_ms=SUBJECT_TOLERANCE_MS,
+        min_span_ms=1_500,
+    )
+    # 100ms + 2*500ms tolerance = 1100ms < min_span(1500ms) → keep span.
+    assert trimmed == span
+
+
+def test_trim_to_subject_appearance_returns_span_when_no_overlap() -> None:
+    from media_processor.services.edit_planner import (
+        _trim_to_subject_appearance,
+    )
+
+    span = (0, 6_000)
+    # Subject only appears far outside the chosen span (8–10s).
+    appearance = [(8_000, 10_000)]
+    trimmed = _trim_to_subject_appearance(
+        span,
+        appearance,
+        tolerance_ms=500,
+        min_span_ms=1_500,
+    )
+    assert trimmed == span
+
+
+def test_assemble_plan_demotes_assets_without_subject() -> None:
+    """When the subject class is set, an asset that contains the subject
+    must be picked before one with a higher raw score that doesn't —
+    even within the same position bucket. Soft demotion: if the present
+    pool runs out and we're still under target, missing-subject assets
+    fill in.
+    """
+    from media_processor.services.edit_planner import (
+        TRANSITION_DEFAULT,
+        _assemble_plan,
+        _AssetScore,
+    )
+
+    scores = [
+        # Higher raw score but no subject — should NOT come first.
+        _AssetScore(
+            asset_id=100,
+            score=95,
+            position="opening",
+            best_span_ms=(0, 3_000),
+            source_kind="improv",
+            reason="no-subject high-score",
+            dominant_motion="static",
+            transition_to_next=TRANSITION_DEFAULT,
+            asset_duration_ms=10_000,
+        ),
+        # Lower raw score but contains the subject — must win the bucket.
+        _AssetScore(
+            asset_id=200,
+            score=70,
+            position="opening",
+            best_span_ms=(0, 3_000),
+            source_kind="improv",
+            reason="subject-present lower-score",
+            dominant_motion="static",
+            transition_to_next=TRANSITION_DEFAULT,
+            asset_duration_ms=10_000,
+        ),
+    ]
+    subject_ranges = {200: [(500, 2_500)]}
+    cuts = _assemble_plan(
+        scores,
+        target_duration_ms=3_000,
+        subject_class="person",
+        subject_ranges_by_asset_id=subject_ranges,
+    )
+    # The subject-present asset must be included before the high-score
+    # missing-subject one. Both may be picked (target = 3s), but the
+    # ordering matters — present-subject opens.
+    assert len(cuts) >= 1
+    assert cuts[0].asset_id == 200
+
+
+def test_assemble_plan_trims_chosen_span_to_subject_range() -> None:
+    """End-to-end: with a subject configured, the materialised
+    CutPlanSegment must carry a span shrunk to the appearance range
+    (± tolerance), not the full original best_span_ms.
+    """
+    from media_processor.services.edit_planner import (
+        TRANSITION_DEFAULT,
+        _assemble_plan,
+        _AssetScore,
+    )
+
+    scores = [
+        _AssetScore(
+            asset_id=42,
+            score=90,
+            position="middle",
+            best_span_ms=(0, 6_000),
+            source_kind="improv",
+            reason="trim me",
+            dominant_motion="static",
+            transition_to_next=TRANSITION_DEFAULT,
+            asset_duration_ms=10_000,
+        ),
+    ]
+    subject_ranges = {42: [(2_000, 4_000)]}
+    cuts = _assemble_plan(
+        scores,
+        target_duration_ms=2_000,
+        subject_class="person",
+        subject_ranges_by_asset_id=subject_ranges,
+    )
+    assert len(cuts) == 1
+    seg = cuts[0]
+    # The trim should snap the original 0..6000 window down to roughly
+    # 1500..4500. We allow ±tolerance wiggle but it must clearly shrink.
+    assert seg.asset_end_ms - seg.asset_start_ms < 6_000
+    assert seg.asset_start_ms >= 0
+    assert seg.asset_end_ms <= 6_000
+    # Subject 2000..4000 with 500ms tolerance → start ≤ 1500, end ≥ 4500.
+    assert seg.asset_start_ms <= 1_500
+    assert seg.asset_end_ms >= 4_500
+
+
+def test_assemble_plan_no_subject_keeps_legacy_behaviour() -> None:
+    """Sanity: with subject_class=None the assembler must behave exactly
+    like the pre-v0.21 flow — no trim, no demotion. Same input as the
+    demotion test; without a subject_class the higher-score asset wins.
+    """
+    from media_processor.services.edit_planner import (
+        TRANSITION_DEFAULT,
+        _assemble_plan,
+        _AssetScore,
+    )
+
+    scores = [
+        _AssetScore(
+            asset_id=100,
+            score=95,
+            position="opening",
+            best_span_ms=(0, 3_000),
+            source_kind="improv",
+            reason="high",
+            dominant_motion="static",
+            transition_to_next=TRANSITION_DEFAULT,
+            asset_duration_ms=10_000,
+        ),
+        _AssetScore(
+            asset_id=200,
+            score=70,
+            position="opening",
+            best_span_ms=(0, 3_000),
+            source_kind="improv",
+            reason="low",
+            dominant_motion="static",
+            transition_to_next=TRANSITION_DEFAULT,
+            asset_duration_ms=10_000,
+        ),
+    ]
+    cuts = _assemble_plan(scores, target_duration_ms=3_000)
+    # Without a subject filter, raw score wins.
+    assert cuts[0].asset_id == 100

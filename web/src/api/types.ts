@@ -80,6 +80,15 @@ export interface ProjectDetail {
   subtitle_position: SubtitlePosition;
   subtitle_size: SubtitleSize;
   subtitle_outline_width: SubtitleOutlineWidth;
+  // v0.21 — optional COCO-80 subject class the planner biases toward.
+  // ``null`` = 不限 (no subject filter, legacy behaviour).
+  subject_class?: string | null;
+}
+
+export interface SubjectClassPatch {
+  // Send ``null`` to clear (= 不限). The backend validates non-null
+  // values against the COCO-80 vocabulary.
+  subject_class: string | null;
 }
 
 // v0.18 — PATCH /projects/{id}/watermark body. Every field optional so
@@ -516,6 +525,11 @@ export interface TrackingSummaryOut {
   confidence: number;
   frame_count: number;
   sampled_frames: number;
+  // v0.21 — every COCO class name YOLO detected on this asset (deduped).
+  // Used by the analysis page to highlight which clips contain the
+  // project's configured subject_class. Empty list when tracking ran
+  // but no detections were kept.
+  class_names?: string[];
 }
 
 // v0.17 — per-class object tracks for the picker UI on the analysis page.

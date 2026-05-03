@@ -32,6 +32,7 @@ from media_processor.api.schemas import (
     ScriptOut,
     ScriptUpsert,
     SecondarySubtitleSummaryOut,
+    SubjectClassPatch,
     SubtitleStylePatch,
     TrackingSummaryOut,
     TranscriptSummaryOut,
@@ -148,6 +149,7 @@ def _project_detail(
         subtitle_position=project.subtitle_position,  # type: ignore[arg-type]
         subtitle_size=project.subtitle_size,  # type: ignore[arg-type]
         subtitle_outline_width=project.subtitle_outline_width,  # type: ignore[arg-type]
+        subject_class=project.subject_class,
     )
 
 
@@ -598,6 +600,49 @@ async def patch_project_subtitle_style(
     )
 
 
+# v0.21 — subject-class PATCH. Validates against the COCO-80 vocabulary
+# from object_tracking so a typo can't slip into a column the planner
+# reads with strict equality. Send ``subject_class=null`` to clear.
+@router.patch("/{project_id}/subject-class", response_model=ProjectDetail)
+async def patch_project_subject_class(
+    project_id: int,
+    payload: SubjectClassPatch,
+    session: SessionDep,
+) -> ProjectDetail:
+    project = await session.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
+    new_value = payload.subject_class
+    if new_value is not None:
+        # Lazy import — keeps the api container free of the YOLO weight path
+        # construction at module load time.
+        from media_processor.services.object_tracking import COCO80_CLASSES
+
+        if new_value not in COCO80_CLASSES:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"subject_class must be one of the COCO-80 classes; "
+                    f"got {new_value!r}"
+                ),
+            )
+    project.subject_class = new_value
+    await session.commit()
+    await session.refresh(project)
+
+    asset_count = await session.scalar(
+        select(func.count(Asset.id)).where(Asset.project_id == project_id)
+    )
+    draft_count = await session.scalar(
+        select(func.count(Draft.id)).where(Draft.project_id == project_id)
+    )
+    return _project_detail(
+        project,
+        asset_count=int(asset_count or 0),
+        draft_count=int(draft_count or 0),
+    )
+
+
 @router.get("/{project_id}/script", response_model=ScriptOut)
 async def get_project_script(
     project_id: int,
@@ -755,11 +800,32 @@ def _tracking_summary_for(asset: Asset) -> TrackingSummaryOut | None:
     if not isinstance(blob, dict):
         return None
     frames = blob.get("frames")
+    # v0.21 — collect all COCO class names YOLO saw on this asset so the
+    # analysis page can highlight which clips contain the project's
+    # configured subject. Read the v0.17 ``tracks`` array preferentially;
+    # fall back to the legacy single ``subject_class`` field for assets
+    # analysed before the multi-track migration.
+    class_names: list[str] = []
+    seen: set[str] = set()
+    tracks = blob.get("tracks") or []
+    if isinstance(tracks, list):
+        for t in tracks:
+            if not isinstance(t, dict):
+                continue
+            name = t.get("cls_name")
+            if isinstance(name, str) and name and name not in seen:
+                class_names.append(name)
+                seen.add(name)
+    if not class_names:
+        legacy = blob.get("subject_class")
+        if isinstance(legacy, str) and legacy:
+            class_names.append(legacy)
     return TrackingSummaryOut(
         subject_class=str(blob.get("subject_class") or ""),
         confidence=float(blob.get("confidence") or 0.0),
         frame_count=len(frames) if isinstance(frames, list) else 0,
         sampled_frames=int(blob.get("sampled_frames") or 0),
+        class_names=class_names,
     )
 
 

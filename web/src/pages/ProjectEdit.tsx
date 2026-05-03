@@ -5,9 +5,11 @@ import BgmSourcePicker from "../components/BgmSourcePicker";
 import type { BgmSource } from "../components/BgmSourcePicker";
 import DraggableTimeline from "../components/DraggableTimeline";
 import ExportSheet from "../components/ExportSheet";
+import SubjectClassPicker from "../components/SubjectClassPicker";
 import SubtitleEditor from "../components/SubtitleEditor";
 import SubtitleStyleEditor from "../components/SubtitleStyleEditor";
 import WatermarkPicker from "../components/WatermarkPicker";
+import { TRACKING_SUBJECT_LABELS } from "../i18n/tags";
 import type {
   ClipStylePreset,
   DraftComment,
@@ -527,6 +529,7 @@ function formatBasicSummary(opts: {
   subtitlesOn: boolean;
   transitionsOn: boolean;
   autoReframe: boolean;
+  subjectClass: string | null | undefined;
 }): string {
   const flags: string[] = [];
   if (opts.subtitlesOn) flags.push("字幕");
@@ -534,7 +537,13 @@ function formatBasicSummary(opts: {
   if (opts.autoReframe) flags.push("自動構圖");
   if (opts.stabilize) flags.push("防抖");
   const flagText = flags.length > 0 ? flags.join(" / ") : "純硬切";
-  return `${opts.durationSec} 秒 · ${STYLE_PRESET_LABELS[opts.stylePreset]} · ${flagText}`;
+  // v0.21 — surface the configured subject class in the collapsed
+  // summary so the user can see at a glance whether subject-trim is
+  // active without expanding the section.
+  const subjectLabel = opts.subjectClass
+    ? `🎯 ${TRACKING_SUBJECT_LABELS[opts.subjectClass] ?? opts.subjectClass}`
+    : "🎯 不限主角";
+  return `${opts.durationSec} 秒 · ${STYLE_PRESET_LABELS[opts.stylePreset]} · ${subjectLabel} · ${flagText}`;
 }
 
 function formatBgmSummary(opts: {
@@ -658,6 +667,7 @@ function EditSettingsBlock(props: EditSettingsBlockProps) {
     subtitlesOn: props.subtitlesOn,
     transitionsOn: props.transitionsOn,
     autoReframe: props.autoReframe,
+    subjectClass: props.project?.subject_class ?? null,
   });
   const bgmSummary = formatBgmSummary({
     source: props.currentBgmSource,
@@ -676,6 +686,11 @@ function EditSettingsBlock(props: EditSettingsBlockProps) {
         <StylePresetPicker
           value={props.stylePreset}
           onChange={props.setStylePreset}
+          disabled={props.triggering}
+        />
+        <SubjectClassPicker
+          project={props.project}
+          onProjectUpdated={props.setProject}
           disabled={props.triggering}
         />
         <RenderOptions
