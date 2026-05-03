@@ -711,6 +711,18 @@ async def run_render(
                     update_state(EditStep.SUBTITLES.value, "done"), loop
                 ).result(timeout=10)
 
+    # v0.18 — pull the user-customised subtitle style off the project row.
+    # ``getattr(..., default)`` keeps the orchestrator runnable on a host
+    # whose DB hasn't applied the 0015 migration yet — those columns
+    # default to the historic look anyway.
+    subtitle_style = video_renderer.SubtitleStyle(
+        font=getattr(project, "subtitle_font", None) or "noto_sans_tc",
+        color=getattr(project, "subtitle_color", None) or "#ffffff",
+        outline_color=getattr(project, "subtitle_outline_color", None) or "#000000",
+        position=getattr(project, "subtitle_position", None) or "bottom",
+        size=getattr(project, "subtitle_size", None) or "medium",
+        outline_width=getattr(project, "subtitle_outline_width", None) or "thin",
+    )
     try:
         result = await asyncio.to_thread(
             video_renderer.render,
@@ -726,6 +738,7 @@ async def run_render(
             tracking_by_asset=tracking_by_asset if auto_reframe_enabled else None,
             tracking_target_by_asset=tracking_target_by_asset if auto_reframe_enabled else None,
             custom_roi_by_asset=custom_roi_by_asset if auto_reframe_enabled else None,
+            subtitle_style=subtitle_style if subtitles_enabled else None,
             on_progress=_sync_progress,
         )
     except Exception as exc:  # noqa: BLE001 — record + mark failed.

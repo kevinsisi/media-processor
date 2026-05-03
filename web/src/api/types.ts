@@ -29,6 +29,26 @@ export type WatermarkPosition =
   | "bottom-center"
   | "bottom-right";
 
+// v0.18 — subtitle style customisation. Keep these unions in sync with
+// services.video_renderer.SUBTITLE_*_CHOICES and the matching pydantic
+// Literal types in api/schemas.py.
+export type SubtitleFont =
+  | "noto_sans_tc"
+  | "noto_sans_tc_bold"
+  | "noto_serif_tc";
+export type SubtitlePosition = "top" | "middle" | "bottom";
+export type SubtitleSize = "small" | "medium" | "large";
+export type SubtitleOutlineWidth = "none" | "thin" | "thick";
+
+export interface SubtitleStylePatch {
+  subtitle_font?: SubtitleFont;
+  subtitle_color?: string;
+  subtitle_outline_color?: string;
+  subtitle_position?: SubtitlePosition;
+  subtitle_size?: SubtitleSize;
+  subtitle_outline_width?: SubtitleOutlineWidth;
+}
+
 export interface ProjectDetail {
   id: number;
   name: string;
@@ -53,6 +73,13 @@ export interface ProjectDetail {
   watermark_position?: WatermarkPosition;
   watermark_scale?: number;
   watermark_opacity?: number;
+  // v0.18 — subtitle style. Defaults match the historic burn-in look.
+  subtitle_font: SubtitleFont;
+  subtitle_color: string;
+  subtitle_outline_color: string;
+  subtitle_position: SubtitlePosition;
+  subtitle_size: SubtitleSize;
+  subtitle_outline_width: SubtitleOutlineWidth;
 }
 
 // v0.18 — PATCH /projects/{id}/watermark body. Every field optional so

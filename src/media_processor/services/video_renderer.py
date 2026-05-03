@@ -100,6 +100,69 @@ SUBTITLE_FONT_SIZE: int = 42
 SUBTITLE_BORDER_W: int = 2
 SUBTITLE_BOTTOM_OFFSET_PX: int = 80  # y=h-N from frame bottom
 
+# v0.18 — user-customisable subtitle style. The frontend picks one entry
+# from each map; the renderer hands the chosen pixel value into the
+# drawtext filter. Defaults are baked here so a project that hasn't
+# been touched (or a stale CutPlan re-render) keeps the historic look.
+#
+# Font keys are stable strings stored on Project.subtitle_font; the path
+# is the file the worker container ships (fonts-noto-cjk apt package
+# under docker/worker.Dockerfile). New entries here MUST also exist on
+# disk inside the worker image or drawtext silently falls back to its
+# own default and CJK glyphs render as tofu.
+SUBTITLE_FONT_CHOICES: dict[str, str] = {
+    "noto_sans_tc": "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "noto_sans_tc_bold": "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+    "noto_serif_tc": "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc",
+}
+SUBTITLE_SIZE_CHOICES: dict[str, int] = {
+    "small": 32,
+    "medium": 42,
+    "large": 56,
+}
+SUBTITLE_OUTLINE_WIDTH_CHOICES: dict[str, int] = {
+    "none": 0,
+    "thin": 2,
+    "thick": 5,
+}
+# Position is computed at filter-build time off the canvas height so the
+# y-expression stays correct across 9:16 / 4:5 / 1:1. ``middle`` centres
+# vertically; ``top`` / ``bottom`` anchor with a small inset so the text
+# doesn't kiss the frame edge.
+SUBTITLE_POSITION_CHOICES: tuple[str, ...] = ("top", "middle", "bottom")
+SUBTITLE_TOP_OFFSET_PX: int = 80
+
+
+@dataclass(frozen=True)
+class SubtitleStyle:
+    """Renderer-level subtitle style. Built from Project.subtitle_* by
+    the orchestrator. Defaults match the pre-v0.18 hard-coded look so
+    callers that don't know about styling get the historic burn-in.
+    Resolution to font path / pixel sizes happens at filter-build time
+    in :func:`_build_drawtext_chain` so an unknown key falls back here
+    rather than failing the whole render.
+    """
+
+    font: str = "noto_sans_tc"
+    color: str = "#ffffff"
+    outline_color: str = "#000000"
+    position: str = "bottom"
+    size: str = "medium"
+    outline_width: str = "thin"
+
+
+def _hex_to_drawtext_color(hex_color: str) -> str:
+    """Convert ``#rrggbb`` (or shorthand ``#rgb``) to drawtext's
+    ``0xRRGGBB`` form. Falls back to white on a malformed input rather
+    than blowing up — drawtext rejects unknown colour syntax with a
+    fatal error which would fail the whole render."""
+    s = hex_color.strip().lstrip("#")
+    if len(s) == 3:
+        s = "".join(c * 2 for c in s)
+    if len(s) != 6 or any(c not in "0123456789abcdefABCDEF" for c in s):
+        return "0xFFFFFF"
+    return f"0x{s.upper()}"
+
 # Timeouts. Per-call covers a single ffmpeg invocation; the worker job
 # layers its own outer cap on the whole render.
 PER_SEGMENT_TIMEOUT_S: float = 300.0
@@ -779,24 +842,62 @@ def _drawtext_escape(text: str) -> str:
     return text
 
 
-def _build_drawtext_chain(cues: list[tuple[float, float, str]]) -> str:
+def _resolve_subtitle_style(
+    style: SubtitleStyle | None,
+) -> tuple[str, int, str, str, int, str]:
+    """Look up the drawtext-ready values for a SubtitleStyle.
+
+    Returns ``(font_path, font_size, font_color, outline_color,
+    border_w, y_expr)``. Unknown choice keys fall back to the
+    historic defaults so a stale Project row never fails the render.
+    """
+    s = style or SubtitleStyle()
+    font_path = SUBTITLE_FONT_CHOICES.get(s.font, SUBTITLE_FONT_PATH)
+    font_size = SUBTITLE_SIZE_CHOICES.get(s.size, SUBTITLE_FONT_SIZE)
+    border_w = SUBTITLE_OUTLINE_WIDTH_CHOICES.get(s.outline_width, SUBTITLE_BORDER_W)
+    font_color = _hex_to_drawtext_color(s.color)
+    outline_color = _hex_to_drawtext_color(s.outline_color)
+    if s.position == "top":
+        y_expr = f"{SUBTITLE_TOP_OFFSET_PX}"
+    elif s.position == "middle":
+        y_expr = "(h-text_h)/2"
+    else:  # "bottom" (default)
+        y_expr = f"h-{SUBTITLE_BOTTOM_OFFSET_PX}-text_h"
+    return font_path, font_size, font_color, outline_color, border_w, y_expr
+
+
+def _build_drawtext_chain(
+    cues: list[tuple[float, float, str]],
+    style: SubtitleStyle | None = None,
+) -> str:
     """Build a comma-chained drawtext filtergraph, one filter per cue.
 
     Each filter is gated by ``enable=between(t,start,end)`` so only the
-    active cue draws on any given frame. Position matches the user spec:
-    ``x=(w-text_w)/2`` (centered), ``y=h-80`` (anchored 80px from bottom).
+    active cue draws on any given frame. Style values are resolved off
+    a SubtitleStyle (font / size / colour / outline / position); when
+    ``style`` is None the historic white-on-black bottom-anchored look
+    is used so callers can opt out of customisation by passing nothing.
     """
+    font_path, font_size, font_color, outline_color, border_w, y_expr = (
+        _resolve_subtitle_style(style)
+    )
     parts: list[str] = []
     for start_s, end_s, text in cues:
         escaped = _drawtext_escape(text)
+        # ``borderw=0`` is the documented "no outline" value but ffmpeg
+        # still draws the border colour when border_w == 0 on some
+        # builds; gate the bordercolor field too so the user-selected
+        # "none" outline really has no edge.
+        outline_part = (
+            f":borderw={border_w}:bordercolor={outline_color}" if border_w > 0 else ""
+        )
         parts.append(
-            f"drawtext=fontfile={SUBTITLE_FONT_PATH}"
-            f":fontsize={SUBTITLE_FONT_SIZE}"
-            f":fontcolor=white"
-            f":borderw={SUBTITLE_BORDER_W}"
-            f":bordercolor=black"
+            f"drawtext=fontfile={font_path}"
+            f":fontsize={font_size}"
+            f":fontcolor={font_color}"
+            f"{outline_part}"
             f":x=(w-text_w)/2"
-            f":y=h-{SUBTITLE_BOTTOM_OFFSET_PX}"
+            f":y={y_expr}"
             f":text='{escaped}'"
             f":enable=between(t\\,{start_s:.3f}\\,{end_s:.3f})"
         )
@@ -808,6 +909,7 @@ def burn_subtitles(
     srt_path: Path,
     output_path: Path,
     target_aspect: str = "9:16",
+    subtitle_style: SubtitleStyle | None = None,
 ) -> None:
     """Re-encode ``concat_path`` with subtitles burned in via drawtext.
 
@@ -819,7 +921,8 @@ def burn_subtitles(
     pre-drawtext behaviour of always producing a fresh mp4 here).
 
     ``target_aspect`` is accepted for signature compatibility — drawtext
-    sizing is uniform across canvases now.
+    sizing is uniform across canvases now. ``subtitle_style`` is the
+    v0.18 user-customised style; ``None`` keeps the historic look.
     """
     _require_ffmpeg()
     if target_aspect not in ASPECT_DIMENSIONS:
@@ -845,7 +948,7 @@ def burn_subtitles(
         str(concat_path),
     ]
     if cues:
-        cmd += ["-vf", _build_drawtext_chain(cues)]
+        cmd += ["-vf", _build_drawtext_chain(cues, subtitle_style)]
     cmd += [
         "-c:v",
         VIDEO_CODEC,
@@ -881,6 +984,7 @@ def render(
     tracking_by_asset: dict[int, dict[str, Any]] | None = None,
     tracking_target_by_asset: dict[int, int | None] | None = None,
     custom_roi_by_asset: dict[int, dict[str, Any]] | None = None,
+    subtitle_style: SubtitleStyle | None = None,
     on_progress: Callable[[str, int, int], None] | None = None,
 ) -> RenderResult:
     """Run the render stages end-to-end.
@@ -976,7 +1080,13 @@ def render(
 
     used_subs = False
     if srt_path is not None and srt_path.is_file() and srt_path.stat().st_size > 0:
-        burn_subtitles(concat_path, srt_path, output_path, target_aspect)
+        burn_subtitles(
+            concat_path,
+            srt_path,
+            output_path,
+            target_aspect,
+            subtitle_style=subtitle_style,
+        )
         used_subs = True
     elif srt_path is not None:
         # No subtitle file produced (transcript-less project); fall back
@@ -1147,7 +1257,12 @@ __all__ = [
     "RenderResult",
     "STABILIZE_TIMEOUT_S",
     "SUBTITLE_BURN_TIMEOUT_S",
+    "SUBTITLE_FONT_CHOICES",
     "SUBTITLE_FORCE_STYLE",
+    "SUBTITLE_OUTLINE_WIDTH_CHOICES",
+    "SUBTITLE_POSITION_CHOICES",
+    "SUBTITLE_SIZE_CHOICES",
+    "SubtitleStyle",
     "subtitle_force_style",
     "TRANSITION_DEFAULT",
     "TRANSITION_DURATION_S",
