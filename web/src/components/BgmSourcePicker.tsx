@@ -360,6 +360,88 @@ export default function BgmSourcePicker({
     }
   }, [projectId, presetHint]);
 
+  // ---- v0.21.4 — preset-match derived signals + auto-trigger ----
+  //
+  // Lifted out of the JSX IIFE so the auto-trigger useEffect below
+  // can read them. ``presetMatches`` is the "current BGM is in sync
+  // with the active style preset" state; ``presetMismatch`` is the
+  // "BGM is from a different preset"; ``bgmIsExternal`` covers the
+  // upload / library cases. All three drive both the banner copy and
+  // whether auto-trigger fires.
+  const lastGenPreset = useMemo(
+    () => presetForPrompt(aiStatus?.prompt),
+    [aiStatus?.prompt],
+  );
+  const aiOutputIsCurrent = useMemo(
+    () => statusOutputMatchesFilename(aiStatus?.output_url, filename),
+    [aiStatus?.output_url, filename],
+  );
+  const presetMatches =
+    filename != null
+    && aiStatus?.status === "done"
+    && aiOutputIsCurrent
+    && lastGenPreset === presetKey;
+  const presetMismatch =
+    filename != null
+    && aiStatus?.status === "done"
+    && aiOutputIsCurrent
+    && lastGenPreset != null
+    && lastGenPreset !== presetKey;
+  const bgmIsExternal =
+    filename != null
+    && !presetMatches
+    && !presetMismatch
+    && aiStatus?.status !== "pending"
+    && aiStatus?.status !== "running";
+
+  // Auto-trigger MusicGen when the user picks the "preset" source
+  // (or switches the project's style preset while already on
+  // "preset") and the current BGM doesn't already match. Saves the
+  // user one click in the most common path: pick style → pick
+  // "依風格預設自動生成" → 30 seconds later, BGM is ready. Manual
+  // re-rolls (the "🔄 換一首" button) bypass this since they call
+  // ``handleGeneratePreset`` directly; this effect just covers the
+  // implicit case.
+  //
+  // ``autoTriggeredFor`` tracks the (source, presetKey) combo we've
+  // already fired once for, so a re-render or a status flip doesn't
+  // loop us. Switching presets changes the combo and re-arms a new
+  // auto-fire. Switching away from "preset" and back also re-arms.
+  const autoTriggeredFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (source !== "preset") {
+      // Reset the latch so re-entering "preset" can fire once again.
+      autoTriggeredFor.current = null;
+      return;
+    }
+    if (!presetActive || !presetKey || !presetHint) return;
+    // Wait for the first ``aiStatus`` fetch to finish — without that
+    // we'd false-trigger on existing matching BGM (we'd see ``null``
+    // status and assume "no BGM yet").
+    if (aiStatus === null) return;
+    // Don't double-fire while a job is queued / running / submitting.
+    if (aiSubmitting || aiJobInFlight) return;
+    // BGM is already in sync with the active preset — nothing to do.
+    if (presetMatches) return;
+    // Only auto-fire once per (source, presetKey) combo. The user
+    // can still hit the "換一首" button manually for variety; that
+    // path bypasses this latch.
+    const combo = `preset|${presetKey}`;
+    if (autoTriggeredFor.current === combo) return;
+    autoTriggeredFor.current = combo;
+    void handleGeneratePreset();
+  }, [
+    source,
+    presetActive,
+    presetKey,
+    presetHint,
+    aiStatus,
+    aiSubmitting,
+    aiJobInFlight,
+    presetMatches,
+    handleGeneratePreset,
+  ]);
+
   // ---- Upload ----
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [uploadInProgress, setUploadInProgress] = useState(false);
@@ -449,33 +531,9 @@ export default function BgmSourcePicker({
       )}
 
       {source === "preset" && presetKey && (() => {
-        // v0.21.2 — derive whether the current bgm_path was generated
-        // from THIS preset (match), from a different one (mismatch),
-        // or from somewhere else entirely / nothing yet. Drives the
-        // banner copy + whether the regenerate CTA shouts as a primary
-        // button or hides as a small grey link.
-        const lastGenPreset = presetForPrompt(aiStatus?.prompt);
-        const aiOutputIsCurrent = statusOutputMatchesFilename(
-          aiStatus?.output_url,
-          filename,
-        );
-        const presetMatches =
-          filename != null
-          && aiStatus?.status === "done"
-          && aiOutputIsCurrent
-          && lastGenPreset === presetKey;
-        const presetMismatch =
-          filename != null
-          && aiStatus?.status === "done"
-          && aiOutputIsCurrent
-          && lastGenPreset != null
-          && lastGenPreset !== presetKey;
-        const bgmIsExternal =
-          filename != null
-          && !presetMatches
-          && !presetMismatch
-          && !(aiStatus?.status === "pending" || aiStatus?.status === "running");
-
+        // v0.21.4 — derived match/mismatch signals are lifted to
+        // component scope (so the auto-trigger useEffect can read
+        // them); only the small render-only locals stay here.
         const isBusy = aiSubmitting || aiJobInFlight;
         const regenLabel = isBusy
           ? null
@@ -533,17 +591,19 @@ export default function BgmSourcePicker({
 
             <div className="bgm-picker__row">
               {presetMatches && !isBusy ? (
-                // Match → quiet link, lets the user actively re-roll
-                // for variation without the panel screaming "do this
-                // now".
+                // Match → quiet link, lets the user re-roll the
+                // current preset for variety. v0.21.4 — labelled
+                // "換一首" since auto-trigger handles the initial
+                // generation; this button is now purely "MusicGen
+                // is non-deterministic, give me a different take".
                 <button
                   type="button"
                   className="bgm-picker__regen-link"
                   onClick={() => void handleGeneratePreset()}
                   disabled={disabled}
-                  title="重新跑一次 MusicGen 會生成新版本，舊草稿仍沿用原配樂"
+                  title="MusicGen 每次結果不同，按一下生成另一個版本"
                 >
-                  🔄 重新生成配樂
+                  🔄 換一首
                 </button>
               ) : (
                 <button
