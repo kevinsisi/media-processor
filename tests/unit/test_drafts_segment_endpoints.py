@@ -22,6 +22,7 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -448,4 +449,103 @@ def test_reorder_falls_back_to_true_for_legacy_drafts(
     assert call["transitions"] is True
     assert call["stabilize"] is True
     assert call["subtitles"] is True
+    assert call["auto_reframe"] is True
+
+
+def test_reorder_body_override_beats_legacy_null_snapshot(
+    app: tuple[FastAPI, _FakeQueue],
+) -> None:
+    """v0.21.3 regression — when the FE sends a render_flags override
+    on the reorder request, the resolved flags must come from the
+    body rather than the (NULL) Draft snapshot. Without this, legacy
+    drafts re-rendered after the operator turned transitions off
+    silently re-enable them."""
+    import asyncio
+
+    fastapi_app, fake_q = app
+    client = TestClient(fastapi_app)
+    detail = client.get("/drafts/1").json()
+    ids = [s["id"] for s in sorted(detail["segments"], key=lambda s: s["order"])]
+
+    resp = client.patch(
+        "/drafts/1/order",
+        json={
+            "orders": list(reversed(ids)),
+            "render_flags": {
+                "transitions": False,
+                "stabilize": False,
+            },
+        },
+    )
+    assert resp.status_code == 200, resp.text
+
+    call = fake_q.calls[0]
+    # Override applied for the two fields the FE sent.
+    assert call["transitions"] is False
+    assert call["stabilize"] is False
+    # Untouched fields fall back to the True default since this draft
+    # had no snapshot.
+    assert call["subtitles"] is True
+    assert call["auto_reframe"] is True
+
+    # And the resolved flags are now backfilled onto the Draft so a
+    # follow-up re-render without an override stays consistent.
+    overrides = fastapi_app.dependency_overrides[get_session]
+
+    async def _read_back() -> dict:
+        async for s in overrides():
+            d = (await s.execute(select(Draft).where(Draft.id == 1))).scalar_one()
+            return dict(d.render_flags_json or {})
+        raise AssertionError("session generator did not yield")
+
+    flags = asyncio.run(_read_back())
+    assert flags == {
+        "transitions": False,
+        "stabilize": False,
+        "subtitles": True,
+        "auto_reframe": True,
+    }
+
+
+def test_rebuild_subtitles_no_body_keeps_legacy_compat(
+    app: tuple[FastAPI, _FakeQueue],
+) -> None:
+    """Older clients post to /rebuild-subtitles with no body. The
+    endpoint must still parse + run with the all-True legacy
+    fallback, not 422 on missing body."""
+    fastapi_app, fake_q = app
+    # Seed a cut_plan_json on the draft so rebuild-subtitles doesn't
+    # hit the "no plan" 409.
+    client = TestClient(fastapi_app)
+    resp = client.post("/drafts/1/rebuild-subtitles")
+    assert resp.status_code == 200, resp.text
+    call = fake_q.calls[0]
+    assert call["subtitles_from_db"] is True
+    assert call["transitions"] is True  # legacy fallback
+    assert call["subtitles"] is True
+
+
+def test_rebuild_subtitles_body_override_beats_snapshot(
+    app: tuple[FastAPI, _FakeQueue],
+) -> None:
+    """rebuild-subtitles accepts the same render_flags override as
+    reorder so a subtitle re-burn after the operator turned
+    transitions off doesn't quietly re-enable them on a legacy
+    draft."""
+    fastapi_app, fake_q = app
+    client = TestClient(fastapi_app)
+    resp = client.post(
+        "/drafts/1/rebuild-subtitles",
+        json={
+            "render_flags": {
+                "transitions": False,
+                "subtitles": False,
+            },
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    call = fake_q.calls[0]
+    assert call["transitions"] is False
+    assert call["subtitles"] is False
+    assert call["stabilize"] is True
     assert call["auto_reframe"] is True

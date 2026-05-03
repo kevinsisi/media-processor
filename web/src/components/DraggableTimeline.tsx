@@ -51,6 +51,18 @@ interface DraggableTimelineProps {
   // 剪輯中 immediately, without a one-tick lag.
   onReorderCommitted?: (next: DraftDetail) => void;
   onReorderError?: (msg: string) => void;
+  // v0.21.3 — current ProjectEdit toggle states. Sent as
+  // ``render_flags`` override on the reorder request so a legacy
+  // draft (Draft.render_flags_json IS NULL) re-renders honouring the
+  // operator's current preference instead of silently defaulting to
+  // all-True. Optional — when omitted the backend keeps using its
+  // stored snapshot.
+  renderFlags?: {
+    transitions: boolean;
+    stabilize: boolean;
+    subtitles: boolean;
+    autoReframe: boolean;
+  };
 }
 
 // Mirror of services.thumbnails.FRAME_PERCENTAGES so we can map a frame
@@ -406,6 +418,7 @@ export default function DraggableTimeline({
   onReorderStart,
   onReorderCommitted,
   onReorderError,
+  renderFlags,
 }: DraggableTimelineProps) {
   const segments = useMemo(
     () => [...draft.segments].sort((a, b) => a.order - b.order),
@@ -494,6 +507,14 @@ export default function DraggableTimeline({
       const ids = localRows.map((r) => r.segment.id);
       const fresh = await apiClient.reorderDraftSegments(draft.id, {
         orders: ids,
+        render_flags: renderFlags
+          ? {
+              transitions: renderFlags.transitions,
+              stabilize: renderFlags.stabilize,
+              subtitles: renderFlags.subtitles,
+              auto_reframe: renderFlags.autoReframe,
+            }
+          : undefined,
       });
       // Locally reflect the commit by updating the server snapshot —
       // when the parent re-fetches the new draft (with status=pending)
@@ -525,6 +546,7 @@ export default function DraggableTimeline({
     onReorderStart,
     onReorderCommitted,
     onReorderError,
+    renderFlags,
   ]);
 
   const handleRevert = useCallback(() => {

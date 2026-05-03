@@ -303,9 +303,28 @@ export interface DraftCommentCreate {
 
 // ----- M7 — manual control types -----
 
+// v0.21.3 — optional override for the four render flags on the
+// skip-plan re-render endpoints (reorder + rebuild-subtitles). Each
+// field is optional; absent fields fall back to the snapshot stored
+// on ``Draft.render_flags_json`` (or all-True for legacy NULL rows).
+// FE sends the operator's current ProjectEdit toggle state so a
+// legacy draft re-rendered after the user turned transitions off
+// honours that choice instead of silently re-enabling them.
+export interface RenderFlagsOverride {
+  transitions?: boolean;
+  stabilize?: boolean;
+  subtitles?: boolean;
+  auto_reframe?: boolean;
+}
+
 export interface DraftReorderRequest {
   // New permutation of the existing DraftSegment ids (full replacement).
   orders: number[];
+  render_flags?: RenderFlagsOverride;
+}
+
+export interface DraftRebuildSubtitlesRequest {
+  render_flags?: RenderFlagsOverride;
 }
 
 // ----- v0.20 — timeline editor segment-level mutations -----

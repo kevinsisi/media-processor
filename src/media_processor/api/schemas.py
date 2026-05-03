@@ -359,11 +359,42 @@ class DraftCommentCreate(BaseModel):
 # ---------- M7 — manual control schemas ----------
 
 
+class RenderFlagsOverride(BaseModel):
+    """v0.21.3 — FE-supplied override for the four render flags
+    (transitions / stabilize / subtitles / auto_reframe) on the
+    skip-plan re-render endpoints. Each field is optional; absent
+    fields fall back to what's stored on ``Draft.render_flags_json``
+    (or the all-True legacy default when that's NULL too).
+
+    Used so a user who toggles transitions off in ProjectEdit and
+    then reorders the timeline gets a hard-cut re-render even when
+    the draft predates ``Draft.render_flags_json`` (legacy NULL row).
+    The endpoint also writes the resolved flag set back to the Draft
+    so subsequent re-renders stay consistent without the FE having
+    to re-send.
+    """
+
+    transitions: bool | None = None
+    stabilize: bool | None = None
+    subtitles: bool | None = None
+    auto_reframe: bool | None = None
+
+
 class DraftReorderRequest(BaseModel):
     """Body for PATCH /drafts/{id}/order — full new order as a permutation
     of the existing DraftSegment ids."""
 
     orders: list[int] = Field(..., min_length=1, max_length=200)
+    render_flags: RenderFlagsOverride | None = None
+
+
+class DraftRebuildSubtitlesRequest(BaseModel):
+    """Body for POST /drafts/{id}/rebuild-subtitles — optional render
+    flag overrides for the same reasons as DraftReorderRequest. Body
+    itself is optional on the endpoint to keep older clients (which
+    posted with no body) working."""
+
+    render_flags: RenderFlagsOverride | None = None
 
 
 # ---------- v0.20 — timeline editor segment-level mutations ----------

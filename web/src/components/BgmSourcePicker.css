@@ -170,9 +170,76 @@
   color: rgba(190, 240, 220, 0.95);
 }
 .bgm-picker__status-banner--mismatch {
-  background: rgba(217, 158, 90, 0.10);
-  border: 1px solid rgba(217, 158, 90, 0.4);
-  color: rgba(255, 220, 170, 0.95);
+  /* v0.21.3 — louder warning when the active preset doesn't match
+     the BGM that's currently set on the project. The match variant
+     stays a quiet teal; this one reads as "your audio is out of
+     sync, action needed". */
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.35rem;
+  background: rgba(217, 100, 50, 0.14);
+  border: 1px solid rgba(217, 100, 50, 0.55);
+  color: rgba(255, 220, 190, 0.96);
+  padding: 0.7rem 0.85rem;
+}
+
+.bgm-picker__status-banner-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.bgm-picker__status-banner-icon {
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.bgm-picker__status-banner-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: rgba(255, 200, 160, 1);
+}
+
+.bgm-picker__status-banner-body {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.55;
+  color: rgba(255, 230, 200, 0.88);
+}
+
+/* v0.21.3 — louder regenerate CTA shown only on mismatch. Bigger
+   font, more padding, and a subtle pulse animation so the user
+   doesn't miss it. Falls back gracefully when prefers-reduced-
+   motion is set. */
+.bgm-picker__regen-cta--loud {
+  font-size: 1rem;
+  padding: 0.65rem 1.25rem;
+  font-weight: 700;
+  box-shadow: 0 0 0 0 rgba(217, 100, 50, 0.55);
+  animation: bgm-picker__pulse 2s ease-in-out infinite;
+}
+@keyframes bgm-picker__pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(217, 100, 50, 0.55);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(217, 100, 50, 0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bgm-picker__regen-cta--loud {
+    animation: none;
+  }
+}
+
+/* v0.21.3 — visual cue that the audio preview underneath the status
+   line is the previous preset's output (the user has switched style
+   but not yet regenerated). Greys out the player so it reads as
+   "this is history, not the future" without disabling playback —
+   the user might want to A/B compare before re-rolling. */
+.bgm-picker__audio--stale {
+  opacity: 0.65;
+  filter: grayscale(0.4);
 }
 
 /* v0.21.2 — quiet "🔄 重新生成配樂" affordance shown when the current

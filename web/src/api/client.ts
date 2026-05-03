@@ -18,6 +18,7 @@ import type {
   DraftDetail,
   DraftExportRequest,
   DraftExportResponse,
+  DraftRebuildSubtitlesRequest,
   DraftReorderRequest,
   DraftSegmentPatch,
   DraftSegmentSplitRequest,
@@ -540,10 +541,19 @@ export class ApiClient {
     );
   }
 
-  rebuildDraftSubtitles(draftId: number): Promise<DraftDetail> {
-    return this.request<DraftDetail>(`/drafts/${draftId}/rebuild-subtitles`, {
-      method: "POST",
-    });
+  rebuildDraftSubtitles(
+    draftId: number,
+    payload?: DraftRebuildSubtitlesRequest,
+  ): Promise<DraftDetail> {
+    const init: RequestInit = { method: "POST" };
+    if (payload) {
+      init.headers = { "Content-Type": "application/json" };
+      init.body = JSON.stringify(payload);
+    }
+    return this.request<DraftDetail>(
+      `/drafts/${draftId}/rebuild-subtitles`,
+      init,
+    );
   }
 
   exportDraft(

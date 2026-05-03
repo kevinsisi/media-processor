@@ -1257,6 +1257,12 @@ export default function ProjectEdit() {
                 void refreshDrafts().catch(() => {});
               }}
               onReorderError={(msg) => setTriggerError(msg)}
+              renderFlags={{
+                transitions: transitionsOn,
+                stabilize,
+                subtitles: subtitlesOn,
+                autoReframe,
+              }}
             />
             {draft.cut_plan?.notes && (
               <p className="edit-card__hint mono">「{draft.cut_plan.notes}」</p>
@@ -1277,6 +1283,12 @@ export default function ProjectEdit() {
             locked={triggering || awaitingFirstFetch || showProcessing}
             onRebuildStart={() => void refreshDrafts().catch(() => {})}
             onRebuildError={(msg) => setTriggerError(msg)}
+            renderFlags={{
+              transitions: transitionsOn,
+              stabilize,
+              subtitles: subtitlesOn,
+              autoReframe,
+            }}
           />
         </>
       )}
