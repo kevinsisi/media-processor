@@ -82,6 +82,28 @@ def _expected_draft_path(project_id: int, version: int, suffix: str) -> Path:
     return Path(settings.drafts_dir) / str(project_id) / _draft_filename(version, suffix)
 
 
+def _draft_render_flags(draft: Draft) -> dict[str, bool]:
+    """v0.21.1 — pull the operator's original render-flag choices off
+    ``Draft.render_flags_json`` for the skip-plan re-render endpoints.
+
+    Returns a dict with every flag the renderer knows about, populated
+    from the snapshot when available and falling back to the historical
+    all-True default otherwise (matches pre-v0.21.1 behaviour for
+    legacy rows that don't have the column populated).
+
+    Each value is coerced through ``bool()`` so a corrupt JSON blob
+    (e.g. a string ``"false"``) doesn't accidentally round-trip as
+    truthy and re-enable a stage the operator turned off.
+    """
+    flags = draft.render_flags_json if isinstance(draft.render_flags_json, dict) else {}
+    return {
+        "transitions": bool(flags.get("transitions", True)),
+        "stabilize": bool(flags.get("stabilize", True)),
+        "subtitles": bool(flags.get("subtitles", True)),
+        "auto_reframe": bool(flags.get("auto_reframe", True)),
+    }
+
+
 def _resolve_draft_url(draft: Draft, *, suffix: str, stored_path: str | None) -> str | None:
     """Pick a public URL for the mp4 or srt sidecar.
 
@@ -500,11 +522,16 @@ async def reorder_draft_segments(
     draft.prompt_feedback = None
     await session.commit()
 
+    flags = _draft_render_flags(draft)
     enqueue_project_edit(
         draft.project_id,
         draft_id=draft.id,
         force=True,
         skip_plan=True,
+        transitions=flags["transitions"],
+        stabilize=flags["stabilize"],
+        subtitles=flags["subtitles"],
+        auto_reframe=flags["auto_reframe"],
     )
 
     await session.refresh(draft, attribute_names=["segments"])
@@ -861,12 +888,17 @@ async def rebuild_subtitles(
     draft.prompt_feedback = None
     await session.commit()
 
+    flags = _draft_render_flags(draft)
     enqueue_project_edit(
         draft.project_id,
         draft_id=draft.id,
         force=True,
         skip_plan=True,
         subtitles_from_db=True,
+        transitions=flags["transitions"],
+        stabilize=flags["stabilize"],
+        subtitles=flags["subtitles"],
+        auto_reframe=flags["auto_reframe"],
     )
     await session.refresh(draft, attribute_names=["segments"])
     return serialise_draft_detail(draft)

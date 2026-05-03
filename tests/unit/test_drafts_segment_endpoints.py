@@ -372,3 +372,80 @@ def test_reorder_still_enqueues_render(app: tuple[FastAPI, _FakeQueue]) -> None:
     assert len(fake_q.calls) == 1
     assert fake_q.calls[0]["draft_id"] == 1
     assert fake_q.calls[0]["skip_plan"] is True
+
+
+# ---------- v0.21.1 — render-flag preservation across skip-plan re-renders ----------
+
+
+def test_reorder_preserves_render_flags_from_draft(
+    app: tuple[FastAPI, _FakeQueue],
+) -> None:
+    """v0.21.1 regression — previously the reorder endpoint dropped the
+    operator's render-flag choices on the floor (every flag silently
+    defaulted to True), so toggling transitions off and then re-ordering
+    the timeline brought dissolves back. The enqueue call must now
+    carry the values stored on ``Draft.render_flags_json``.
+    """
+    import asyncio
+
+    fastapi_app, fake_q = app
+    # Stamp the seeded draft with an explicit "transitions off" snapshot
+    # the way the trigger endpoint does for fresh v0.21.1 drafts. Direct
+    # SQL update so we don't depend on the trigger-endpoint plumbing.
+    from sqlalchemy import update
+
+    overrides = fastapi_app.dependency_overrides[get_session]
+
+    async def _stamp() -> None:
+        async for s in overrides():
+            await s.execute(
+                update(Draft)
+                .where(Draft.id == 1)
+                .values(
+                    render_flags_json={
+                        "transitions": False,
+                        "stabilize": False,
+                        "subtitles": True,
+                        "auto_reframe": True,
+                    }
+                )
+            )
+            await s.commit()
+            return
+
+    asyncio.run(_stamp())
+
+    client = TestClient(fastapi_app)
+    detail = client.get("/drafts/1").json()
+    ids = [s["id"] for s in sorted(detail["segments"], key=lambda s: s["order"])]
+    resp = client.patch("/drafts/1/order", json={"orders": list(reversed(ids))})
+    assert resp.status_code == 200, resp.text
+
+    assert len(fake_q.calls) == 1
+    call = fake_q.calls[0]
+    assert call["transitions"] is False
+    assert call["stabilize"] is False
+    assert call["subtitles"] is True
+    assert call["auto_reframe"] is True
+
+
+def test_reorder_falls_back_to_true_for_legacy_drafts(
+    app: tuple[FastAPI, _FakeQueue],
+) -> None:
+    """Legacy drafts (pre-v0.21.1, ``render_flags_json IS NULL``) keep
+    the historical all-True defaults so the fix is backwards-compatible
+    — only fresh trigger drafts that snapshotted False values are
+    preserved as off."""
+    fastapi_app, fake_q = app
+    # Seeded draft has render_flags_json = NULL (default).
+    client = TestClient(fastapi_app)
+    detail = client.get("/drafts/1").json()
+    ids = [s["id"] for s in sorted(detail["segments"], key=lambda s: s["order"])]
+    resp = client.patch("/drafts/1/order", json={"orders": list(reversed(ids))})
+    assert resp.status_code == 200, resp.text
+
+    call = fake_q.calls[0]
+    assert call["transitions"] is True
+    assert call["stabilize"] is True
+    assert call["subtitles"] is True
+    assert call["auto_reframe"] is True
