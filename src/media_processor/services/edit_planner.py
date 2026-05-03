@@ -642,24 +642,44 @@ def _has_face_in_span(asset: Asset, span_ms: tuple[int, int]) -> bool:
 # first / last YOLO detection (those edge frames are typically lower-
 # confidence with the subject only partially in frame).
 SUBJECT_PADDING_MS: int = 500
+# v0.21.5 — gap between consecutive detections that's bigger than this
+# splits a continuous run into two separate "presence windows". YOLO
+# samples at TRACKING_SAMPLE_FPS = 5 Hz (~200 ms per sample), so a
+# 1500 ms gap allows ~7 missed frames before we declare the subject has
+# left the scene. Without the split, an asset where the dog appears at
+# t=1 s and t=9 s would have a "presence range" of [0.5, 9.5] s and
+# clamping the LLM's span into [3, 7] s would produce 4 seconds of
+# floor-only footage — which is exactly the bug report.
+SUBJECT_GAP_TOLERANCE_MS: int = 1500
+# v0.21.5 — drop windows shorter than this so a single-frame YOLO
+# flicker doesn't become a 200 ms cut. 1500 ms ≈ the planner's
+# minimum span across all style presets.
+SUBJECT_MIN_WINDOW_MS: int = 1500
 
 
-def _subject_presence_range_ms(
+def _subject_presence_windows_ms(
     asset: Asset, subject_class: str
-) -> tuple[int, int] | None:
-    """Earliest/latest timestamps (ms) where ``subject_class`` appears in
-    this asset's ``tracking_json``, padded ±``SUBJECT_PADDING_MS`` and
-    clamped to ``[0, asset.duration_ms]``.
+) -> list[tuple[int, int]]:
+    """v0.21.5 — return the list of contiguous time windows in this
+    asset where ``subject_class`` is detected.
 
-    Returns ``None`` when the class never appears or tracking never ran.
+    A "window" is a run of detections with no gap larger than
+    ``SUBJECT_GAP_TOLERANCE_MS``. Each window is then padded
+    ±``SUBJECT_PADDING_MS`` and clamped to the asset's duration;
+    windows shorter than ``SUBJECT_MIN_WINDOW_MS`` after padding are
+    discarded so we don't ship sub-second flicker cuts.
+
     Reads the v0.17 ``tracks`` array; falls back to the legacy top-level
-    ``frames`` field iff its ``subject_class`` matches (so pre-v0.17
+    ``frames`` field iff its ``subject_class`` matches (pre-v0.17
     assets without a per-class tracks list still work).
+
+    Returns ``[]`` when the class never appears, tracking never ran,
+    or every candidate window is below the minimum length.
     """
     tracking = asset.tracking_json
     if not isinstance(tracking, dict):
-        return None
-    matched_t_ms: list[int] = []
+        return []
+    matched: list[int] = []
     tracks = tracking.get("tracks")
     if isinstance(tracks, list):
         for t in tracks:
@@ -672,22 +692,51 @@ def _subject_presence_range_ms(
                     continue
                 t_ms = f.get("t_ms")
                 if isinstance(t_ms, int):
-                    matched_t_ms.append(t_ms)
-    if not matched_t_ms and tracking.get("subject_class") == subject_class:
+                    matched.append(t_ms)
+    if not matched and tracking.get("subject_class") == subject_class:
         for f in tracking.get("frames", []) or []:
             if not isinstance(f, dict):
                 continue
             t_ms = f.get("t_ms")
             if isinstance(t_ms, int):
-                matched_t_ms.append(t_ms)
-    if not matched_t_ms:
-        return None
+                matched.append(t_ms)
+    if not matched:
+        return []
+    matched.sort()
     asset_end = max(0, int(asset.duration_ms))
-    start = max(0, min(matched_t_ms) - SUBJECT_PADDING_MS)
-    end = min(asset_end, max(matched_t_ms) + SUBJECT_PADDING_MS)
-    if end <= start:
+    raw_runs: list[tuple[int, int]] = []
+    cur_start = matched[0]
+    cur_end = matched[0]
+    for ts in matched[1:]:
+        if ts - cur_end > SUBJECT_GAP_TOLERANCE_MS:
+            raw_runs.append((cur_start, cur_end))
+            cur_start = ts
+        cur_end = ts
+    raw_runs.append((cur_start, cur_end))
+
+    out: list[tuple[int, int]] = []
+    for run_start, run_end in raw_runs:
+        s = max(0, run_start - SUBJECT_PADDING_MS)
+        e = min(asset_end, run_end + SUBJECT_PADDING_MS)
+        if e - s >= SUBJECT_MIN_WINDOW_MS:
+            out.append((s, e))
+    return out
+
+
+def _subject_presence_range_ms(
+    asset: Asset, subject_class: str
+) -> tuple[int, int] | None:
+    """Backwards-compat wrapper used by ``heuristic_fallback`` —
+    returns the LONGEST contiguous window or ``None`` when the
+    subject never appears (or every window is below the minimum
+    length). Pre-v0.21.5 callers got a single ``min..max`` range; the
+    longest-window choice is the closest 1-tuple approximation that
+    still drops floor-only stretches between sparse appearances.
+    """
+    windows = _subject_presence_windows_ms(asset, subject_class)
+    if not windows:
         return None
-    return start, end
+    return max(windows, key=lambda w: w[1] - w[0])
 
 
 def _apply_subject_filter(
@@ -696,37 +745,77 @@ def _apply_subject_filter(
     assets: tuple[Asset, ...],
     subject_class: str | None,
 ) -> list[_AssetScore]:
-    """Drop assets where ``subject_class`` never appears; clamp the
-    survivors' ``best_span_ms`` to the subject-presence window.
+    """v0.21.5 — drop assets where the subject is never visible long
+    enough; clamp survivors' ``best_span_ms`` into the contiguous
+    window with the most overlap with the LLM's pick.
 
-    ``None`` for ``subject_class`` is the no-op. When the LLM-picked
-    span and the presence window have zero overlap we snap the span to
-    the full presence window (preserves footage when the planner would
-    otherwise have picked a useful clip but missed the subject's exact
-    appearance window).
+    Algorithm:
+      1. Compute contiguous presence windows for the asset.
+      2. If none qualify (missing tracking or all windows shorter
+         than ``SUBJECT_MIN_WINDOW_MS``) → drop the asset.
+      3. Pick the window with the largest overlap with
+         ``best_span_ms``. Clamp the span into that window
+         (intersection).
+      4. If no window overlaps the LLM's pick at all, snap to the
+         LONGEST window (preserves the asset rather than dropping
+         it for a missed LLM pick).
+
+    ``None`` for ``subject_class`` is the no-op. Logs every per-asset
+    decision so production traces of "auto-trim isn't working" are
+    cheap to diagnose.
     """
     if not subject_class:
         return scores
     by_id = {a.id: a for a in assets}
     out: list[_AssetScore] = []
+    drop_count = 0
     for s in scores:
         asset = by_id.get(s.asset_id)
         if asset is None:
             continue
-        presence = _subject_presence_range_ms(asset, subject_class)
-        if presence is None:
+        windows = _subject_presence_windows_ms(asset, subject_class)
+        if not windows:
             logger.info(
-                "edit-planner: dropping asset %d — subject_class=%r never appears",
+                "subject-filter: drop asset=%d (subject_class=%r not present long enough)",
                 s.asset_id,
                 subject_class,
             )
+            drop_count += 1
             continue
         span_start, span_end = s.best_span_ms
-        new_start = max(span_start, presence[0])
-        new_end = min(span_end, presence[1])
-        if new_end <= new_start:
-            new_start, new_end = presence
+        best_overlap = -1
+        chosen = windows[0]
+        for ws, we in windows:
+            overlap = max(0, min(we, span_end) - max(ws, span_start))
+            if overlap > best_overlap:
+                best_overlap = overlap
+                chosen = (ws, we)
+        if best_overlap > 0:
+            ws, we = chosen
+            new_start = max(span_start, ws)
+            new_end = min(span_end, we)
+            action = "clamp"
+        else:
+            longest = max(windows, key=lambda w: w[1] - w[0])
+            new_start, new_end = longest
+            action = "snap-longest"
+        logger.info(
+            "subject-filter: %s asset=%d windows=%s llm_span=(%d,%d) -> (%d,%d)",
+            action,
+            s.asset_id,
+            windows,
+            span_start,
+            span_end,
+            new_start,
+            new_end,
+        )
         out.append(replace(s, best_span_ms=(new_start, new_end)))
+    logger.info(
+        "subject-filter: subject_class=%r kept=%d dropped=%d",
+        subject_class,
+        len(out),
+        drop_count,
+    )
     return out
 
 
