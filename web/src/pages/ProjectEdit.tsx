@@ -544,14 +544,18 @@ function formatBgmSummary(opts: {
   switch (opts.source) {
     case "none":
       return "🔇 不使用配樂";
+    case "preset":
+      return opts.bgmFilename
+        ? `🎼 風格預設配樂：${opts.bgmFilename}`
+        : "🎼 依風格預設自動生成（待產生）";
     case "library":
       return opts.bgmFilename
         ? `🎵 音樂庫：${opts.bgmFilename}`
         : "🎵 從音樂庫選擇（待挑選）";
     case "ai":
       return opts.bgmFilename
-        ? `🎼 AI 配樂：${opts.bgmFilename}`
-        : "🎼 AI 生成配樂（待產生）";
+        ? `🎼 AI 自訂配樂：${opts.bgmFilename}`
+        : "🎼 AI 自訂生成（待產生）";
     case "upload":
       return opts.bgmFilename
         ? `📁 已上傳：${opts.bgmFilename}`

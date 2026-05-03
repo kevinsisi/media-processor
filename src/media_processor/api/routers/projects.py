@@ -75,37 +75,6 @@ def _watermark_url(project: Project) -> str | None:
     return f"/api/media/watermarks/{p.name}?v={mtime}"
 
 
-def _project_detail(
-    project: Project,
-    *,
-    asset_count: int,
-    draft_count: int,
-) -> ProjectDetail:
-    """Build a ProjectDetail with every column populated.
-
-    Centralised so the watermark/BGM/etc. fields don't drift across the
-    list / get / upload / analysis endpoints.
-    """
-    return ProjectDetail(
-        id=project.id,
-        name=project.name,
-        client=project.client,
-        profile_name=project.profile_name,
-        source_dir=project.source_dir,
-        status=project.status,
-        target_aspect_ratio=project.target_aspect_ratio,
-        created_at=project.created_at,
-        asset_count=asset_count,
-        draft_count=draft_count,
-        bgm_path=project.bgm_path,
-        watermark_path=project.watermark_path,
-        watermark_url=_watermark_url(project),
-        watermark_position=project.watermark_position,  # type: ignore[arg-type]
-        watermark_scale=float(project.watermark_scale),
-        watermark_opacity=float(project.watermark_opacity),
-    )
-
-
 def _draft_summary_with_urls(draft: Draft) -> DraftSummary:
     """Build a DraftSummary from a Draft row, populating mp4_url / subtitle_url
     when the renderer's expected files exist on disk (or the row already
@@ -162,6 +131,17 @@ def _project_detail(
         asset_count=asset_count,
         draft_count=draft_count,
         bgm_path=project.bgm_path,
+        # v0.20.3 — watermark fields. A duplicate _project_detail used
+        # to live above with these fields and was silently shadowed by
+        # this one (Python last-definition-wins), so GET /projects/{id}
+        # always returned watermark_path=null even when the upload had
+        # set it. Folded into the single canonical builder so the bug
+        # can't recur.
+        watermark_path=project.watermark_path,
+        watermark_url=_watermark_url(project),
+        watermark_position=project.watermark_position,  # type: ignore[arg-type]
+        watermark_scale=float(project.watermark_scale),
+        watermark_opacity=float(project.watermark_opacity),
         subtitle_font=project.subtitle_font,  # type: ignore[arg-type]
         subtitle_color=project.subtitle_color,
         subtitle_outline_color=project.subtitle_outline_color,

@@ -66,6 +66,13 @@ export default function WatermarkPicker({
     null,
   );
   const successTimerRef = useRef<number | null>(null);
+  // v0.20.3 — local object-URL for the file the user just picked. Used
+  // as a preview source while the POST + re-fetch are still in flight,
+  // so the canvas pops to the new logo instantly instead of staying on
+  // the "無預覽" placeholder for a beat. Cleared once the parent's
+  // project.watermark_url lands (server URL is authoritative + carries
+  // the cache-bust query). Also revoked on unmount to avoid leaking.
+  const [localPreviewUrl, setLocalPreviewUrl] = useState<string | null>(null);
 
   useEffect(() => {
     return () => {
@@ -75,11 +82,36 @@ export default function WatermarkPicker({
     };
   }, []);
 
+  // Revoke the previous object-URL whenever a new one replaces it, and
+  // on unmount. createObjectURL leaks the underlying blob until you
+  // revoke, so this keeps memory bounded even after several re-uploads.
+  useEffect(() => {
+    return () => {
+      if (localPreviewUrl) URL.revokeObjectURL(localPreviewUrl);
+    };
+  }, [localPreviewUrl]);
+
   const watermarkUrl = project?.watermark_url ?? null;
   const filename = useMemo(
     () => watermarkFilename(project?.watermark_path),
     [project?.watermark_path],
   );
+
+  // Preview-source priority: server URL (authoritative + cache-bust)
+  // wins as soon as it lands; the local object-URL fills the gap
+  // between "user picked a file" and "API roundtrip + re-fetch
+  // returned the new watermark_url".
+  const previewSrc = watermarkUrl ?? localPreviewUrl;
+
+  // Once the server's watermark_url is in scope the local preview is
+  // redundant — drop it (and revoke the blob) so the canvas only
+  // tracks one source of truth.
+  useEffect(() => {
+    if (watermarkUrl && localPreviewUrl) {
+      URL.revokeObjectURL(localPreviewUrl);
+      setLocalPreviewUrl(null);
+    }
+  }, [watermarkUrl, localPreviewUrl]);
 
   // v0.20.2 — display priority: justUploadedName (right after upload)
   // → filename (parent state). Either one indicates "we have a
@@ -97,6 +129,15 @@ export default function WatermarkPicker({
     async (file: File) => {
       setError(null);
       setBusy(true);
+      // v0.20.3 — kick off a local object-URL preview before the POST
+      // round-trips, so the canvas pops to the new logo as soon as the
+      // user picks the file. Replaces any previous local preview;
+      // ``URL.revokeObjectURL`` runs via the cleanup effect.
+      const blobUrl = URL.createObjectURL(file);
+      setLocalPreviewUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return blobUrl;
+      });
       try {
         const updated = await apiClient.uploadProjectWatermark(
           projectId,
@@ -284,9 +325,9 @@ export default function WatermarkPicker({
           aria-label="浮水印預覽"
           role="img"
         >
-          {watermarkUrl ? (
+          {previewSrc ? (
             <img
-              src={watermarkUrl}
+              src={previewSrc}
               alt="watermark preview"
               className={`watermark-picker__logo watermark-picker__logo--${position}`}
               style={{
