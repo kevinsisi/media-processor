@@ -189,6 +189,15 @@ def mix_bgm(
     voice_expr = _build_voice_volume_expr(seg_list)
     bgm_expr = _build_bgm_volume_expr(cues, seg_list)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    # v0.21.5 — ``-stream_loop -1`` on the BGM input loops the source
+    # track until ffmpeg's output duration limit kicks in. Combined with
+    # ``amix=duration=first`` (= match the voice track, which is the
+    # full video) and the trailing ``-shortest`` (clipped to the input
+    # video), this guarantees the BGM covers the whole runtime even
+    # when the source wav is shorter than the video. MusicGen ships
+    # 30 s clips by default and operators have asked for arbitrary-
+    # length videos; without the loop the back half of the reel went
+    # silent.
     cmd = [
         "ffmpeg",
         "-hide_banner",
@@ -197,6 +206,8 @@ def mix_bgm(
         "-y",
         "-i",
         str(video_path),
+        "-stream_loop",
+        "-1",
         "-i",
         str(bgm_path),
         "-filter_complex",

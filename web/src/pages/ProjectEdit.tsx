@@ -273,8 +273,8 @@ interface DurationPickerProps {
 
 function DurationPicker({ value, onChange, disabled }: DurationPickerProps) {
   return (
-    <div className="duration-picker" aria-label="目標成品長度">
-      <span className="duration-picker__label">目標長度</span>
+    <div className="duration-picker" aria-label="影片總長度">
+      <span className="duration-picker__label">影片總長度</span>
       <div className="duration-picker__presets">
         {DURATION_PRESETS_S.map((sec) => (
           <button
@@ -318,17 +318,19 @@ interface StylePresetCard {
   value: ClipStylePreset;
   label: string;
   icon: string;
-  spanHint: string;
   transitionHint: string;
   bgmHint: string;
 }
 
+// v0.21.5 — dropped the technical "片段 X-Y 秒" line. Operators see
+// one finished video; per-cut span bounds are an internal planner
+// detail, not something they tune. The card now reads as a one-line
+// "what this style sounds + transitions like" pair.
 const STYLE_PRESET_CARDS: readonly StylePresetCard[] = [
   {
     value: "fast",
     label: "快節奏",
     icon: "⚡",
-    spanHint: "片段 3–5 秒",
     transitionHint: "wipe / slide / circle",
     bgmHint: "高能量電子 / 搖滾 130–150 BPM",
   },
@@ -336,7 +338,6 @@ const STYLE_PRESET_CARDS: readonly StylePresetCard[] = [
     value: "slow",
     label: "慢節奏",
     icon: "🌊",
-    spanHint: "片段 8–15 秒",
     transitionHint: "dissolve / fade",
     bgmHint: "柔和氛圍音 60–80 BPM",
   },
@@ -344,7 +345,6 @@ const STYLE_PRESET_CARDS: readonly StylePresetCard[] = [
     value: "commercial",
     label: "商業感",
     icon: "🏷️",
-    spanHint: "片段 5–8 秒",
     transitionHint: "slide / wipe / fade-black",
     bgmHint: "Corporate 配樂 90–110 BPM",
   },
@@ -352,7 +352,6 @@ const STYLE_PRESET_CARDS: readonly StylePresetCard[] = [
     value: "artistic",
     label: "文青風",
     icon: "🎨",
-    spanHint: "片段 3–12 秒（不規則）",
     transitionHint: "fade / fade-white",
     bgmHint: "Acoustic / indie 木吉他 80–100 BPM",
   },
@@ -360,7 +359,6 @@ const STYLE_PRESET_CARDS: readonly StylePresetCard[] = [
     value: "custom",
     label: "自訂",
     icon: "✦",
-    spanHint: "由 AI 自由決定",
     transitionHint: "依素材內容挑選",
     bgmHint: "依素材內容建議",
   },
@@ -408,8 +406,6 @@ function StylePresetPicker({
               </span>
               <span className="style-preset-card__label">{card.label}</span>
               <span className="style-preset-card__hint mono">
-                {card.spanHint}
-                <br />
                 轉場：{card.transitionHint}
                 <br />
                 配樂：{card.bgmHint}
