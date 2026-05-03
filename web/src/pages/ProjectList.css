@@ -355,6 +355,29 @@
   color: var(--rust, #b34b3a);
 }
 
+/* v0.22.0 — friendlier empty state with copy + CTA. */
+.board__notice--empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  padding: var(--space-7) var(--space-5);
+  text-align: center;
+}
+.board__notice-title {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--text-primary, rgba(255, 255, 255, 0.92));
+  margin: 0;
+}
+.board__notice-hint {
+  font-size: 0.88rem;
+  color: var(--text-secondary);
+  margin: 0;
+  max-width: 30rem;
+  line-height: 1.55;
+}
+
 /* Compact layout for narrow screens */
 @media (max-width: 880px) {
   .projects {

@@ -339,6 +339,47 @@
   transition: background 200ms var(--ease-out), transform 200ms var(--ease-out);
 }
 
+/* v0.22.0 — disabled-looking variant when no videos have finished
+   uploading yet. Keeps the "next step" affordance visible (so the
+   operator knows where they're going) but tones it down so it's not
+   shouting until there's actually something to do. */
+.summary-next--inactive {
+  opacity: 0.55;
+  background: transparent;
+  color: var(--text-secondary);
+  border-color: var(--rule);
+  pointer-events: auto;
+}
+.summary-next--inactive:hover {
+  transform: none;
+  background: transparent;
+}
+
+/* v0.22.0 — separate the upload-failed state into a bold red label
+   + a quieter detail line so the technical error message doesn't
+   visually dominate. */
+.upload-row__state-fail {
+  color: var(--rust, #b34b3a);
+  font-weight: 600;
+  margin-right: 0.4rem;
+}
+.upload-row__state-detail {
+  font-size: 0.78rem;
+  color: var(--text-muted, #888);
+}
+
+/* v0.22.0 — small "輸出比例 9:16" pill in the hero. Replaces the
+   inline mono spans that exposed the technical profile_name. */
+.hero__lede-aspect {
+  margin-left: 0.6rem;
+  padding: 0.1rem 0.55rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
 .summary-next:hover {
   background: var(--gold-bright, var(--gold));
   transform: translateY(-1px);

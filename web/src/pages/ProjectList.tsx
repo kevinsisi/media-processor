@@ -19,10 +19,10 @@ function formatCreatedAt(iso: string): string {
 
 const STATUS_LABEL: Record<string, string> = {
   drafted: "剪輯就緒",
-  analyzing: "分析中",
+  analyzing: "AI 分析中（約 2–5 分鐘）",
   approved: "成品就緒",
-  rejected: "已退回",
-  pending: "待處理",
+  rejected: "已退回，待重剪",
+  pending: "等待上傳素材",
 };
 
 function StatusCell({ project }: { project: ProjectSummary }) {
@@ -47,7 +47,7 @@ function StatusCell({ project }: { project: ProjectSummary }) {
       <div className="status-cell status-cell--processing">
         <div className="status-line">
           <span className="dot dot--processing" />
-          <span className="status-text">處理流程執行中</span>
+          <span className="status-text">AI 分析中（約 2–5 分鐘）</span>
         </div>
         <div className="progress-track" aria-hidden>
           <div className="progress-bar" style={{ width: "55%" }} />
@@ -136,8 +136,14 @@ export default function ProjectList() {
         )}
 
         {!loading && projects && list.length === 0 && (
-          <div className="board__notice">
-            <span className="mono">目前沒有專案</span>
+          <div className="board__notice board__notice--empty">
+            <p className="board__notice-title">還沒有任何專案</p>
+            <p className="board__notice-hint">
+              建立第一個專案，上傳素材後 AI 會自動分析並剪出短片。
+            </p>
+            <Link to="/projects/new" className="cta cta--primary">
+              新增第一個專案 →
+            </Link>
           </div>
         )}
 
@@ -172,8 +178,6 @@ export default function ProjectList() {
                 <h2 className="entry__name">{p.name}</h2>
                 <div className="entry__meta">
                   <span>{p.asset_count} 個素材</span>
-                  <span className="entry__meta-sep">·</span>
-                  <span className="mono">風格檔 {p.profile_name}</span>
                 </div>
               </div>
 
