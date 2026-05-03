@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
@@ -15,6 +16,7 @@ from media_processor.api.config import settings
 from media_processor.api.deps import get_session
 from media_processor.api.routers.assets import thumbnail_urls_for_asset
 from media_processor.api.routers.drafts import _draft_url, _expected_draft_path
+from media_processor.api.routers.watermark_presets import _load_preset_for_apply
 from media_processor.api.schemas import (
     AssetAnalysisItem,
     CoverageSummaryOut,
@@ -37,6 +39,7 @@ from media_processor.api.schemas import (
     SubtitleStylePatch,
     TrackingSummaryOut,
     TranscriptSummaryOut,
+    WatermarkPresetApplyRequest,
     WatermarkSettingsPatch,
 )
 from media_processor.models import (
@@ -558,6 +561,57 @@ async def delete_project_watermark(
         Path(project.watermark_path).unlink(missing_ok=True)
         project.watermark_path = None
         await session.commit()
+
+
+# v0.21.6 — apply a saved preset to this project. Reverse direction
+# of POST /watermark-presets (which copies project → preset). The
+# preset's own PNG file is the source of truth so deleting the
+# preset later doesn't strip the project's watermark.
+@router.post(
+    "/{project_id}/watermark/apply-preset",
+    response_model=ProjectDetail,
+)
+async def apply_watermark_preset(
+    project_id: int,
+    payload: WatermarkPresetApplyRequest,
+    session: SessionDep,
+) -> ProjectDetail:
+    project = await session.get(Project, project_id)
+    if project is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="project not found"
+        )
+    preset, src_path = await _load_preset_for_apply(session, payload.preset_id)
+
+    wm_dir = Path(settings.watermark_dir)
+    wm_dir.mkdir(parents=True, exist_ok=True)
+    target = wm_dir / f"{project_id}.png"
+    try:
+        shutil.copyfile(src_path, target)
+    except OSError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"failed to copy preset into project watermark: {exc}",
+        ) from exc
+
+    project.watermark_path = str(target)
+    project.watermark_position = preset.position
+    project.watermark_scale = float(preset.scale)
+    project.watermark_opacity = float(preset.opacity)
+    await session.commit()
+    await session.refresh(project)
+
+    asset_count = await session.scalar(
+        select(func.count(Asset.id)).where(Asset.project_id == project_id)
+    )
+    draft_count = await session.scalar(
+        select(func.count(Draft.id)).where(Draft.project_id == project_id)
+    )
+    return _project_detail(
+        project,
+        asset_count=int(asset_count or 0),
+        draft_count=int(draft_count or 0),
+    )
 
 
 @router.delete("/{project_id}/bgm", status_code=status.HTTP_204_NO_CONTENT)

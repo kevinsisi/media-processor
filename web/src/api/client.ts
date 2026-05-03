@@ -57,6 +57,9 @@ import type {
   UploadCompleteOut,
   UploadSessionCreate,
   UploadSessionOut,
+  WatermarkPresetApplyRequest,
+  WatermarkPresetOut,
+  WatermarkPresetSaveRequest,
   WatermarkSettingsPatch,
 } from "./types";
 
@@ -217,6 +220,45 @@ export class ApiClient {
       const text = await response.text().catch(() => "");
       throw new ApiError(response.status, url, text || response.statusText);
     }
+  }
+
+  // ----- v0.21.6 — watermark presets -----
+
+  fetchWatermarkPresets(): Promise<WatermarkPresetOut[]> {
+    return this.get<WatermarkPresetOut[]>("/watermark-presets");
+  }
+
+  saveWatermarkPreset(
+    payload: WatermarkPresetSaveRequest,
+  ): Promise<WatermarkPresetOut> {
+    return this.request<WatermarkPresetOut>("/watermark-presets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteWatermarkPreset(presetId: number): Promise<void> {
+    const url = `${this.baseUrl}/watermark-presets/${presetId}`;
+    const response = await this.fetchImpl(url, { method: "DELETE" });
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      throw new ApiError(response.status, url, text || response.statusText);
+    }
+  }
+
+  applyWatermarkPreset(
+    projectId: number,
+    payload: WatermarkPresetApplyRequest,
+  ): Promise<ProjectDetail> {
+    return this.request<ProjectDetail>(
+      `/projects/${projectId}/watermark/apply-preset`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      },
+    );
   }
 
   // ----- v0.15 — AI BGM gen + music library -----

@@ -827,6 +827,27 @@ export default function ProjectEdit() {
   // button can show "目前：filename.mp3"). Fetched once on mount and
   // refreshed after a successful BGM upload.
   const [project, setProject] = useState<ProjectDetail | null>(null);
+  // v0.21.6 — analysis status gate: the trigger buttons are disabled
+  // while any per-asset analysis step is still running / pending so
+  // the operator doesn't kick off a render against half-analysed
+  // material. ``null`` until the first fetch resolves so we can show
+  // an "analysis loading" hint rather than enabling buttons too early.
+  // ``inFlight`` is the count of (asset × step) pairs still working;
+  // failed steps are treated as terminal (don't block) since they
+  // need manual retry on the analysis page anyway.
+  const [analysisStatus, setAnalysisStatus] = useState<{
+    allDone: boolean;
+    inFlight: number;
+    failed: number;
+    total: number;
+  } | null>(null);
+  // v0.21.6 — completion toast. Set to a string when analysis flips
+  // from incomplete → done while the user is on this page; a
+  // useEffect timer clears it after ~4 seconds. ``transitionRef``
+  // tracks the previous allDone value so we only fire the toast on
+  // the false → true edge (not on every re-fetch that returns done).
+  const [analysisToast, setAnalysisToast] = useState<string | null>(null);
+  const prevAnalysisAllDoneRef = useRef<boolean | null>(null);
   // v0.14.7 — per-asset thumbnail metadata (duration + frame URLs) so
   // each segment card can render the keyframe closest to the cut's
   // mid-point. Fetched once on mount; failure is non-fatal — the cards
@@ -889,10 +910,15 @@ export default function ProjectEdit() {
 
   // v0.14.7 — pull keyframe galleries for every analysed asset in the
   // project so DraggableTimeline can render a per-cut thumbnail.
+  // v0.21.6 — also computes the per-step analysis status so the
+  // trigger button can disable itself while any step is still running
+  // / pending. Polls every 5 s while incomplete; stops once allDone.
   useEffect(() => {
     if (!Number.isFinite(projectId)) return;
     let cancelled = false;
-    (async () => {
+    let timer: number | null = null;
+
+    async function tick() {
       try {
         const data = await apiClient.fetchProjectAnalysis(validProjectId);
         if (cancelled) return;
@@ -900,6 +926,9 @@ export default function ProjectEdit() {
           number,
           { duration_ms: number; thumbnail_urls: string[] }
         >();
+        let inFlight = 0;
+        let failed = 0;
+        let total = 0;
         for (const a of data.assets) {
           if (a.thumbnail_urls && a.thumbnail_urls.length > 0) {
             map.set(a.id, {
@@ -907,16 +936,53 @@ export default function ProjectEdit() {
               thumbnail_urls: a.thumbnail_urls,
             });
           }
+          const steps = a.analysis_steps ?? {};
+          for (const state of Object.values(steps)) {
+            total += 1;
+            if (state === "running" || state === "pending") inFlight += 1;
+            else if (typeof state === "string" && state.startsWith("failed:"))
+              failed += 1;
+          }
         }
         setAssetThumbs(map);
+        const next = {
+          allDone: inFlight === 0,
+          inFlight,
+          failed,
+          total,
+        };
+        setAnalysisStatus(next);
+        // Edge-trigger the completion toast when allDone goes false → true.
+        const prev = prevAnalysisAllDoneRef.current;
+        if (next.allDone && prev === false) {
+          setAnalysisToast("分析完成！");
+        }
+        prevAnalysisAllDoneRef.current = next.allDone;
+        // Schedule the next poll only if there's still work to wait on.
+        if (!cancelled && !next.allDone) {
+          timer = window.setTimeout(() => void tick(), 5_000);
+        }
       } catch {
-        // tolerate — just don't show thumbnails
+        // tolerate — just don't show thumbnails / status. Try again
+        // on the next poll cycle so a transient API hiccup doesn't
+        // permanently leave the trigger button disabled.
+        if (!cancelled) timer = window.setTimeout(() => void tick(), 5_000);
       }
-    })();
+    }
+
+    void tick();
     return () => {
       cancelled = true;
+      if (timer !== null) window.clearTimeout(timer);
     };
   }, [projectId, validProjectId]);
+
+  // v0.21.6 — auto-dismiss the completion toast after 4 s.
+  useEffect(() => {
+    if (analysisToast === null) return;
+    const handle = window.setTimeout(() => setAnalysisToast(null), 4_000);
+    return () => window.clearTimeout(handle);
+  }, [analysisToast]);
 
   const selectedSummary = useMemo(
     () => drafts.find((d) => d.id === selectedDraftId) ?? null,
@@ -1081,6 +1147,50 @@ export default function ProjectEdit() {
         </p>
       )}
 
+      {/* v0.21.6 — analysis-status banner. Shown across every state
+         (initial / queued / processing / ready) so the operator sees
+         the warning regardless of whether they're about to trigger
+         a fresh edit or already viewing a finished version. */}
+      {analysisStatus !== null && !analysisStatus.allDone ? (
+        <div
+          className="analysis-banner analysis-banner--running"
+          role="status"
+          aria-live="polite"
+        >
+          <span className="analysis-banner__icon" aria-hidden>
+            ⏳
+          </span>
+          <div className="analysis-banner__body">
+            <strong>部分分析尚未完成（剩 {analysisStatus.inFlight} 個步驟）</strong>
+            <span className="analysis-banner__hint">
+              現在剪輯可能不完整 — 等待全部分析完成後再開始能拿到最完整的素材判斷。
+              {analysisStatus.failed > 0 ? (
+                <>
+                  {" "}有 {analysisStatus.failed} 個步驟失敗；到「分析」頁可手動重試。
+                </>
+              ) : null}
+            </span>
+          </div>
+        </div>
+      ) : null}
+
+      {/* v0.21.6 — completion toast. Top-right floating chip,
+         auto-dismisses 4 s after analysis allDone goes false → true.
+         Uses ``key`` so React re-mounts the node and the CSS
+         animation replays even if the message is set twice in
+         quick succession. */}
+      {analysisToast !== null ? (
+        <div
+          key={analysisToast}
+          className="analysis-toast"
+          role="status"
+          aria-live="polite"
+        >
+          <span aria-hidden>✓</span>
+          <span>{analysisToast}</span>
+        </div>
+      ) : null}
+
       {showInitial && (
         <section className="edit-card">
           <h2 className="edit-card__title">準備好就開始</h2>
@@ -1113,9 +1223,21 @@ export default function ProjectEdit() {
               type="button"
               className="cta cta--primary"
               onClick={() => void handleStartEdit(false)}
-              disabled={triggering}
+              disabled={
+                triggering
+                || (analysisStatus !== null && !analysisStatus.allDone)
+              }
+              title={
+                analysisStatus !== null && !analysisStatus.allDone
+                  ? "等待分析全部完成後即可剪輯"
+                  : undefined
+              }
             >
-              {triggering ? "排隊中…" : `開始剪輯（${durationSec} 秒）`}
+              {triggering
+                ? "排隊中…"
+                : analysisStatus !== null && !analysisStatus.allDone
+                  ? `分析中（剩 ${analysisStatus.inFlight} 步驟），完成後可剪輯`
+                  : `開始剪輯（${durationSec} 秒）`}
             </button>
           </div>
         </section>
@@ -1201,9 +1323,21 @@ export default function ProjectEdit() {
                   type="button"
                   className="cta"
                   onClick={() => void handleStartEdit(true)}
-                  disabled={triggering}
+                  disabled={
+                    triggering
+                    || (analysisStatus !== null && !analysisStatus.allDone)
+                  }
+                  title={
+                    analysisStatus !== null && !analysisStatus.allDone
+                      ? "等待分析全部完成後即可重新剪輯"
+                      : undefined
+                  }
                 >
-                  {triggering ? "排隊中…" : `重新剪輯（${durationSec} 秒）`}
+                  {triggering
+                    ? "排隊中…"
+                    : analysisStatus !== null && !analysisStatus.allDone
+                      ? `分析中（剩 ${analysisStatus.inFlight} 步驟）`
+                      : `重新剪輯（${durationSec} 秒）`}
                 </button>
               </div>
             </div>
