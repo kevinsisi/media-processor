@@ -152,6 +152,52 @@
   color: rgba(255, 255, 255, 0.85);
 }
 
+/* v0.21.2 — match / mismatch banner shown above the regenerate CTA.
+   "Match" reads as quiet success (BGM is in sync with the preset);
+   "mismatch" reads as a warning (preset moved, BGM is stale). */
+.bgm-picker__status-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+.bgm-picker__status-banner--match {
+  background: rgba(132, 217, 196, 0.10);
+  border: 1px solid rgba(132, 217, 196, 0.35);
+  color: rgba(190, 240, 220, 0.95);
+}
+.bgm-picker__status-banner--mismatch {
+  background: rgba(217, 158, 90, 0.10);
+  border: 1px solid rgba(217, 158, 90, 0.4);
+  color: rgba(255, 220, 170, 0.95);
+}
+
+/* v0.21.2 — quiet "🔄 重新生成配樂" affordance shown when the current
+   BGM already matches the active preset. Looks like a subtle text
+   link rather than a CTA so it doesn't pull the eye when no action
+   is required, but still gives the user an out for re-rolling. */
+.bgm-picker__regen-link {
+  background: transparent;
+  border: 0;
+  padding: 0.25rem 0.4rem;
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--text-muted, #9aa);
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+.bgm-picker__regen-link:hover:not(:disabled) {
+  color: rgba(255, 255, 255, 0.9);
+}
+.bgm-picker__regen-link:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* ---- Library list ---- */
 
 .bgm-library {
