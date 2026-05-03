@@ -27,6 +27,96 @@
   color: var(--text-muted, #888);
 }
 
+/* v0.20.2 — preset banner shown above the radios when a non-custom
+   style preset is active. Visually anchored to gold so it reads as
+   "advisory" rather than the hard outline used by panels below. */
+.bgm-picker__preset-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: rgba(255, 215, 130, 0.06);
+  border: 1px dashed rgba(255, 215, 130, 0.35);
+  border-radius: 8px;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  transition: opacity 200ms ease, color 200ms ease;
+}
+
+.bgm-picker__preset-banner--overridden {
+  opacity: 0.55;
+}
+
+.bgm-picker__preset-banner--overridden
+  .bgm-picker__preset-banner-hint {
+  text-decoration: line-through;
+  text-decoration-color: rgba(255, 215, 130, 0.5);
+  color: var(--text-muted, #888);
+}
+
+.bgm-picker__preset-banner-tag {
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(255, 215, 130, 0.18);
+  color: #d6b56a;
+  flex-shrink: 0;
+}
+
+.bgm-picker__preset-banner-hint {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.bgm-picker__preset-banner-pill {
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(180, 90, 80, 0.18);
+  color: #e09a8e;
+  border: 1px solid rgba(180, 90, 80, 0.35);
+  flex-shrink: 0;
+}
+
+.bgm-picker__preset-banner-pill--info {
+  background: rgba(132, 217, 196, 0.12);
+  color: #b9f0e0;
+  border-color: rgba(132, 217, 196, 0.3);
+}
+
+/* "目前最終效果" status line. Single source of truth for "will the
+   final mp4 have BGM?" — kept above the radios so the user reads
+   consequence first. */
+.bgm-picker__final {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.55rem 0.8rem;
+  background: rgba(132, 217, 196, 0.08);
+  border-left: 3px solid rgba(132, 217, 196, 0.55);
+  border-radius: 6px;
+  font-size: 0.9rem;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.bgm-picker__final-label {
+  font-size: 0.7rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.bgm-picker__final-value {
+  flex: 1 1 auto;
+  min-width: 0;
+  word-break: break-word;
+}
+
 .bgm-picker__radios {
   display: flex;
   flex-wrap: wrap;

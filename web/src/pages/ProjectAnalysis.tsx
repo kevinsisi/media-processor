@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ApiError, apiClient } from "../api/client";
 import type {
+  AnalysisStep,
   AssetAnalysisItem,
   TranscriptOut,
   TranscriptSegmentIn,
@@ -21,14 +22,26 @@ import {
 } from "../i18n/tags";
 import "./ProjectAnalysis.css";
 
-const ANALYSIS_STEP_ORDER: (
-  | "stt"
-  | "scene"
-  | "motion"
-  | "emotion"
-  | "tracking"
-  | "coverage"
-)[] = ["stt", "scene", "motion", "emotion", "tracking", "coverage"];
+const ANALYSIS_STEP_ORDER: AnalysisStep[] = [
+  "stt",
+  "scene",
+  "motion",
+  "emotion",
+  "tracking",
+  "coverage",
+];
+
+// v0.20.2 — emoji-leading icons for each step. Helps the step-card row
+// scan as 6 distinct things at a glance instead of a wall of identical
+// chips. Pure visual aid; the localized name still drives semantics.
+const ANALYSIS_STEP_ICONS: Record<AnalysisStep, string> = {
+  stt: "🗣",
+  scene: "🏞",
+  motion: "🎥",
+  emotion: "😊",
+  tracking: "🎯",
+  coverage: "📜",
+};
 
 const TRANSCRIPT_DEBOUNCE_MS = 1500;
 
@@ -50,28 +63,267 @@ function classifyStepState(value: string | undefined): string {
   return value;
 }
 
-interface AnalysisStepChipsProps {
-  steps: Record<string, string> | null | undefined;
+// v0.20.2 — step-summary text. Pulls a short, meaningful description
+// out of the asset's analysis output so the user can tell what each
+// analysis step *produced* without expanding the asset.
+function summaryForStep(
+  step: AnalysisStep,
+  asset: AssetAnalysisItem,
+): string | null {
+  const raw = asset.analysis_steps?.[step];
+  // Only show summaries for steps that actually finished. Other states
+  // are conveyed by the state pill itself.
+  if (raw !== "done") return null;
+
+  switch (step) {
+    case "stt": {
+      const tx = asset.transcript_summary;
+      if (!tx) return null;
+      const editedTag = tx.edited ? " · 已編輯" : "";
+      return `${tx.segment_count} 段字幕${editedTag}`;
+    }
+    case "scene": {
+      const tags = asset.scene_tags;
+      if (tags.length === 0) return "未偵測場景";
+      // Top tag + count — tags are already sorted by confidence by the
+      // analysis pipeline.
+      const top = tags[0];
+      const moreCount = Math.max(0, tags.length - 1);
+      const moreText = moreCount > 0 ? ` 等 ${tags.length} 標` : "";
+      return `${labelForSceneTag(top.name)}${moreText}`;
+    }
+    case "motion": {
+      const segs = asset.motion_segments;
+      if (segs.length === 0) return "未偵測運鏡";
+      // Bucket by motion_type, get the dominant by total ms.
+      const bucket: Record<string, number> = {};
+      for (const s of segs) {
+        const dur = Math.max(0, s.end_ms - s.start_ms);
+        bucket[s.motion_type] = (bucket[s.motion_type] ?? 0) + dur;
+      }
+      const total = Object.values(bucket).reduce((a, b) => a + b, 0);
+      if (total <= 0) return `${segs.length} 段`;
+      const sorted = Object.entries(bucket).sort((a, b) => b[1] - a[1]);
+      const [topName, topDur] = sorted[0];
+      const pct = Math.round((topDur / total) * 100);
+      return `${labelForMotionType(topName)} ${pct}%`;
+    }
+    case "emotion": {
+      const e = asset.emotion_tags;
+      if (!e) return "未偵測情緒";
+      const dom = labelForEmotionTag(e.dominant);
+      const ranges = e.ranges.length;
+      return ranges > 1 ? `${dom} 等 ${ranges} 段` : dom;
+    }
+    case "tracking": {
+      const t = asset.tracking_summary;
+      if (!t || !t.subject_class) return "未偵測主體";
+      const conf = Math.round((t.confidence ?? 0) * 100);
+      return `${labelForTrackingSubject(t.subject_class)} ${conf}%`;
+    }
+    case "coverage": {
+      const c = asset.coverage_summary;
+      if (!c) return null;
+      const pct = Math.round(c.coverage_ratio_by_duration_ms * 100);
+      return `照稿 ${pct}%`;
+    }
+  }
 }
 
-function AnalysisStepChips({ steps }: AnalysisStepChipsProps) {
+interface AnalysisStepStatusGridProps {
+  asset: AssetAnalysisItem;
+  onRetryStep: (assetId: number, step: AnalysisStep) => void;
+  retryingStep: AnalysisStep | null;
+}
+
+// v0.20.2 — per-step status cards (replaces the old <AnalysisStepChips>).
+// Each step gets:
+//  * a coloured state pill (4 states: pending / running / done / failed,
+//    plus skipped),
+//  * a one-line summary built from the analysis output (e.g. "32 段字幕"),
+//  * an icon-only retry button on done / failed / skipped states.
+//
+// The retry button calls the regular /assets/{id}/analyze endpoint with
+// ``steps: [<this step>]`` so we don't re-run the whole pipeline.
+function AnalysisStepStatusGrid({
+  asset,
+  onRetryStep,
+  retryingStep,
+}: AnalysisStepStatusGridProps) {
   return (
-    <div className="step-chips">
+    <div className="step-grid" role="list" aria-label="分析步驟狀態">
       {ANALYSIS_STEP_ORDER.map((step) => {
-        const raw = steps?.[step];
+        const raw = asset.analysis_steps?.[step];
         const cls = classifyStepState(raw);
+        const summary = summaryForStep(step, asset);
+        // Retry makes sense once the step has *settled* — running/pending
+        // is wasted work because the worker is already on it (or will be).
+        const canRetry = cls === "done" || cls === "failed" || cls === "skipped";
+        const busy = retryingStep === step;
+        const failureDetail =
+          raw && raw.startsWith("failed:") ? raw.slice("failed:".length) : null;
         return (
-          <span
+          <div
             key={step}
-            className={`step-chip step-chip--${cls}`}
-            title={raw ?? "pending"}
+            className={`step-card step-card--${cls}`}
+            role="listitem"
           >
-            <span className="step-chip__name">{ANALYSIS_STEP_LABELS[step]}</span>
-            <span className="step-chip__state">{labelForStepState(raw)}</span>
-          </span>
+            <div className="step-card__head">
+              <span className="step-card__icon" aria-hidden>
+                {ANALYSIS_STEP_ICONS[step]}
+              </span>
+              <span className="step-card__name">
+                {ANALYSIS_STEP_LABELS[step]}
+              </span>
+              <span className="step-card__pill mono" title={raw ?? "pending"}>
+                {labelForStepState(raw)}
+              </span>
+              {canRetry && (
+                <button
+                  type="button"
+                  className="step-card__retry"
+                  aria-label={`重新分析「${ANALYSIS_STEP_LABELS[step]}」`}
+                  title={`重新分析「${ANALYSIS_STEP_LABELS[step]}」`}
+                  disabled={busy}
+                  onClick={() => onRetryStep(asset.id, step)}
+                >
+                  {busy ? "…" : "↻"}
+                </button>
+              )}
+            </div>
+            {summary && (
+              <div className="step-card__summary mono" title={summary}>
+                {summary}
+              </div>
+            )}
+            {cls === "failed" && failureDetail && (
+              <div
+                className="step-card__error mono"
+                title={failureDetail}
+                aria-label="失敗原因"
+              >
+                {failureDetail}
+              </div>
+            )}
+          </div>
         );
       })}
     </div>
+  );
+}
+
+// v0.20.2 — top-of-page roll-up. Counts every (asset × step) cell so
+// the user knows whether the whole project is analysed or there are
+// stragglers, without having to scan each card. ``mode`` toggles the
+// granularity between "by asset" (each asset's overall status) and
+// "by step" (cells of the analysis matrix).
+interface AnalysisProgressSummaryProps {
+  assets: AssetAnalysisItem[];
+}
+
+function AnalysisProgressSummary({ assets }: AnalysisProgressSummaryProps) {
+  const counts = useMemo(() => {
+    const out = {
+      assetTotal: assets.length,
+      assetDone: 0,
+      assetRunning: 0,
+      assetFailed: 0,
+      assetPending: 0,
+      stepTotal: 0,
+      stepDone: 0,
+      stepRunning: 0,
+      stepFailed: 0,
+      stepPending: 0,
+      stepSkipped: 0,
+    };
+    for (const a of assets) {
+      // Per-asset status from the asset-level pill (already aggregated
+      // by the analyser).
+      switch (a.status) {
+        case "analyzed":
+          out.assetDone += 1;
+          break;
+        case "analyzing":
+          out.assetRunning += 1;
+          break;
+        case "analysis_failed":
+          out.assetFailed += 1;
+          break;
+        default:
+          out.assetPending += 1;
+      }
+      const steps = a.analysis_steps ?? {};
+      for (const s of ANALYSIS_STEP_ORDER) {
+        out.stepTotal += 1;
+        const cls = classifyStepState(steps[s]);
+        if (cls === "done") out.stepDone += 1;
+        else if (cls === "running") out.stepRunning += 1;
+        else if (cls === "failed") out.stepFailed += 1;
+        else if (cls === "skipped") out.stepSkipped += 1;
+        else out.stepPending += 1;
+      }
+    }
+    return out;
+  }, [assets]);
+
+  if (counts.assetTotal === 0) return null;
+
+  const stepPctDone =
+    counts.stepTotal > 0
+      ? Math.round((counts.stepDone / counts.stepTotal) * 100)
+      : 0;
+
+  return (
+    <section
+      className="analysis-progress-summary"
+      aria-label="整體分析進度"
+    >
+      <div className="analysis-progress-summary__head">
+        <span className="analysis-progress-summary__title">
+          整體分析進度
+        </span>
+        <span className="analysis-progress-summary__nums mono">
+          {counts.stepDone} / {counts.stepTotal} 步驟完成（{stepPctDone}%）
+        </span>
+      </div>
+      <div
+        className="analysis-progress-summary__bar"
+        role="progressbar"
+        aria-valuenow={stepPctDone}
+        aria-valuemin={0}
+        aria-valuemax={100}
+      >
+        <span
+          className="analysis-progress-summary__bar-fill"
+          style={{ width: `${stepPctDone}%` }}
+        />
+      </div>
+      <div className="analysis-progress-summary__breakdown mono">
+        <span className="aps-pill aps-pill--done">
+          ✓ 完成 {counts.stepDone}
+        </span>
+        {counts.stepRunning > 0 && (
+          <span className="aps-pill aps-pill--running">
+            ⏵ 進行中 {counts.stepRunning}
+          </span>
+        )}
+        {counts.stepPending > 0 && (
+          <span className="aps-pill aps-pill--pending">
+            · 待分析 {counts.stepPending}
+          </span>
+        )}
+        {counts.stepFailed > 0 && (
+          <span className="aps-pill aps-pill--failed">
+            ✗ 失敗 {counts.stepFailed}
+          </span>
+        )}
+        {counts.stepSkipped > 0 && (
+          <span className="aps-pill aps-pill--skipped">
+            – 略過 {counts.stepSkipped}
+          </span>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -361,6 +613,8 @@ function ThumbnailGallery({ assetId, filename, thumbnails }: ThumbnailGalleryPro
 interface AssetCardProps {
   asset: AssetAnalysisItem;
   onAnalyze: (assetId: number, force: boolean) => void;
+  onRetryStep: (assetId: number, step: AnalysisStep) => void;
+  retryingStep: AnalysisStep | null;
   onTranslate: (assetId: number) => void;
   translating: boolean;
   selected: boolean;
@@ -420,6 +674,8 @@ function SecondarySubtitleToggle({
 function AssetCard({
   asset,
   onAnalyze,
+  onRetryStep,
+  retryingStep,
   onTranslate,
   translating,
   selected,
@@ -457,7 +713,11 @@ function AssetCard({
         </span>
       </header>
 
-      <AnalysisStepChips steps={asset.analysis_steps} />
+      <AnalysisStepStatusGrid
+        asset={asset}
+        onRetryStep={onRetryStep}
+        retryingStep={retryingStep}
+      />
 
       {asset.scene_tags.length > 0 && (
         <div className="scene-tag-row" aria-label="場景標籤">
@@ -591,6 +851,40 @@ export default function ProjectAnalysis() {
   // when done); the local set just keeps the button disabled long
   // enough to communicate "queued" to the user.
   const [translatingIds, setTranslatingIds] = useState<Set<number>>(new Set());
+  // v0.20.2 — track per-asset per-step retry. Map assetId -> step name
+  // currently being retried. Lets the AssetCard show the spinner on
+  // exactly the right step button without leaking state across cards.
+  const [retryingMap, setRetryingMap] = useState<
+    Record<number, AnalysisStep | null>
+  >({});
+
+  const handleRetryStep = useCallback(
+    async (assetId: number, step: AnalysisStep) => {
+      setRetryingMap((prev) => ({ ...prev, [assetId]: step }));
+      try {
+        await apiClient.triggerAnalyze(assetId, { steps: [step], force: true });
+        polling.refresh();
+      } catch (err) {
+        setTriggerError(
+          err instanceof Error
+            ? `重新分析「${step}」失敗：${err.message}`
+            : String(err),
+        );
+      } finally {
+        // Brief delay so the spinner is visible even if the queue
+        // accepted instantly. Polling will then flip the chip.
+        window.setTimeout(() => {
+          setRetryingMap((prev) => {
+            if (prev[assetId] !== step) return prev;
+            const next = { ...prev };
+            next[assetId] = null;
+            return next;
+          });
+        }, 1500);
+      }
+    },
+    [polling],
+  );
 
   const handleAnalyze = useCallback(
     async (assetId: number, force: boolean) => {
@@ -803,6 +1097,8 @@ export default function ProjectAnalysis() {
         )}
       </header>
 
+      <AnalysisProgressSummary assets={assets} />
+
       {assets.length > 0 && (
         <div className="batch-toolbar" role="toolbar" aria-label="批次分析">
           <label className="batch-toolbar__select-all">
@@ -864,6 +1160,8 @@ export default function ProjectAnalysis() {
             key={asset.id}
             asset={asset}
             onAnalyze={handleAnalyze}
+            onRetryStep={handleRetryStep}
+            retryingStep={retryingMap[asset.id] ?? null}
             onTranslate={handleTranslate}
             translating={translatingIds.has(asset.id)}
             selected={selectedIds.has(asset.id)}

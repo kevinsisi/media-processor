@@ -26,6 +26,55 @@
 .watermark-picker__current {
   font-size: var(--t-xs);
   color: var(--text-muted, #888);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  transition: color 200ms ease, background 200ms ease;
+}
+
+.watermark-picker__check {
+  display: none;
+  font-weight: 700;
+}
+
+/* Steady "已設定" green pill once a watermark is present. */
+.watermark-picker__current--ok {
+  color: rgb(98, 184, 122);
+}
+.watermark-picker__current--ok .watermark-picker__check {
+  display: inline;
+}
+
+/* Animated success flash right after upload. Brighter green + subtle
+   pulse so the user sees "上傳成功：filename.png" even before the
+   parent's project state propagates. Lasts 2.5s — see WatermarkPicker
+   handleUpload. */
+.watermark-picker__current--just-uploaded {
+  color: #fff;
+  background: rgba(98, 184, 122, 0.22);
+  border: 1px solid rgba(98, 184, 122, 0.55);
+  padding: 2px 10px;
+  border-radius: 999px;
+  animation: watermark-success-pulse 2.5s ease-out;
+}
+.watermark-picker__current--just-uploaded .watermark-picker__check {
+  display: inline;
+  color: rgb(98, 184, 122);
+}
+
+@keyframes watermark-success-pulse {
+  0% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(98, 184, 122, 0.55);
+  }
+  20% {
+    transform: scale(1.04);
+    box-shadow: 0 0 0 8px rgba(98, 184, 122, 0);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(98, 184, 122, 0);
+  }
 }
 
 .watermark-picker__upload-row {

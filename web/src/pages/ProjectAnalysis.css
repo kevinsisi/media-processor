@@ -287,7 +287,246 @@
   color: var(--status-down, #b34b3a);
 }
 
-/* ---- Step chips ---- */
+/* ---- v0.20.2 — top-of-page analysis progress summary ---- */
+
+.analysis-progress-summary {
+  margin-top: var(--space-5);
+  padding: var(--space-4) var(--space-5);
+  background: var(--ink-elevated);
+  border: 1px solid var(--ink-line);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.analysis-progress-summary__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.analysis-progress-summary__title {
+  font-family: var(--font-display);
+  font-weight: 320;
+  font-size: var(--t-md);
+  color: var(--text-primary);
+}
+
+.analysis-progress-summary__nums {
+  font-size: var(--t-xs);
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+}
+
+.analysis-progress-summary__bar {
+  width: 100%;
+  height: 8px;
+  background: var(--ink-line);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.analysis-progress-summary__bar-fill {
+  display: block;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    rgba(98, 184, 122, 0.85),
+    rgba(132, 217, 196, 0.85)
+  );
+  transition: width 360ms var(--ease-out);
+}
+
+.analysis-progress-summary__breakdown {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.aps-pill {
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--ink-line);
+  color: var(--text-secondary);
+}
+
+.aps-pill--done {
+  background: rgba(98, 184, 122, 0.14);
+  border-color: rgba(98, 184, 122, 0.45);
+  color: rgb(98, 184, 122);
+}
+
+.aps-pill--running {
+  background: rgba(255, 215, 130, 0.14);
+  border-color: rgba(255, 215, 130, 0.45);
+  color: var(--gold);
+}
+
+.aps-pill--failed {
+  background: rgba(180, 75, 58, 0.14);
+  border-color: rgba(180, 75, 58, 0.5);
+  color: var(--status-down, #b34b3a);
+}
+
+.aps-pill--skipped {
+  opacity: 0.7;
+}
+
+/* ---- v0.20.2 — per-step status cards (replaces .step-chips) ---- */
+
+.step-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-2);
+}
+
+.step-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  background: var(--ink-elevated);
+  border: 1px solid var(--ink-line);
+  border-radius: 10px;
+  transition: border-color 200ms ease, background 200ms ease;
+  min-width: 0;
+}
+
+.step-card__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.step-card__icon {
+  font-size: 1.1em;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.step-card__name {
+  font-family: var(--font-display);
+  font-size: var(--t-sm);
+  color: var(--text-primary);
+  flex-shrink: 0;
+}
+
+.step-card__pill {
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--ink-line);
+  color: var(--text-secondary);
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.step-card__retry {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1px solid var(--ink-line);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: border-color 150ms ease, color 150ms ease, background 150ms ease;
+}
+
+.step-card__retry:hover:not(:disabled) {
+  border-color: var(--gold);
+  color: var(--gold);
+  background: rgba(255, 215, 130, 0.08);
+}
+
+.step-card__retry:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.step-card__summary {
+  font-size: var(--t-xs);
+  color: var(--text-secondary);
+  letter-spacing: 0.04em;
+  padding-left: calc(1.1em + 6px);
+  word-break: break-word;
+}
+
+.step-card__error {
+  font-size: 0.7rem;
+  color: var(--status-down, #b34b3a);
+  padding-left: calc(1.1em + 6px);
+  word-break: break-word;
+}
+
+/* State-driven colours. Match the aps-pill palette so the page reads
+   coherently when the eye sweeps across the summary into the cards. */
+
+.step-card--pending {
+  opacity: 0.85;
+}
+
+.step-card--running {
+  border-color: var(--gold);
+  background: rgba(255, 215, 130, 0.06);
+  animation: step-card-pulse 1.6s ease-in-out infinite;
+}
+.step-card--running .step-card__pill {
+  border-color: var(--gold);
+  color: var(--gold);
+  background: rgba(255, 215, 130, 0.12);
+}
+
+@keyframes step-card-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 215, 130, 0);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(255, 215, 130, 0.18);
+  }
+}
+
+.step-card--done {
+  border-color: rgba(98, 184, 122, 0.5);
+  background: rgba(98, 184, 122, 0.06);
+}
+.step-card--done .step-card__pill {
+  border-color: rgba(98, 184, 122, 0.55);
+  color: rgb(98, 184, 122);
+  background: rgba(98, 184, 122, 0.14);
+}
+
+.step-card--failed {
+  border-color: var(--status-down, #b34b3a);
+  background: rgba(180, 75, 58, 0.06);
+}
+.step-card--failed .step-card__pill {
+  border-color: var(--status-down, #b34b3a);
+  color: var(--status-down, #b34b3a);
+  background: rgba(180, 75, 58, 0.14);
+}
+
+.step-card--skipped {
+  opacity: 0.75;
+}
+.step-card--skipped .step-card__pill {
+  color: var(--text-muted, #888);
+}
+
+/* ---- Step chips (legacy — kept for any other consumer) ---- */
 
 .step-chips {
   display: flex;

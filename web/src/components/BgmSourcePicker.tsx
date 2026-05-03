@@ -2,12 +2,31 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, apiClient } from "../api/client";
 import type {
   BgmGenerationStatus,
+  ClipStylePreset,
   MusicLibraryItem,
   ProjectDetail,
 } from "../api/types";
 import "./BgmSourcePicker.css";
 
-type Source = "none" | "library" | "ai" | "upload";
+export type BgmSource = "none" | "library" | "ai" | "upload";
+type Source = BgmSource;
+
+// v0.20.2 — copy for the per-preset BGM banner shown above the radios.
+// Mirrors the ``bgmHint`` text on each StylePresetCard in ProjectEdit so
+// the user sees "風格預設建議" wording in two places without surprises.
+const PRESET_BGM_HINT: Record<Exclude<ClipStylePreset, "custom">, string> = {
+  fast: "高能量電子 / 搖滾 130–150 BPM",
+  slow: "柔和氛圍音 60–80 BPM",
+  commercial: "Corporate 配樂 90–110 BPM",
+  artistic: "Acoustic / indie 木吉他 80–100 BPM",
+};
+
+const PRESET_LABEL: Record<Exclude<ClipStylePreset, "custom">, string> = {
+  fast: "快節奏",
+  slow: "慢節奏",
+  commercial: "商業感",
+  artistic: "文青風",
+};
 
 interface BgmSourcePickerProps {
   projectId: number;
@@ -17,7 +36,12 @@ interface BgmSourcePickerProps {
   // v0.18 — when set, the music-suggestion API is called with this
   // preset so the suggested BGM matches the rhythm picked on the edit
   // screen. ``custom`` (or omitted) means no preset hint.
-  stylePreset?: string;
+  stylePreset?: ClipStylePreset;
+  // v0.20.2 — notify the parent every time the user (or auto-switch
+  // effect) flips the source radio. Lets ProjectEdit show "目前配樂"
+  // in the section title and decorate the style preset card with a
+  // strikethrough on its bgm hint when the user manually overrode it.
+  onSourceChange?: (source: BgmSource) => void;
 }
 
 function bgmFilename(bgmPath: string | null | undefined): string | null {
@@ -47,11 +71,90 @@ export default function BgmSourcePicker({
   onProjectUpdated,
   disabled,
   stylePreset,
+  onSourceChange,
 }: BgmSourcePickerProps) {
   const [source, setSource] = useState<Source>(() =>
     bgmPath ? "upload" : "none",
   );
   const filename = useMemo(() => bgmFilename(bgmPath), [bgmPath]);
+
+  // v0.20.2 — track whether the user has manually picked a source so
+  // (a) we can show a "已被手動覆蓋" pill on the preset banner and
+  // (b) the auto-switch effect below knows to leave a manual choice
+  // alone even when the user later flips between presets. The flag
+  // is sticky once set in this session.
+  const userChoseSourceRef = useRef(false);
+
+  const updateSource = useCallback(
+    (next: Source, fromUser: boolean) => {
+      if (fromUser) userChoseSourceRef.current = true;
+      setSource(next);
+    },
+    [],
+  );
+
+  // Notify parent on every source change (initial + subsequent). Plays
+  // back into ProjectEdit's section-title summary line so the header
+  // always mirrors what the radios show.
+  useEffect(() => {
+    onSourceChange?.(source);
+  }, [source, onSourceChange]);
+
+  // v0.20.2 — auto-switch from "不使用配樂" → "AI 生成配樂" the first
+  // time the user picks a non-custom style preset. We use a ref to
+  // read the *current* source without putting it in the dep array
+  // (otherwise the effect would re-fire on every source flip and
+  // immediately reset a manual "none" back to "ai", trapping the user).
+  // We also bail out once the user has manually picked anything, so
+  // their explicit choice always wins.
+  const sourceRef = useRef(source);
+  useEffect(() => {
+    sourceRef.current = source;
+  }, [source]);
+  useEffect(() => {
+    if (!stylePreset || stylePreset === "custom") return;
+    if (userChoseSourceRef.current) return;
+    if (sourceRef.current === "none") {
+      // fromUser=false: auto-switch must NOT mark the source as
+      // user-chosen, otherwise a later real user click never gets
+      // the "已覆蓋" banner treatment.
+      updateSource("ai", false);
+    }
+  }, [stylePreset, updateSource]);
+
+  // The banner copy mirrors the style-preset card on ProjectEdit so
+  // the suggestion is visible in both places. ``presetActive`` gates
+  // the banner — only render when a real preset (not "custom") is on.
+  const presetActive =
+    stylePreset !== undefined && stylePreset !== "custom";
+  const presetBgmHint = presetActive
+    ? PRESET_BGM_HINT[stylePreset as Exclude<ClipStylePreset, "custom">]
+    : null;
+  const presetLabel = presetActive
+    ? PRESET_LABEL[stylePreset as Exclude<ClipStylePreset, "custom">]
+    : null;
+  // The preset's hint is "overridden" once the user has explicitly
+  // touched the radios. Show a strikethrough + small "已覆蓋" pill so
+  // the user can tell at a glance which one wins.
+  const presetOverridden = userChoseSourceRef.current;
+
+  // Single-source-of-truth status line: "目前最終效果" — what will
+  // actually be rendered with the current radios. Computed here so
+  // it stays in lock-step with all the radio-driven state below.
+  const finalStatusLabel = (() => {
+    if (source === "none") return "🔇 不使用配樂（影片只有人聲）";
+    if (source === "library") {
+      if (filename) return `🎵 已套用音樂庫：${filename}`;
+      return "🎵 從音樂庫選擇（尚未套用，請於下方挑選）";
+    }
+    if (source === "ai") {
+      if (filename) return `🎼 AI 生成配樂：${filename}`;
+      return "🎼 AI 生成配樂（尚未生成，請於下方產生）";
+    }
+    // upload
+    if (filename) return `📁 已上傳：${filename}`;
+    return "📁 上傳配樂（尚未選擇檔案，請於下方上傳）";
+  })();
 
   // ---- Library ----
   const [library, setLibrary] = useState<MusicLibraryItem[] | null>(null);
@@ -266,6 +369,46 @@ export default function BgmSourcePicker({
           </span>
         )}
       </div>
+
+      {/* v0.20.2 — preset banner. Mirrors the BGM hint from the style
+          preset card so the user sees the recommendation right next
+          to the radios that override it. Greys out + strikes through
+          once the user has manually picked a source so it's clear
+          which one wins. */}
+      {presetActive && presetBgmHint && (
+        <div
+          className={
+            "bgm-picker__preset-banner" +
+            (presetOverridden ? " bgm-picker__preset-banner--overridden" : "")
+          }
+          role="note"
+        >
+          <span className="bgm-picker__preset-banner-tag mono">
+            風格預設「{presetLabel}」
+          </span>
+          <span className="bgm-picker__preset-banner-hint">
+            建議配樂：{presetBgmHint}
+          </span>
+          {presetOverridden ? (
+            <span className="bgm-picker__preset-banner-pill mono">
+              已被下方覆蓋
+            </span>
+          ) : (
+            <span className="bgm-picker__preset-banner-pill bgm-picker__preset-banner-pill--info mono">
+              建議僅供參考
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* "目前最終效果" — single line that always tells the user what
+          will actually happen on the next render. Sits above the
+          radios so the user sees consequence before mechanism. */}
+      <div className="bgm-picker__final" aria-live="polite">
+        <span className="bgm-picker__final-label mono">最終效果</span>
+        <span className="bgm-picker__final-value">{finalStatusLabel}</span>
+      </div>
+
       <div className="bgm-picker__radios" role="radiogroup">
         {(
           [
@@ -285,7 +428,7 @@ export default function BgmSourcePicker({
               value={val}
               checked={source === val}
               disabled={disabled}
-              onChange={() => setSource(val)}
+              onChange={() => updateSource(val, true)}
             />
             <span>{label}</span>
           </label>
