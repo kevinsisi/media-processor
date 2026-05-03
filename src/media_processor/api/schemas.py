@@ -5,9 +5,10 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from media_processor.models.enums import REVIEW_ACTION_VALUES
+from media_processor.services.object_tracking import COCO80_CLASSES
 
 ReviewActionLiteral = Literal["approve", "reject", "repatch", "download"]
 TargetAspectRatioLiteral = Literal["9:16", "4:5", "1:1"]
@@ -92,6 +93,10 @@ class ProjectDetail(BaseModel):
     subtitle_position: SubtitlePositionLiteral = "bottom"
     subtitle_size: SubtitleSizeLiteral = "medium"
     subtitle_outline_width: SubtitleOutlineWidthLiteral = "thin"
+    # v0.21 — optional subject-class filter for the auto-edit planner.
+    # ``None`` means "no filter, use every asset at full duration"
+    # (historical default). Otherwise one of the 80 COCO class names.
+    subject_class: str | None = None
 
 
 class WatermarkSettingsPatch(BaseModel):
@@ -121,6 +126,42 @@ class SubtitleStylePatch(BaseModel):
     subtitle_position: SubtitlePositionLiteral | None = None
     subtitle_size: SubtitleSizeLiteral | None = None
     subtitle_outline_width: SubtitleOutlineWidthLiteral | None = None
+
+
+class SubjectClassPatch(BaseModel):
+    """Body for PATCH /projects/{id}/subject-class.
+
+    ``subject_class=None`` clears the filter (planner uses every asset
+    at full duration); a non-null value must be one of the 80 COCO
+    class names so the renderer's ``tracking_json`` lookup actually
+    matches something.
+    """
+
+    subject_class: str | None = Field(default=None, max_length=64)
+
+    @field_validator("subject_class")
+    @classmethod
+    def _validate_subject_class(cls, value: str | None) -> str | None:
+        if value is None or value == "":
+            return None
+        if value not in COCO80_CLASSES:
+            raise ValueError(
+                f"subject_class must be one of the 80 COCO classes; got {value!r}"
+            )
+        return value
+
+
+class DetectedClassOut(BaseModel):
+    """v0.21 — one detected class summary across a project's assets.
+
+    Returned by GET /projects/{id}/detected-classes, sorted by
+    ``total_frames`` descending so the picker can render the most
+    common class first as the natural default.
+    """
+
+    cls_name: str
+    total_frames: int
+    asset_count: int
 
 
 class ProjectCreate(BaseModel):

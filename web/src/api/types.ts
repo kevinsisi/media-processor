@@ -80,6 +80,29 @@ export interface ProjectDetail {
   subtitle_position: SubtitlePosition;
   subtitle_size: SubtitleSize;
   subtitle_outline_width: SubtitleOutlineWidth;
+  // v0.21 — auto-edit planner subject filter. When set to one of the 80
+  // COCO class names, the planner shrinks each asset's used span to
+  // the time range where that class is detected in tracking_json,
+  // padded ±0.5 s. ``null`` = no filter (historical default).
+  subject_class?: string | null;
+}
+
+// v0.21 — PATCH /projects/{id}/subject-class body. ``null`` clears the
+// filter; a string must be one of the 80 COCO class names (validated
+// server-side).
+export interface SubjectClassPatch {
+  subject_class: string | null;
+}
+
+// v0.21 — GET /projects/{id}/detected-classes — one row per class that
+// actually appears in any of this project's assets' tracking_json.
+// Sorted server-side by ``total_frames`` descending so the most common
+// subject lands first; ``asset_count`` is the number of distinct
+// assets the class shows up in.
+export interface DetectedClassOut {
+  cls_name: string;
+  total_frames: number;
+  asset_count: number;
 }
 
 // v0.18 — PATCH /projects/{id}/watermark body. Every field optional so

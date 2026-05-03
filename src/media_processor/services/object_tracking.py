@@ -411,6 +411,71 @@ def _serialise_frames(frames: tuple[Detection, ...]) -> list[dict[str, Any]]:
     ]
 
 
+def aggregate_detected_classes(
+    tracking_blobs: list[dict[str, Any] | None],
+) -> list[dict[str, Any]]:
+    """v0.21 — roll up every asset's ``tracking_json`` into a per-class
+    summary suitable for the subject-class picker.
+
+    Returns one row per detected class, sorted by ``total_frames``
+    descending (most-frequent first). ``asset_count`` counts the
+    distinct assets that contained at least one detection of the class.
+
+    Reads the v0.17 ``tracks`` array. Falls back to the legacy
+    top-level ``frames`` (and ``subject_class``) when ``tracks`` is
+    missing — keeps pre-v0.17 stored blobs visible in the picker so
+    operators don't have to re-run YOLO just to use the filter.
+
+    ``None`` entries (assets that haven't been tracked yet) and blobs
+    without recognisable shape are silently skipped — the caller
+    decides how to surface "no detected classes" to the UI.
+    """
+    counts: dict[str, dict[str, int]] = {}
+    for blob in tracking_blobs:
+        if not isinstance(blob, dict):
+            continue
+        tracks = blob.get("tracks")
+        seen_in_asset: set[str] = set()
+        if isinstance(tracks, list) and tracks:
+            for t in tracks:
+                if not isinstance(t, dict):
+                    continue
+                cls = t.get("cls_name")
+                if not isinstance(cls, str) or not cls:
+                    continue
+                frames = t.get("frames")
+                nframes = len(frames) if isinstance(frames, list) else 0
+                if nframes <= 0:
+                    continue
+                slot = counts.setdefault(cls, {"total_frames": 0, "asset_count": 0})
+                slot["total_frames"] += nframes
+                seen_in_asset.add(cls)
+        else:
+            cls = blob.get("subject_class")
+            frames = blob.get("frames")
+            if (
+                isinstance(cls, str)
+                and cls
+                and isinstance(frames, list)
+                and frames
+            ):
+                slot = counts.setdefault(cls, {"total_frames": 0, "asset_count": 0})
+                slot["total_frames"] += len(frames)
+                seen_in_asset.add(cls)
+        for cls in seen_in_asset:
+            counts[cls]["asset_count"] += 1
+    rows = [
+        {
+            "cls_name": cls,
+            "total_frames": agg["total_frames"],
+            "asset_count": agg["asset_count"],
+        }
+        for cls, agg in counts.items()
+    ]
+    rows.sort(key=lambda r: (-int(r["total_frames"]), r["cls_name"]))
+    return rows
+
+
 def serialise(result: TrackingResult) -> dict[str, Any]:
     """JSON-friendly dict suitable for ``Asset.tracking_json``.
 
@@ -610,6 +675,7 @@ __all__ = [
     "TrackingError",
     "TrackingResult",
     "TrackingUnavailableError",
+    "aggregate_detected_classes",
     "detect",
     "serialise",
     "track_custom_roi",

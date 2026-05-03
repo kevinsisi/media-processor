@@ -6,6 +6,7 @@ import type { BgmSource } from "../components/BgmSourcePicker";
 import DraggableTimeline from "../components/DraggableTimeline";
 import ExportSheet from "../components/ExportSheet";
 import SubtitleEditor from "../components/SubtitleEditor";
+import SubjectClassPicker from "../components/SubjectClassPicker";
 import SubtitleStyleEditor from "../components/SubtitleStyleEditor";
 import WatermarkPicker from "../components/WatermarkPicker";
 import type {
@@ -566,6 +567,9 @@ function formatBgmSummary(opts: {
 function formatVisualSummary(project: ProjectDetail | null): string {
   if (!project) return "載入中…";
   const parts: string[] = [];
+  if (project.subject_class) {
+    parts.push(`主角 🎯 ${project.subject_class}`);
+  }
   if (project.watermark_path) {
     const scalePct = Math.round((project.watermark_scale ?? 0.1) * 100);
     parts.push(`浮水印 ✓ ${scalePct}%`);
@@ -703,6 +707,11 @@ function EditSettingsBlock(props: EditSettingsBlockProps) {
       </SettingsGroup>
 
       <SettingsGroup title="視覺疊加" summary={visualSummary}>
+        <SubjectClassPicker
+          project={props.project}
+          onProjectUpdated={props.setProject}
+          disabled={props.triggering}
+        />
         <WatermarkPicker
           projectId={props.validProjectId}
           project={props.project}

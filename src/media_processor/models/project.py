@@ -134,6 +134,14 @@ class Project(Base):
         default="thin",
         server_default="thin",
     )
+    # v0.21 — optional subject-class filter for the auto-edit planner.
+    # When set to one of the COCO-80 class names (e.g. "person", "dog",
+    # "car"), the planner shrinks each asset's used span to the time
+    # range where that class appears in the asset's ``tracking_json``,
+    # padded by ±0.5 s. Assets where the chosen class never appears
+    # are dropped from the plan. ``None`` (default) preserves the
+    # historical behaviour: every asset is eligible at full duration.
+    subject_class: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
