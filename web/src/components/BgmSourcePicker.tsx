@@ -32,6 +32,48 @@ const PRESET_LABEL: Record<Exclude<ClipStylePreset, "custom">, string> = {
   artistic: "文青風",
 };
 
+// v0.21.2 — short genre tag used in the "配樂已生成" status line so the
+// user reads the music *style* rather than the preset's display name
+// (e.g. "Acoustic/indie 風格" instead of "文青風 風格"). Trimmed from
+// PRESET_BGM_HINT so we don't echo the BPM noise into the status chip.
+const PRESET_GENRE_SHORT: Record<Exclude<ClipStylePreset, "custom">, string> = {
+  fast: "高能量電子/搖滾",
+  slow: "柔和氛圍",
+  commercial: "Corporate",
+  artistic: "Acoustic/indie",
+};
+
+// v0.21.2 — reverse lookup: given the prompt that was sent to MusicGen
+// (server returns it on ``BgmGenerationStatus.prompt``), figure out
+// which preset's hint produced it. Used to detect "the user's chosen
+// style preset has changed since the current BGM was generated" so
+// the panel can flag a mismatch instead of silently keeping the stale
+// track. Returns ``null`` when the prompt is a free-form one (the
+// "AI 自訂生成" path) or doesn't match any known hint exactly.
+function presetForPrompt(
+  prompt: string | null | undefined,
+): Exclude<ClipStylePreset, "custom"> | null {
+  if (!prompt) return null;
+  for (const [key, hint] of Object.entries(PRESET_BGM_HINT)) {
+    if (hint === prompt) {
+      return key as Exclude<ClipStylePreset, "custom">;
+    }
+  }
+  return null;
+}
+
+// v0.21.2 — does the latest generation status point at the file the
+// project currently has set as its bgm_path? When false, the AI job
+// completed but the user has since uploaded / picked a library track,
+// so the "已根據 X 生成" banner shouldn't fire.
+function statusOutputMatchesFilename(
+  outputUrl: string | null | undefined,
+  filename: string | null,
+): boolean {
+  if (!outputUrl || !filename) return false;
+  return outputUrl.endsWith(filename);
+}
+
 interface BgmSourcePickerProps {
   projectId: number;
   bgmPath: string | null | undefined;
@@ -406,72 +448,156 @@ export default function BgmSourcePicker({
         </p>
       )}
 
-      {source === "preset" && presetKey && (
-        <div className="bgm-picker__panel">
-          <p className="bgm-picker__hint mono">
-            風格描述（將直接送給 MusicGen 作為提示詞）：
-          </p>
-          <div className="bgm-picker__preset-readonly mono">
-            <span className="bgm-picker__preset-readonly-tag">
-              「{presetLabel}」
-            </span>
-            <span className="bgm-picker__preset-readonly-hint">
-              {presetHint}
-            </span>
-          </div>
-          {filename && (
+      {source === "preset" && presetKey && (() => {
+        // v0.21.2 — derive whether the current bgm_path was generated
+        // from THIS preset (match), from a different one (mismatch),
+        // or from somewhere else entirely / nothing yet. Drives the
+        // banner copy + whether the regenerate CTA shouts as a primary
+        // button or hides as a small grey link.
+        const lastGenPreset = presetForPrompt(aiStatus?.prompt);
+        const aiOutputIsCurrent = statusOutputMatchesFilename(
+          aiStatus?.output_url,
+          filename,
+        );
+        const presetMatches =
+          filename != null
+          && aiStatus?.status === "done"
+          && aiOutputIsCurrent
+          && lastGenPreset === presetKey;
+        const presetMismatch =
+          filename != null
+          && aiStatus?.status === "done"
+          && aiOutputIsCurrent
+          && lastGenPreset != null
+          && lastGenPreset !== presetKey;
+        const bgmIsExternal =
+          filename != null
+          && !presetMatches
+          && !presetMismatch
+          && !(aiStatus?.status === "pending" || aiStatus?.status === "running");
+
+        const isBusy = aiSubmitting || aiJobInFlight;
+        const regenLabel = isBusy
+          ? null
+          : filename
+            ? "🔄 重新生成配樂"
+            : "🎵 生成 30 秒配樂";
+
+        return (
+          <div className="bgm-picker__panel">
             <p className="bgm-picker__hint mono">
-              目前配樂：<span className="mono">{filename}</span>。重新生成會建立新檔案，舊草稿仍會沿用原本的配樂。
+              風格描述（將直接送給 MusicGen 作為提示詞）：
             </p>
-          )}
-          <div className="bgm-picker__row">
-            <button
-              type="button"
-              className="cta cta--primary"
-              onClick={() => void handleGeneratePreset()}
-              disabled={disabled || aiSubmitting || aiJobInFlight}
-            >
-              {aiSubmitting || aiJobInFlight ? (
-                <span className="cta__spinner-row">
-                  <span className="bgm-picker__spinner" aria-hidden="true" />
-                  {aiSubmitting
-                    ? "排隊中…"
-                    : aiStatus?.status === "running"
-                      ? "生成中…"
-                      : "排隊中…"}
-                </span>
-              ) : filename ? (
-                "重新生成"
-              ) : (
-                "生成 30 秒配樂"
-              )}
-            </button>
-          </div>
-          {aiStatus && aiStatus.job_id != null && (
-            <div className="bgm-picker__status">
-              <span className="bgm-picker__status-label mono">
-                狀態：{labelForGenStatus(aiStatus.status)}
+            <div className="bgm-picker__preset-readonly mono">
+              <span className="bgm-picker__preset-readonly-tag">
+                「{presetLabel}」
               </span>
-              {aiStatus.status === "done" && aiStatus.output_url && (
-                <audio
-                  className="bgm-library__audio"
-                  controls
-                  preload="none"
-                  src={aiStatus.output_url}
-                />
-              )}
-              {aiStatus.error && (
-                <span className="bgm-picker__err mono">{aiStatus.error}</span>
+              <span className="bgm-picker__preset-readonly-hint">
+                {presetHint}
+              </span>
+            </div>
+
+            {presetMatches && (
+              <div className="bgm-picker__status-banner bgm-picker__status-banner--match">
+                <span aria-hidden="true">✓</span>
+                <span>已根據「{presetLabel}」生成配樂</span>
+              </div>
+            )}
+            {presetMismatch && lastGenPreset && (
+              <div className="bgm-picker__status-banner bgm-picker__status-banner--mismatch">
+                <span aria-hidden="true">⚠</span>
+                <span>
+                  目前配樂依「{PRESET_LABEL[lastGenPreset]}」生成；已切換到「
+                  {presetLabel}」，按下方重新生成才會更新。
+                </span>
+              </div>
+            )}
+            {bgmIsExternal && (
+              <p className="bgm-picker__hint mono">
+                目前配樂為自行上傳或音樂庫選曲（{filename}）。要使用「
+                {presetLabel}」風格的話，按下方重新生成。
+              </p>
+            )}
+
+            <div className="bgm-picker__row">
+              {presetMatches && !isBusy ? (
+                // Match → quiet link, lets the user actively re-roll
+                // for variation without the panel screaming "do this
+                // now".
+                <button
+                  type="button"
+                  className="bgm-picker__regen-link"
+                  onClick={() => void handleGeneratePreset()}
+                  disabled={disabled}
+                  title="重新跑一次 MusicGen 會生成新版本，舊草稿仍沿用原配樂"
+                >
+                  🔄 重新生成配樂
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="cta cta--primary"
+                  onClick={() => void handleGeneratePreset()}
+                  disabled={disabled || isBusy}
+                >
+                  {isBusy ? (
+                    <span className="cta__spinner-row">
+                      <span
+                        className="bgm-picker__spinner"
+                        aria-hidden="true"
+                      />
+                      {aiSubmitting
+                        ? "排隊中…"
+                        : aiStatus?.status === "running"
+                          ? "生成中…"
+                          : "排隊中…"}
+                    </span>
+                  ) : (
+                    regenLabel
+                  )}
+                </button>
               )}
             </div>
-          )}
-          {aiError && (
-            <p className="bgm-picker__err mono" role="alert">
-              {aiError}
-            </p>
-          )}
-        </div>
-      )}
+
+            {aiStatus && aiStatus.job_id != null && (
+              <div className="bgm-picker__status">
+                {(aiStatus.status === "pending"
+                  || aiStatus.status === "running") && (
+                  <span className="bgm-picker__status-label mono">
+                    {labelForGenStatus(aiStatus.status)}
+                  </span>
+                )}
+                {aiStatus.status === "done" && (
+                  <span className="bgm-picker__status-label mono">
+                    配樂已生成
+                    {lastGenPreset
+                      ? `（${PRESET_GENRE_SHORT[lastGenPreset]} 風格）`
+                      : "（自訂提示詞）"}
+                  </span>
+                )}
+                {aiStatus.status === "done" && aiStatus.output_url && (
+                  <audio
+                    className="bgm-library__audio"
+                    controls
+                    preload="none"
+                    src={aiStatus.output_url}
+                  />
+                )}
+                {aiStatus.error && (
+                  <span className="bgm-picker__err mono">
+                    {aiStatus.error}
+                  </span>
+                )}
+              </div>
+            )}
+            {aiError && (
+              <p className="bgm-picker__err mono" role="alert">
+                {aiError}
+              </p>
+            )}
+          </div>
+        );
+      })()}
 
       {source === "library" && (
         <div className="bgm-picker__panel">
