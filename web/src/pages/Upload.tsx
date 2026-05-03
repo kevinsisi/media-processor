@@ -326,8 +326,8 @@ export default function Upload() {
         {project && (
           <p className="hero__lede">
             {project.client ? `${project.client} ／ ` : ""}
-            {project.name} ・ 風格 <span className="mono">{project.profile_name}</span>
-            ・ 比例 <span className="mono">{project.target_aspect_ratio}</span>
+            {project.name}
+            <span className="hero__lede-aspect">輸出比例 {project.target_aspect_ratio}</span>
           </p>
         )}
         {projectError && (
@@ -395,11 +395,18 @@ export default function Upload() {
               </div>
               <div className="upload-row__bottom">
                 <span className="upload-row__state">
-                  {row.state === "queued" && "佇列中"}
+                  {row.state === "queued" && "等待上傳…"}
                   {row.state === "uploading" &&
                     `上傳中 ${formatPct(row.uploadedBytes, row.totalBytes)}`}
-                  {row.state === "complete" && "已完成 · 自動分析中"}
-                  {row.state === "error" && `失敗：${row.errorMessage ?? ""}`}
+                  {row.state === "complete" && "✓ 已完成（AI 分析自動進行中）"}
+                  {row.state === "error" && (
+                    <>
+                      <span className="upload-row__state-fail">上傳失敗</span>
+                      <span className="upload-row__state-detail">
+                        {row.errorMessage ?? "未知錯誤"}
+                      </span>
+                    </>
+                  )}
                 </span>
                 {row.state === "error" && (
                   <button
@@ -414,7 +421,9 @@ export default function Upload() {
             </li>
           ))}
           {videoRows.length === 0 && (
-            <li className="upload-rows__empty">尚未選擇影片</li>
+            <li className="upload-rows__empty">
+              還沒選任何影片 — 按上方「選取影片 +」開始
+            </li>
           )}
         </ul>
       </section>
@@ -482,11 +491,13 @@ export default function Upload() {
           </div>
           <div className="summary-cell">
             <span className="summary-cell__label">腳本</span>
-            <span className="summary-cell__value">{hasScript ? "已備妥" : "未備妥"}</span>
+            <span className="summary-cell__value">
+              {hasScript ? "✓ 已填寫" : "尚未填寫"}
+            </span>
           </div>
           <div className="summary-cell">
             <span className="summary-cell__label">輸出比例</span>
-            <span className="summary-cell__value mono">
+            <span className="summary-cell__value">
               {project?.target_aspect_ratio ?? "-"}
             </span>
           </div>
@@ -495,8 +506,22 @@ export default function Upload() {
           <Link to="/" className="summary-back">
             ← 返回專案清單
           </Link>
-          <Link to={`/projects/${projectId}/assets`} className="summary-next">
-            進入素材分析 →
+          <Link
+            to={`/projects/${projectId}/assets`}
+            className={
+              completedVideoCount > 0
+                ? "cta cta--primary summary-next"
+                : "cta summary-next summary-next--inactive"
+            }
+            title={
+              completedVideoCount > 0
+                ? undefined
+                : "影片上傳完成後可進入分析頁面"
+            }
+          >
+            {completedVideoCount > 0
+              ? `下一步：查看分析（${completedVideoCount} 個素材）→`
+              : "下一步：查看分析 →"}
           </Link>
         </div>
       </section>

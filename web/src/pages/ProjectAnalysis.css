@@ -428,21 +428,28 @@
 }
 
 .step-card__retry {
-  width: 26px;
-  height: 26px;
   flex-shrink: 0;
-  border-radius: 50%;
+  height: 28px;
+  border-radius: 14px;
   border: 1px solid var(--ink-line);
   background: transparent;
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: 12px;
   line-height: 1;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  padding: 0;
+  gap: 0.3rem;
+  padding: 0 0.65rem;
   transition: border-color 150ms ease, color 150ms ease, background 150ms ease;
+}
+.step-card__retry-icon {
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+}
+.step-card__retry-label {
+  font-size: 12px;
 }
 
 .step-card__retry:hover:not(:disabled) {
@@ -454,6 +461,21 @@
 .step-card__retry:disabled {
   opacity: 0.55;
   cursor: not-allowed;
+}
+
+/* v0.22.0 — when the step actually failed, the retry button gets a
+   warm-amber tint so it reads as "you should probably click this"
+   rather than the calm secondary state used after a successful
+   step. Hover effect carries through. */
+.step-card__retry--prominent {
+  border-color: rgba(217, 158, 90, 0.55);
+  color: rgba(255, 220, 170, 0.95);
+  background: rgba(217, 158, 90, 0.12);
+}
+.step-card__retry--prominent:hover:not(:disabled) {
+  border-color: rgba(217, 158, 90, 1);
+  color: rgba(255, 235, 200, 1);
+  background: rgba(217, 158, 90, 0.22);
 }
 
 .step-card__summary {

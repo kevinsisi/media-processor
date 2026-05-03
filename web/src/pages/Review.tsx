@@ -277,9 +277,9 @@ function ReviewBody({ project, draft }: ReviewBodyProps) {
         >
           <span className="action__glyph">✓</span>
           <span className="action__label">
-            {pendingAction === "approve" ? "定剪中…" : "定剪"}
+            {pendingAction === "approve" ? "定剪中…" : "通過定剪"}
           </span>
-          <span className="action__hint mono">→ 自動同步到 CapCut</span>
+          <span className="action__hint">把這版標為最終版</span>
         </button>
         <button
           className={`action${review.result?.action === "repatch" && !review.result?.prompt_feedback ? " action--done" : ""}`}
@@ -290,9 +290,9 @@ function ReviewBody({ project, draft }: ReviewBodyProps) {
           <span className="action__label">
             {pendingAction === "repatch" && !promptOpen
               ? "重新剪輯中…"
-              : "重新剪輯"}
+              : "重新剪一版"}
           </span>
-          <span className="action__hint mono">同一風格檔，重新挑選片段</span>
+          <span className="action__hint">不變風格，AI 重抽片段</span>
         </button>
         <button
           className="action action--prompt"
@@ -301,7 +301,7 @@ function ReviewBody({ project, draft }: ReviewBodyProps) {
         >
           <span className="action__glyph">❉</span>
           <span className="action__label">依指示重剪</span>
-          <span className="action__hint mono">告訴 AI 要改什麼</span>
+          <span className="action__hint">告訴 AI 哪裡要改</span>
         </button>
         <button
           className={`action${review.result?.action === "download" ? " action--done" : ""}`}
@@ -310,9 +310,9 @@ function ReviewBody({ project, draft }: ReviewBodyProps) {
         >
           <span className="action__glyph">↓</span>
           <span className="action__label">
-            {pendingAction === "download" ? "記錄中…" : "下載 zip"}
+            {pendingAction === "download" ? "記錄中…" : "下載成品"}
           </span>
-          <span className="action__hint mono">手動複製到 CapCut</span>
+          <span className="action__hint">mp4 + 字幕 SRT</span>
         </button>
         <button
           className={`action action--reject${review.result?.action === "reject" ? " action--done" : ""}`}
@@ -321,9 +321,9 @@ function ReviewBody({ project, draft }: ReviewBodyProps) {
         >
           <span className="action__glyph">×</span>
           <span className="action__label">
-            {pendingAction === "reject" ? "退回中…" : "退回"}
+            {pendingAction === "reject" ? "退回中…" : "退回此版"}
           </span>
-          <span className="action__hint mono">退回 v{draft.version}</span>
+          <span className="action__hint">標記 v{draft.version} 不採用</span>
         </button>
       </div>
 

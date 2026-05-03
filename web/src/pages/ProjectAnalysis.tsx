@@ -160,8 +160,15 @@ function AnalysisStepStatusGrid({
         // is wasted work because the worker is already on it (or will be).
         const canRetry = cls === "done" || cls === "failed" || cls === "skipped";
         const busy = retryingStep === step;
+        // v0.22.0 — show the friendly mapped reason (e.g.「GPU 不可用」)
+        // when we recognise the token; fall back to the raw tail for
+        // unmapped errors so debugging info isn't fully hidden.
         const failureDetail =
-          raw && raw.startsWith("failed:") ? raw.slice("failed:".length) : null;
+          raw && raw.startsWith("failed:")
+            ? labelForStepState(raw) === "失敗"
+              ? raw.slice("failed:".length)
+              : labelForStepState(raw)
+            : null;
         return (
           <div
             key={step}
@@ -181,13 +188,21 @@ function AnalysisStepStatusGrid({
               {canRetry && (
                 <button
                   type="button"
-                  className="step-card__retry"
+                  className={
+                    "step-card__retry"
+                    + (cls === "failed" ? " step-card__retry--prominent" : "")
+                  }
                   aria-label={`重新分析「${ANALYSIS_STEP_LABELS[step]}」`}
                   title={`重新分析「${ANALYSIS_STEP_LABELS[step]}」`}
                   disabled={busy}
                   onClick={() => onRetryStep(asset.id, step)}
                 >
-                  {busy ? "…" : "↻"}
+                  <span className="step-card__retry-icon" aria-hidden>
+                    {busy ? "⋯" : "↻"}
+                  </span>
+                  <span className="step-card__retry-label">
+                    {busy ? "重試中" : "重試"}
+                  </span>
                 </button>
               )}
             </div>
