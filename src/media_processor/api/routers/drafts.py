@@ -6,7 +6,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -23,10 +23,12 @@ from media_processor.api.schemas import (
     DraftExportResponse,
     DraftPatchRequest,
     DraftPatchResponse,
+    DraftRebuildSubtitlesRequest,
     DraftReorderRequest,
     DraftSegmentOut,
     DraftSegmentPatch,
     DraftSegmentSplitRequest,
+    RenderFlagsOverride,
     SegmentVolumeOut,
     SegmentVolumePatch,
     SubtitleCueOut,
@@ -82,25 +84,45 @@ def _expected_draft_path(project_id: int, version: int, suffix: str) -> Path:
     return Path(settings.drafts_dir) / str(project_id) / _draft_filename(version, suffix)
 
 
-def _draft_render_flags(draft: Draft) -> dict[str, bool]:
-    """v0.21.1 — pull the operator's original render-flag choices off
-    ``Draft.render_flags_json`` for the skip-plan re-render endpoints.
+def _draft_render_flags(
+    draft: Draft,
+    override: RenderFlagsOverride | None = None,
+) -> dict[str, bool]:
+    """v0.21.1 / v0.21.3 — resolve the four render flags for a skip-plan
+    re-render.
 
-    Returns a dict with every flag the renderer knows about, populated
-    from the snapshot when available and falling back to the historical
-    all-True default otherwise (matches pre-v0.21.1 behaviour for
-    legacy rows that don't have the column populated).
+    Priority, per-flag (independent — partial overrides are fine):
+      1. ``override`` body field (FE-authoritative, sent fresh from the
+         current ProjectEdit toggle state)
+      2. ``Draft.render_flags_json`` snapshot (written by the trigger
+         endpoint when the draft was created)
+      3. The historical all-True default (matches pre-v0.21.1
+         behaviour for legacy NULL rows that have no snapshot)
 
-    Each value is coerced through ``bool()`` so a corrupt JSON blob
-    (e.g. a string ``"false"``) doesn't accidentally round-trip as
-    truthy and re-enable a stage the operator turned off.
+    The boolean coercion guards against corrupt JSON blobs (e.g. a
+    string ``"false"``) round-tripping as truthy.
     """
-    flags = draft.render_flags_json if isinstance(draft.render_flags_json, dict) else {}
+    snapshot = (
+        draft.render_flags_json if isinstance(draft.render_flags_json, dict) else {}
+    )
+    over = (
+        override.model_dump(exclude_none=True)
+        if override is not None
+        else {}
+    )
+
+    def _pick(key: str) -> bool:
+        if key in over:
+            return bool(over[key])
+        if key in snapshot:
+            return bool(snapshot[key])
+        return True
+
     return {
-        "transitions": bool(flags.get("transitions", True)),
-        "stabilize": bool(flags.get("stabilize", True)),
-        "subtitles": bool(flags.get("subtitles", True)),
-        "auto_reframe": bool(flags.get("auto_reframe", True)),
+        "transitions": _pick("transitions"),
+        "stabilize": _pick("stabilize"),
+        "subtitles": _pick("subtitles"),
+        "auto_reframe": _pick("auto_reframe"),
     }
 
 
@@ -520,9 +542,14 @@ async def reorder_draft_segments(
     draft.status = DraftStatus.PENDING.value
     draft.progress_steps_json = {}
     draft.prompt_feedback = None
+    flags = _draft_render_flags(draft, payload.render_flags)
+    # v0.21.3 — backfill the resolved flags onto the Draft so subsequent
+    # re-renders (skip-plan or otherwise) stay consistent without the
+    # FE having to keep re-sending the override. This is what makes
+    # legacy NULL rows "settle" into a known state on first re-render.
+    draft.render_flags_json = flags
     await session.commit()
 
-    flags = _draft_render_flags(draft)
     enqueue_project_edit(
         draft.project_id,
         draft_id=draft.id,
@@ -870,10 +897,17 @@ async def patch_subtitle(
 async def rebuild_subtitles(
     draft_id: int,
     session: SessionDep,
+    payload: DraftRebuildSubtitlesRequest | None = Body(default=None),  # noqa: B008
 ) -> DraftDetail:
     """Re-burn subtitles using the current ``subtitle_cues`` rows. Skips
     the plan + cut + concat stages — only the SRT-from-DB and burn-in
-    stages run, plus the BGM stage at the end if a track is set."""
+    stages run, plus the BGM stage at the end if a track is set.
+
+    The body is optional so older clients (no body) keep working;
+    when provided, ``render_flags`` overrides the per-flag values
+    stored on the Draft (used by ProjectEdit to push the operator's
+    current toggle state, especially for legacy drafts that pre-date
+    ``Draft.render_flags_json``)."""
     stmt = select(Draft).where(Draft.id == draft_id).options(selectinload(Draft.segments))
     draft = (await session.execute(stmt)).scalar_one_or_none()
     if draft is None:
@@ -886,9 +920,11 @@ async def rebuild_subtitles(
     draft.status = DraftStatus.PENDING.value
     draft.progress_steps_json = {}
     draft.prompt_feedback = None
+    override = payload.render_flags if payload is not None else None
+    flags = _draft_render_flags(draft, override)
+    draft.render_flags_json = flags
     await session.commit()
 
-    flags = _draft_render_flags(draft)
     enqueue_project_edit(
         draft.project_id,
         draft_id=draft.id,

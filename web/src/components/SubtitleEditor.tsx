@@ -9,6 +9,17 @@ interface SubtitleEditorProps {
   locked: boolean;
   onRebuildStart?: () => void;
   onRebuildError?: (msg: string) => void;
+  // v0.21.3 — current ProjectEdit toggle state. Sent as render_flags
+  // override on rebuild-subtitles so a legacy draft (NULL snapshot)
+  // re-renders honouring the operator's current toggles instead of
+  // silently defaulting to all-True. Optional — when omitted the
+  // backend keeps using its stored snapshot.
+  renderFlags?: {
+    transitions: boolean;
+    stabilize: boolean;
+    subtitles: boolean;
+    autoReframe: boolean;
+  };
 }
 
 function formatTimecode(ms: number): string {
@@ -30,6 +41,7 @@ export default function SubtitleEditor({
   locked,
   onRebuildStart,
   onRebuildError,
+  renderFlags,
 }: SubtitleEditorProps) {
   const [cues, setCues] = useState<SubtitleCueOut[]>([]);
   const [loading, setLoading] = useState(true);
@@ -115,7 +127,19 @@ export default function SubtitleEditor({
     onRebuildStart?.();
     setRebuilding(true);
     try {
-      await apiClient.rebuildDraftSubtitles(draftId);
+      await apiClient.rebuildDraftSubtitles(
+        draftId,
+        renderFlags
+          ? {
+              render_flags: {
+                transitions: renderFlags.transitions,
+                stabilize: renderFlags.stabilize,
+                subtitles: renderFlags.subtitles,
+                auto_reframe: renderFlags.autoReframe,
+              },
+            }
+          : undefined,
+      );
       setEdited(false);
     } catch (err) {
       const msg =
@@ -128,7 +152,7 @@ export default function SubtitleEditor({
     } finally {
       setRebuilding(false);
     }
-  }, [draftId, onRebuildStart, onRebuildError]);
+  }, [draftId, onRebuildStart, onRebuildError, renderFlags]);
 
   const total = cues.length;
   const charCount = useMemo(

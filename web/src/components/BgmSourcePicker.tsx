@@ -505,11 +505,23 @@ export default function BgmSourcePicker({
             )}
             {presetMismatch && lastGenPreset && (
               <div className="bgm-picker__status-banner bgm-picker__status-banner--mismatch">
-                <span aria-hidden="true">⚠</span>
-                <span>
-                  目前配樂依「{PRESET_LABEL[lastGenPreset]}」生成；已切換到「
-                  {presetLabel}」，按下方重新生成才會更新。
-                </span>
+                <div className="bgm-picker__status-banner-head">
+                  <span
+                    className="bgm-picker__status-banner-icon"
+                    aria-hidden="true"
+                  >
+                    ⚠
+                  </span>
+                  <strong className="bgm-picker__status-banner-title">
+                    配樂尚未更新！目前播放的仍是舊配樂
+                  </strong>
+                </div>
+                <p className="bgm-picker__status-banner-body">
+                  風格已從「{PRESET_LABEL[lastGenPreset]}」改為「{presetLabel}」，
+                  但配樂仍是「{PRESET_LABEL[lastGenPreset]}」
+                  （{PRESET_GENRE_SHORT[lastGenPreset]}）的版本。請按下方
+                  <strong>「重新生成配樂」</strong>套用新風格。
+                </p>
               </div>
             )}
             {bgmIsExternal && (
@@ -536,7 +548,11 @@ export default function BgmSourcePicker({
               ) : (
                 <button
                   type="button"
-                  className="cta cta--primary"
+                  className={
+                    presetMismatch
+                      ? "cta cta--primary bgm-picker__regen-cta--loud"
+                      : "cta cta--primary"
+                  }
                   onClick={() => void handleGeneratePreset()}
                   disabled={disabled || isBusy}
                 >
@@ -569,15 +585,20 @@ export default function BgmSourcePicker({
                 )}
                 {aiStatus.status === "done" && (
                   <span className="bgm-picker__status-label mono">
-                    配樂已生成
-                    {lastGenPreset
-                      ? `（${PRESET_GENRE_SHORT[lastGenPreset]} 風格）`
-                      : "（自訂提示詞）"}
+                    {presetMismatch && lastGenPreset
+                      ? `🕘 舊版本：${PRESET_GENRE_SHORT[lastGenPreset]} 風格（按上方重新生成才會更新）`
+                      : lastGenPreset
+                        ? `配樂已生成（${PRESET_GENRE_SHORT[lastGenPreset]} 風格）`
+                        : "配樂已生成（自訂提示詞）"}
                   </span>
                 )}
                 {aiStatus.status === "done" && aiStatus.output_url && (
                   <audio
-                    className="bgm-library__audio"
+                    className={
+                      presetMismatch
+                        ? "bgm-library__audio bgm-picker__audio--stale"
+                        : "bgm-library__audio"
+                    }
                     controls
                     preload="none"
                     src={aiStatus.output_url}
