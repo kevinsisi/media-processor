@@ -1,15 +1,15 @@
-"""v0.18 — projects.subtitle_* customisation columns.
+"""v0.19 — projects.subtitle_* customisation columns.
 
 Six string columns on ``projects`` so the user can pick the subtitle
 font / colour / outline / position / size from the project edit page.
 The renderer reads these to build the drawtext filter; defaults match
 the pre-v0.18 burn-in look so untouched projects render identically.
 
-NB: this migration is intentionally numbered 0015 to leave 0014 free
-for an in-flight watermark feature on a sibling worktree.
+Chains after 0014 (project watermark) so the v0.18 -> v0.19 release
+remains a single linear migration head.
 
 Revision ID: 0015_project_subtitle_style
-Revises: 0013_draft_segment_volume
+Revises: 0014_project_watermark
 Create Date: 2026-05-03
 """
 
@@ -19,7 +19,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "0015_project_subtitle_style"
-down_revision: str | None = "0013_draft_segment_volume"
+down_revision: str | None = "0014_project_watermark"
 branch_labels: str | None = None
 depends_on: str | None = None
 
