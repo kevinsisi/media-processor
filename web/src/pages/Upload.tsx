@@ -506,23 +506,38 @@ export default function Upload() {
           <Link to="/" className="summary-back">
             ← 返回專案清單
           </Link>
-          <Link
-            to={`/projects/${projectId}/assets`}
-            className={
-              completedVideoCount > 0
-                ? "cta cta--primary summary-next"
-                : "cta summary-next summary-next--inactive"
-            }
-            title={
-              completedVideoCount > 0
-                ? undefined
-                : "影片上傳完成後可進入分析頁面"
-            }
-          >
-            {completedVideoCount > 0
-              ? `下一步：查看分析（${completedVideoCount} 個素材）→`
-              : "下一步：查看分析 →"}
-          </Link>
+          {/* v0.22 — three states for the next-step CTA so users
+              never navigate to an empty analysis page or away while
+              uploads are mid-flight:
+              * 0 assets → disabled (greyed, not clickable)
+              * uploads still flowing → warning variant (clickable
+                but flagged with the in-flight count so the operator
+                knows what they'd miss)
+              * idle → primary CTA carrying the asset count */}
+          {assetCount === 0 ? (
+            <span
+              className="cta summary-next summary-next--inactive"
+              aria-disabled="true"
+              title="請先上傳至少一個影片，才能進入素材分析。"
+            >
+              下一步：查看分析 →
+            </span>
+          ) : pendingUploadCount > 0 ? (
+            <Link
+              to={`/projects/${projectId}/assets`}
+              className="summary-next summary-next--warning"
+              title={`還有 ${pendingUploadCount} 個影片未上傳完，前往分析頁可能看不到全部素材。`}
+            >
+              下一步：查看分析（{pendingUploadCount} 個還在上傳）→
+            </Link>
+          ) : (
+            <Link
+              to={`/projects/${projectId}/assets`}
+              className="cta cta--primary summary-next"
+            >
+              下一步：查看分析（{assetCount} 個素材）→
+            </Link>
+          )}
         </div>
       </section>
     </main>

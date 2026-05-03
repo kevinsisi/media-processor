@@ -385,6 +385,19 @@
   transform: translateY(-1px);
 }
 
+/* v0.22 — warning variant for the next-step CTA: clickable, but
+   visually flags that uploads are still in flight. The disabled-when-
+   no-assets state reuses .summary-next--inactive (defined above). */
+.summary-next--warning {
+  background: var(--ink-elevated);
+  color: var(--text-primary);
+  border-color: var(--gold);
+}
+
+.summary-next--warning:hover {
+  background: var(--ink-elevated);
+}
+
 .summary-back {
   font-family: var(--font-mono);
   font-size: var(--t-xs);

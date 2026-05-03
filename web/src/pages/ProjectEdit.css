@@ -690,6 +690,33 @@
   white-space: pre-wrap;
   word-break: break-word;
   overflow-x: auto;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+/* v0.22 — wrap the raw worker error in a <details> so the user
+   reads the plain-Chinese explanation first and only opens the
+   stack trace if they need to triage it. */
+.edit-card__error-details {
+  margin-top: var(--space-3);
+}
+
+.edit-card__error-details > summary {
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
+  color: var(--text-secondary);
+  padding: var(--space-2) 0;
+  user-select: none;
+}
+
+.edit-card__error-details > summary:hover {
+  color: var(--text-primary);
+}
+
+.edit-card__error-details[open] > summary {
+  color: var(--text-primary);
+  margin-bottom: var(--space-2);
 }
 
 /* ---- v0.20.2 — settings sub-cards inside .edit-card ---- */

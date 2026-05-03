@@ -344,6 +344,32 @@
   to   { transform: translateX(100%); }
 }
 
+/* v0.22 — indeterminate-progress variant: no fake percentage, just a
+   rolling gold sliver. Replaces the previous hardcoded 55% bar that
+   misled operators about real progress. */
+.progress-track--indeterminate {
+  width: 220px;
+  height: 2px;
+  background: var(--ink-line);
+  position: relative;
+  overflow: hidden;
+}
+
+.progress-bar--indeterminate {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 35%;
+  background: var(--gold);
+  opacity: 0.85;
+  animation: indeterminate-slide 1.6s var(--ease-out) infinite;
+}
+
+@keyframes indeterminate-slide {
+  0%   { left: -40%; }
+  100% { left: 105%; }
+}
+
 /* Loading / error / empty notice rendered inside the board */
 .board__notice {
   padding: var(--space-5) 0;

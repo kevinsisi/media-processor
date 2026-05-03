@@ -1426,9 +1426,17 @@ export default function ProjectEdit() {
       {showFailed && draft && (
         <section className="edit-card edit-card--failed">
           <h2 className="edit-card__title">剪輯失敗</h2>
+          <p className="edit-card__body">
+            渲染流程沒能跑完。下方的進度條會標出失敗在哪一階段；常見原因：素材不夠多、Gemini 無法服務、或某段素材的編碼有問題。
+          </p>
           <ProgressTracker steps={draft.progress_steps} />
           {draft.prompt_feedback && (
-            <pre className="edit-card__error mono">{draft.prompt_feedback}</pre>
+            <details className="edit-card__error-details">
+              <summary>展開技術細節（給開發者參考）</summary>
+              <pre className="edit-card__error mono">
+                {draft.prompt_feedback}
+              </pre>
+            </details>
           )}
           <div className="edit-card__actions">
             <button

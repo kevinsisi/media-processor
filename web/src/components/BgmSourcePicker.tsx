@@ -795,9 +795,9 @@ export default function BgmSourcePicker({
                       : "排隊中…"}
                 </span>
               ) : filename ? (
-                "重新生成"
+                "重新生成（覆寫舊配樂）"
               ) : (
-                "生成配樂"
+                "🎵 生成 30 秒配樂"
               )}
             </button>
           </div>

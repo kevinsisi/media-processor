@@ -722,7 +722,7 @@ function AssetCard({
         </div>
         <span
           className={`asset-status asset-status--${asset.status}`}
-          title={`asset.status = ${asset.status}`}
+          title={labelForAssetStatus(asset.status)}
         >
           {labelForAssetStatus(asset.status)}
         </span>
@@ -834,19 +834,25 @@ function AssetCard({
           type="button"
           className="cta cta--quiet"
           onClick={() => onAnalyze(asset.id, false)}
+          title="只重跑尚未完成或失敗的步驟；手動編輯過的字幕會保留。"
         >
-          重新分析
+          重新分析（保留手改）
         </button>
         <button
           type="button"
           className="cta"
           onClick={() => {
-            if (window.confirm("強制重跑會覆蓋手動編輯過的逐字稿。確定要繼續？")) {
+            if (
+              window.confirm(
+                "強制重跑會覆蓋手動編輯過的逐字稿與字幕。確定要繼續？",
+              )
+            ) {
               onAnalyze(asset.id, true);
             }
           }}
+          title="所有分析步驟全部重跑，並覆寫手動編輯過的字幕。"
         >
-          強制重跑
+          強制重跑（覆寫手改）
         </button>
       </footer>
     </article>
@@ -1148,16 +1154,20 @@ export default function ProjectAnalysis() {
               className="cta cta--primary"
               onClick={() => void runBatchAnalyze(false)}
               disabled={selectedIds.size === 0 || batchRunning}
+              title="只跑未完成或失敗的步驟，手改字幕會保留。"
             >
-              {batchRunning ? "觸發中…" : `批次分析 (${selectedIds.size})`}
+              {batchRunning
+                ? "觸發中…"
+                : `重新分析所選（${selectedIds.size}）`}
             </button>
             <button
               type="button"
               className="cta"
               onClick={() => void runBatchAnalyze(true)}
               disabled={selectedIds.size === 0 || batchRunning}
+              title="所有步驟全部重跑，會覆寫手改字幕。"
             >
-              強制重跑
+              強制重跑（覆寫手改）
             </button>
           </div>
         </div>
