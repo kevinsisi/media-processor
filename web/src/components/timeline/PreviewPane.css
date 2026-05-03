@@ -17,9 +17,10 @@
   background: #000;
   border-radius: 6px;
   overflow: hidden;
-  /* Default 16:9 aspect; mobile-landscape overrides to 9:16 below. */
+  /* Default 16:9 aspect; mobile-landscape overrides below. */
   aspect-ratio: 16 / 9;
   width: 100%;
+  position: relative;
 }
 
 .preview-pane__video {
@@ -35,10 +36,39 @@
 }
 
 @media (orientation: landscape) and (max-width: 1023px) {
-  /* Mobile landscape — preview shifts to 9:16 since most short-form
-     reels are vertical. */
+  /* Mobile landscape — preview is small (1/4 of width). The viewport
+     fills available space; transport overlays at the bottom so it
+     doesn't steal vertical space from the timeline. */
+  .preview-pane {
+    padding: 0;
+    background: transparent;
+    position: relative;
+  }
   .preview-pane__viewport {
-    aspect-ratio: 9 / 16;
-    max-height: 70vh;
+    aspect-ratio: auto;
+    width: 100%;
+    height: 100%;
+    max-height: none;
+    border-radius: 6px;
+  }
+  .preview-pane .transport {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(
+      to top,
+      rgba(0, 0, 0, 0.78) 0%,
+      rgba(0, 0, 0, 0.0) 100%
+    );
+    border-radius: 0 0 6px 6px;
+    padding: 16px 8px 6px;
+    flex-wrap: nowrap;
+    gap: 6px;
+    z-index: 2;
+    pointer-events: none;
+  }
+  .preview-pane .transport > * {
+    pointer-events: auto;
   }
 }

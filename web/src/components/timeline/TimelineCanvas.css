@@ -64,11 +64,13 @@
 }
 
 .timeline-canvas__track--video {
-  background: rgba(74, 122, 217, 0.05);
+  background: rgba(74, 122, 217, 0.12);
+  border-color: rgba(74, 122, 217, 0.25);
 }
 
 .timeline-canvas__track--bgm {
-  background: rgba(100, 180, 100, 0.05);
+  background: rgba(100, 180, 100, 0.10);
+  border-color: rgba(100, 180, 100, 0.25);
   display: flex;
   align-items: center;
   padding: 0 8px;
@@ -101,12 +103,4 @@
   color: var(--text-secondary);
   font-size: 0.75rem;
   font-style: italic;
-}
-
-.timeline-canvas__zoom {
-  padding: 4px 8px;
-  font-size: 0.7rem;
-  color: var(--text-secondary);
-  background: rgba(0, 0, 0, 0.3);
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
 }

@@ -114,9 +114,6 @@ export default function TimelineCanvas({
           />
         </div>
       </div>
-      <div className="timeline-canvas__zoom mono">
-        zoom: {pxPerSec.toFixed(1)} px/s · Ctrl + 滾輪 / 兩指縮放
-      </div>
     </div>
   );
 }

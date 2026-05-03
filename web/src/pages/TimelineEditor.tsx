@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ApiError, apiClient } from "../api/client";
 import PreviewPane from "../components/timeline/PreviewPane";
@@ -17,6 +17,9 @@ import "./TimelineEditor.css";
 // stays paused until the operator hits Apply, which fires the existing
 // PATCH /drafts/{id}/order endpoint with the current order list (that
 // endpoint already does the skip-plan re-render enqueue).
+
+const PWA_HINT_DISMISS_KEY = "timeline.pwaHintDismissed";
+const QUICK_SPEEDS = [0.5, 1.0, 2.0] as const;
 
 export default function TimelineEditor() {
   const params = useParams();
@@ -43,6 +46,19 @@ export default function TimelineEditor() {
   const [isPortrait, setIsPortrait] = useState<boolean>(() =>
     detectPortrait(),
   );
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [showPwaHint, setShowPwaHint] = useState<boolean>(() =>
+    !localStorage.getItem(PWA_HINT_DISMISS_KEY) && isMobileViewport(),
+  );
+
+  const moreMenuRef = useRef<HTMLDivElement | null>(null);
+
+  // Body class so global CSS (AppHeader hide on mobile landscape) and
+  // page-level fullscreen styling can target this route specifically.
+  useEffect(() => {
+    document.body.classList.add("timeline-editor-active");
+    return () => document.body.classList.remove("timeline-editor-active");
+  }, []);
 
   useEffect(() => {
     const mq = window.matchMedia(
@@ -52,6 +68,21 @@ export default function TimelineEditor() {
     mq.addEventListener?.("change", listener);
     return () => mq.removeEventListener?.("change", listener);
   }, []);
+
+  // Click-outside to close more-options menu.
+  useEffect(() => {
+    if (!moreOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      if (
+        moreMenuRef.current &&
+        !moreMenuRef.current.contains(e.target as Node)
+      ) {
+        setMoreOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [moreOpen]);
 
   // Initial load.
   useEffect(() => {
@@ -223,6 +254,11 @@ export default function TimelineEditor() {
     }
   }, [draft, draftId]);
 
+  const dismissPwaHint = useCallback(() => {
+    localStorage.setItem(PWA_HINT_DISMISS_KEY, "1");
+    setShowPwaHint(false);
+  }, []);
+
   if (loadError) {
     return (
       <main className="timeline-editor timeline-editor--error">
@@ -248,9 +284,11 @@ export default function TimelineEditor() {
         <header className="timeline-editor__header timeline-editor__header--mobile">
           <Link
             to={`/projects/${projectId}/edit`}
-            className="timeline-editor__back"
+            className="timeline-editor__icon-btn"
+            aria-label="返回基本編輯"
+            title="返回"
           >
-            ← 返回
+            ←
           </Link>
           <span className="timeline-editor__title">
             {project.name} · v{draft.version}
@@ -261,36 +299,106 @@ export default function TimelineEditor() {
     );
   }
 
+  const applyTitle = applying
+    ? "排隊中…"
+    : dirty
+      ? "套用變更並重新渲染"
+      : "尚無待套用的變更";
+
   return (
     <main className="timeline-editor">
       <header className="timeline-editor__header">
         <Link
           to={`/projects/${projectId}/edit`}
-          className="timeline-editor__back"
+          className="timeline-editor__icon-btn"
+          aria-label="返回基本編輯"
+          title="返回基本編輯"
         >
-          ← 返回
+          ←
         </Link>
         <span className="timeline-editor__title">
-          {project.name} · Draft v{draft.version}
+          {project.name}
+          <span className="timeline-editor__version mono">
+            v{draft.version}
+          </span>
+          {dirty && (
+            <span
+              className="timeline-editor__dirty"
+              aria-label="有未套用的變更"
+              title="有未套用的變更"
+            >
+              ●
+            </span>
+          )}
         </span>
-        {dirty && <span className="timeline-editor__dirty">● 未套用</span>}
-        <span style={{ flex: 1 }} />
-        <button
-          type="button"
-          className="cta cta--primary"
-          onClick={() => void handleApply()}
-          disabled={!dirty || applying || busy}
-          title={dirty ? "重新渲染預覽 mp4" : "尚無待套用的變更"}
-        >
-          {applying ? "排隊中…" : "套用 / 重新渲染"}
-        </button>
-        <button
-          type="button"
-          className="cta cta--secondary"
-          onClick={() => navigate(`/projects/${projectId}/edit`)}
-        >
-          回到基本編輯
-        </button>
+        <div className="timeline-editor__actions">
+          <button
+            type="button"
+            className={`timeline-editor__icon-btn timeline-editor__icon-btn--accent ${
+              dirty && !applying ? "is-active" : ""
+            }`}
+            onClick={() => void handleApply()}
+            disabled={!dirty || applying || busy}
+            title={applyTitle}
+            aria-label={applyTitle}
+          >
+            {applying ? "…" : "🔄"}
+          </button>
+          <div
+            className="timeline-editor__more"
+            ref={moreMenuRef}
+          >
+            <button
+              type="button"
+              className="timeline-editor__icon-btn"
+              onClick={() => setMoreOpen((v) => !v)}
+              aria-label="更多選項"
+              aria-expanded={moreOpen}
+              title="更多選項"
+            >
+              ⋯
+            </button>
+            {moreOpen && (
+              <div
+                className="timeline-editor__more-menu"
+                role="menu"
+              >
+                <div className="timeline-editor__more-section">
+                  <span className="timeline-editor__more-label">倍速</span>
+                  <div className="timeline-editor__speed-row">
+                    {QUICK_SPEEDS.map((s) => (
+                      <button
+                        key={s}
+                        type="button"
+                        className={`timeline-editor__speed-btn ${
+                          speed === s ? "is-active" : ""
+                        }`}
+                        onClick={() => {
+                          setSpeed(s);
+                          setMoreOpen(false);
+                        }}
+                      >
+                        {s}×
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="timeline-editor__more-divider" />
+                <button
+                  type="button"
+                  className="timeline-editor__more-item"
+                  role="menuitem"
+                  onClick={() => {
+                    setMoreOpen(false);
+                    navigate(`/projects/${projectId}/edit`);
+                  }}
+                >
+                  回到基本編輯
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
       </header>
       {actionError && (
         <div className="timeline-editor__error">{actionError}</div>
@@ -335,6 +443,21 @@ export default function TimelineEditor() {
           />
         </div>
       </div>
+      {showPwaHint && (
+        <div className="timeline-editor__pwa-hint" role="status">
+          <span className="timeline-editor__pwa-hint-text">
+            💡 加到主畫面可獲得全螢幕體驗（隱藏瀏覽器工具列）
+          </span>
+          <button
+            type="button"
+            className="timeline-editor__pwa-hint-dismiss"
+            onClick={dismissPwaHint}
+            aria-label="關閉提示"
+          >
+            ✕
+          </button>
+        </div>
+      )}
     </main>
   );
 }
@@ -345,6 +468,11 @@ function detectPortrait(): boolean {
     "(orientation: portrait) and (max-width: 1023px)",
   );
   return mq.matches;
+}
+
+function isMobileViewport(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.matchMedia("(max-width: 1023px)").matches;
 }
 
 function extractError(err: unknown): string {

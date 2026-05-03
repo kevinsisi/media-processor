@@ -6,37 +6,46 @@
   align-items: stretch;
   background: linear-gradient(
     180deg,
-    rgba(74, 122, 217, 0.65) 0%,
-    rgba(74, 122, 217, 0.45) 100%
+    rgba(74, 122, 217, 0.92) 0%,
+    rgba(58, 100, 190, 0.78) 100%
   );
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 4px;
+  border: 1px solid rgba(180, 210, 255, 0.55);
+  border-radius: 5px;
   cursor: pointer;
   user-select: none;
   overflow: hidden;
   box-sizing: border-box;
-  transition: border-color 80ms ease;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 1px 2px rgba(0, 0, 0, 0.35);
+  transition: border-color 80ms ease, box-shadow 80ms ease, transform 80ms ease;
 }
 
 .seg-clip:hover {
-  border-color: rgba(255, 255, 255, 0.35);
+  border-color: rgba(255, 255, 255, 0.7);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.25),
+    0 2px 6px rgba(0, 0, 0, 0.45);
 }
 
 .seg-clip--selected {
-  border-color: var(--accent, #ffd34a);
-  box-shadow: 0 0 0 2px rgba(255, 211, 74, 0.4);
+  border-color: var(--gold, #ffd34a);
+  box-shadow:
+    0 0 0 2px rgba(255, 211, 74, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    0 2px 8px rgba(0, 0, 0, 0.5);
 }
 
 .seg-clip__handle {
   width: 8px;
   flex-shrink: 0;
-  background: rgba(0, 0, 0, 0.35);
+  background: rgba(0, 0, 0, 0.45);
   cursor: ew-resize;
   position: relative;
 }
 
 .seg-clip__handle:hover {
-  background: rgba(255, 255, 255, 0.5);
+  background: rgba(255, 255, 255, 0.55);
 }
 
 .seg-clip__handle::after {
@@ -45,8 +54,9 @@
   top: 30%;
   bottom: 30%;
   left: 50%;
-  width: 1px;
-  background: rgba(255, 255, 255, 0.6);
+  width: 2px;
+  background: rgba(255, 255, 255, 0.7);
+  border-radius: 1px;
   transform: translateX(-50%);
 }
 
@@ -57,19 +67,26 @@
   justify-content: space-between;
   padding: 4px 6px;
   min-width: 0;
-  font-size: 0.7rem;
+  font-size: 0.72rem;
   color: #fff;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
 }
 
 .seg-clip__label {
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .seg-clip__transition {
-  opacity: 0.75;
+  opacity: 0.85;
   font-size: 0.6rem;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Bigger touch targets on mobile so trim handles are reachable. */
+@media (orientation: landscape) and (max-width: 1023px) {
+  .seg-clip__handle {
+    width: 12px;
+  }
 }

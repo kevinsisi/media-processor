@@ -3,7 +3,9 @@
   flex-direction: column;
   gap: var(--space-3, 12px);
   padding: var(--space-3, 12px);
-  height: calc(100vh - 60px); /* leave room for AppHeader */
+  /* 100dvh tracks dynamic viewport (auto-subtracts mobile browser
+     chrome / Safari bottom bar). Desktop subtracts AppHeader. */
+  height: calc(100dvh - 60px);
   box-sizing: border-box;
 }
 
@@ -18,34 +20,168 @@
 .timeline-editor__header {
   display: flex;
   align-items: center;
-  gap: var(--space-3, 12px);
-  padding: var(--space-2, 8px) var(--space-3, 12px);
+  gap: var(--space-2, 8px);
+  padding: var(--space-1, 4px) var(--space-2, 8px);
   background: var(--surface-1, rgba(0, 0, 0, 0.25));
   border-radius: 8px;
-  flex-wrap: wrap;
+  flex: 0 0 auto;
 }
 
-.timeline-editor__back {
+.timeline-editor__icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
   color: var(--text-primary);
+  cursor: pointer;
+  font-size: 1rem;
   text-decoration: none;
-  font-size: 0.85rem;
+  flex: 0 0 auto;
+  transition: background-color 120ms ease, border-color 120ms ease, opacity 120ms ease;
 }
 
-.timeline-editor__back:hover {
-  text-decoration: underline;
+.timeline-editor__icon-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.10);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.timeline-editor__icon-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.timeline-editor__icon-btn--accent.is-active {
+  background: var(--accent, #4a7ad9);
+  border-color: var(--accent, #4a7ad9);
+  color: #fff;
+  animation: timeline-editor-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes timeline-editor-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(74, 122, 217, 0.6); }
+  50% { box-shadow: 0 0 0 6px rgba(74, 122, 217, 0); }
 }
 
 .timeline-editor__title {
+  flex: 1 1 auto;
   font-weight: 600;
   font-size: 0.95rem;
+  text-align: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2, 8px);
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.timeline-editor__version {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  font-weight: 400;
 }
 
 .timeline-editor__dirty {
   color: #ffd34a;
-  font-size: 0.75rem;
+  font-size: 0.7rem;
+  line-height: 1;
+}
+
+.timeline-editor__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1, 4px);
+  flex: 0 0 auto;
+}
+
+.timeline-editor__more {
+  position: relative;
+}
+
+.timeline-editor__more-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 220px;
+  background: rgba(20, 20, 24, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: var(--space-2, 8px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  z-index: 50;
+}
+
+.timeline-editor__more-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1, 4px);
+  padding: var(--space-1, 4px) var(--space-2, 8px);
+}
+
+.timeline-editor__more-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-secondary);
+}
+
+.timeline-editor__speed-row {
+  display: flex;
+  gap: 4px;
+}
+
+.timeline-editor__speed-btn {
+  flex: 1;
+  padding: 6px 0;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: transparent;
+  color: var(--text-primary);
+  border-radius: 6px;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.timeline-editor__speed-btn:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.timeline-editor__speed-btn.is-active {
+  background: var(--accent, #4a7ad9);
+  border-color: var(--accent, #4a7ad9);
+  color: #fff;
+}
+
+.timeline-editor__more-divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.08);
+  margin: var(--space-2, 8px) 0;
+}
+
+.timeline-editor__more-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 12px;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  font-size: 0.85rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.timeline-editor__more-item:hover {
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .timeline-editor__error {
+  flex: 0 0 auto;
   padding: 8px 12px;
   background: rgba(230, 74, 74, 0.15);
   border: 1px solid rgba(230, 74, 74, 0.4);
@@ -55,7 +191,7 @@
 }
 
 .timeline-editor__main {
-  flex: 1;
+  flex: 1 1 auto;
   display: grid;
   grid-template-columns: 1fr 2fr;
   grid-template-rows: 1fr auto;
@@ -83,22 +219,97 @@
   min-height: 200px;
 }
 
-/* Mobile landscape — same 1/3 + 2/3 split, but inspector becomes a
-   bottom-sheet style overlay. Phase 1 keeps it inline; if width is
-   really tight, stack inspector under canvas. */
+/* Mobile landscape — preview shrinks to ~1/4, timeline gets ~3/4.
+   Inspector becomes a slim full-width panel below; transport
+   controls overlay the preview (see PreviewPane.css). */
 @media (orientation: landscape) and (max-width: 1023px) {
+  .timeline-editor {
+    height: 100dvh;
+    padding: var(--space-2, 8px);
+    gap: var(--space-2, 8px);
+  }
   .timeline-editor__main {
-    grid-template-columns: 1fr 2fr;
+    grid-template-columns: 1fr 3fr;
     grid-template-rows: 1fr auto;
     grid-template-areas:
       "preview canvas"
       "inspector inspector";
+    gap: var(--space-2, 8px);
   }
   .timeline-editor__inspector {
-    max-height: 200px;
+    max-height: 140px;
+    min-height: 0;
+  }
+  /* Hide the global app header on this route in landscape mobile to
+     reclaim vertical space. Toggled by the body class set in
+     TimelineEditor.tsx. */
+  body.timeline-editor-active .app-header {
+    display: none;
+  }
+}
+
+@media (orientation: landscape) and (max-height: 480px) {
+  .timeline-editor__title {
+    font-size: 0.85rem;
+  }
+  .timeline-editor__icon-btn {
+    width: 32px;
+    height: 32px;
   }
 }
 
 .timeline-editor__header--mobile {
   width: 100%;
+}
+
+.timeline-editor__pwa-hint {
+  position: fixed;
+  bottom: var(--space-3, 12px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2, 8px);
+  padding: 8px 12px;
+  background: rgba(20, 20, 24, 0.92);
+  border: 1px solid rgba(255, 211, 74, 0.4);
+  border-radius: 999px;
+  color: var(--text-primary);
+  font-size: 0.78rem;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  z-index: 30;
+  max-width: calc(100vw - 24px);
+}
+
+.timeline-editor__pwa-hint-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.timeline-editor__pwa-hint-dismiss {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 0.7rem;
+  line-height: 1;
+}
+
+.timeline-editor__pwa-hint-dismiss:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+@media (min-width: 1024px) {
+  /* Don't pester desktop users — hint targets phones/tablets. */
+  .timeline-editor__pwa-hint {
+    display: none;
+  }
 }
