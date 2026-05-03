@@ -406,7 +406,13 @@ export interface ScriptCoverageOut {
   computed_at: string;
 }
 
-export type AnalysisStep = "stt" | "scene" | "motion" | "emotion" | "coverage";
+export type AnalysisStep =
+  | "stt"
+  | "scene"
+  | "motion"
+  | "emotion"
+  | "tracking"
+  | "coverage";
 
 // Phase 8.1 — face emotion analysis. Mirrors api/schemas.EmotionTagsOut.
 export type EmotionTag = "happy" | "surprised" | "serious" | "neutral";

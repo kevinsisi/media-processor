@@ -626,6 +626,95 @@
   overflow-x: auto;
 }
 
+/* ---- v0.20.2 — settings sub-cards inside .edit-card ---- */
+
+.edit-settings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin: var(--space-4) 0;
+}
+
+.settings-group {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 10px;
+  overflow: hidden;
+  transition: border-color 200ms ease;
+}
+
+.settings-group:hover {
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.settings-group__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  background: rgba(255, 255, 255, 0.03);
+  border: 0;
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  font-size: var(--t-sm);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.settings-group--collapsed .settings-group__head {
+  border-bottom: 0;
+}
+
+.settings-group__head:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.settings-group__chevron {
+  font-size: var(--t-xs);
+  color: var(--text-secondary);
+  width: 1em;
+  flex-shrink: 0;
+}
+
+.settings-group__title {
+  font-family: var(--font-display);
+  font-weight: 320;
+  font-size: var(--t-md);
+  color: var(--text-primary);
+  flex-shrink: 0;
+}
+
+.settings-group__summary {
+  margin-left: auto;
+  font-size: var(--t-xs);
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  text-align: right;
+  word-break: break-word;
+  min-width: 0;
+}
+
+.settings-group__body {
+  padding: var(--space-4);
+}
+
+@media (max-width: 540px) {
+  .settings-group__head {
+    flex-wrap: wrap;
+  }
+  .settings-group__summary {
+    width: 100%;
+    margin-left: 0;
+    text-align: left;
+    padding-left: calc(1em + var(--space-3));
+  }
+  .settings-group__body {
+    padding: var(--space-3);
+  }
+}
+
 /* ---- Stage progress chips ---- */
 
 .edit-progress-wrap {

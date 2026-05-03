@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, apiClient } from "../api/client";
 import type { ProjectDetail, WatermarkPosition } from "../api/types";
 import "./WatermarkPicker.css";
@@ -55,12 +55,38 @@ export default function WatermarkPicker({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // v0.20.2 — immediate-feedback state. Holds the just-uploaded
+  // filename for ~2.5 seconds so the green ✓ banner is visible even
+  // before the parent's project state finishes updating. Used in
+  // tandem with ``filename`` (from project.watermark_path) so that
+  // even on flaky parent state the user can confirm the upload
+  // succeeded. Cleared by a timer so the banner fades back to the
+  // standard "目前：" label once the parent state catches up.
+  const [justUploadedName, setJustUploadedName] = useState<string | null>(
+    null,
+  );
+  const successTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (successTimerRef.current !== null) {
+        window.clearTimeout(successTimerRef.current);
+      }
+    };
+  }, []);
 
   const watermarkUrl = project?.watermark_url ?? null;
   const filename = useMemo(
     () => watermarkFilename(project?.watermark_path),
     [project?.watermark_path],
   );
+
+  // v0.20.2 — display priority: justUploadedName (right after upload)
+  // → filename (parent state). Either one indicates "we have a
+  // watermark." When both are set we still prefer justUploadedName
+  // because the user just touched it — its provenance is unambiguous.
+  const displayFilename = justUploadedName ?? filename;
+  const showSuccessFlash = justUploadedName !== null;
   const position: WatermarkPosition =
     project?.watermark_position ?? "bottom-right";
   // Backend stores fractions; the sliders work in percent for legibility.
@@ -77,6 +103,30 @@ export default function WatermarkPicker({
           file,
         );
         onProjectUpdated(updated);
+        // v0.20.2 — immediate-feedback path. Shows the file the user
+        // just picked even if onProjectUpdated -> setProject hasn't
+        // finished propagating, so the user is never left staring at
+        // "尚未上傳" after a successful upload. Clears after 2.5 s,
+        // by which point ``project.watermark_path`` is authoritative.
+        setJustUploadedName(file.name);
+        if (successTimerRef.current !== null) {
+          window.clearTimeout(successTimerRef.current);
+        }
+        successTimerRef.current = window.setTimeout(() => {
+          setJustUploadedName(null);
+          successTimerRef.current = null;
+        }, 2500);
+        // Defensive belt-and-suspenders: re-fetch the project after
+        // the upload to catch any case where the POST response was
+        // missing watermark_path (shouldn't happen, but cheap to
+        // guard against). Failure is non-fatal — the optimistic
+        // setJustUploadedName covers the gap.
+        try {
+          const refreshed = await apiClient.fetchProject(projectId);
+          onProjectUpdated(refreshed);
+        } catch {
+          /* ignore — primary update already landed */
+        }
       } catch (err) {
         setError(
           err instanceof ApiError
@@ -183,9 +233,22 @@ export default function WatermarkPicker({
     <section className="watermark-picker" aria-busy={busy}>
       <header className="watermark-picker__head">
         <h3 className="watermark-picker__title">浮水印 / LOGO</h3>
-        {filename ? (
-          <span className="watermark-picker__current" title={filename}>
-            目前：{filename}
+        {displayFilename ? (
+          <span
+            className={
+              "watermark-picker__current" +
+              (showSuccessFlash
+                ? " watermark-picker__current--just-uploaded"
+                : " watermark-picker__current--ok")
+            }
+            title={displayFilename}
+            aria-live="polite"
+          >
+            <span className="watermark-picker__check" aria-hidden>
+              ✓
+            </span>
+            {showSuccessFlash ? "上傳成功：" : "目前："}
+            {displayFilename}
           </span>
         ) : (
           <span className="watermark-picker__current">尚未上傳</span>

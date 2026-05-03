@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ApiError, apiClient } from "../api/client";
 import BgmSourcePicker from "../components/BgmSourcePicker";
+import type { BgmSource } from "../components/BgmSourcePicker";
 import DraggableTimeline from "../components/DraggableTimeline";
 import ExportSheet from "../components/ExportSheet";
 import SubtitleEditor from "../components/SubtitleEditor";
@@ -13,6 +14,8 @@ import type {
   DraftDetail,
   DraftSummary,
   ProjectDetail,
+  SubtitlePosition,
+  SubtitleSize,
 } from "../api/types";
 import { useDraftPolling } from "../hooks/useDraftPolling";
 import {
@@ -504,6 +507,214 @@ function RenderOptions({
   );
 }
 
+// v0.20.2 — small text helpers for the sub-card status summaries.
+// Each setting group's heading shows a one-line digest of its current
+// state so the user can audit the configuration at a glance without
+// scrolling into every sub-section.
+
+const STYLE_PRESET_LABELS: Record<ClipStylePreset, string> = {
+  fast: "快節奏",
+  slow: "慢節奏",
+  commercial: "商業感",
+  artistic: "文青風",
+  custom: "自訂",
+};
+
+function formatBasicSummary(opts: {
+  durationSec: number;
+  stylePreset: ClipStylePreset;
+  stabilize: boolean;
+  subtitlesOn: boolean;
+  transitionsOn: boolean;
+  autoReframe: boolean;
+}): string {
+  const flags: string[] = [];
+  if (opts.subtitlesOn) flags.push("字幕");
+  if (opts.transitionsOn) flags.push("轉場");
+  if (opts.autoReframe) flags.push("自動構圖");
+  if (opts.stabilize) flags.push("防抖");
+  const flagText = flags.length > 0 ? flags.join(" / ") : "純硬切";
+  return `${opts.durationSec} 秒 · ${STYLE_PRESET_LABELS[opts.stylePreset]} · ${flagText}`;
+}
+
+function formatBgmSummary(opts: {
+  source: BgmSource;
+  bgmFilename: string | null;
+}): string {
+  switch (opts.source) {
+    case "none":
+      return "🔇 不使用配樂";
+    case "library":
+      return opts.bgmFilename
+        ? `🎵 音樂庫：${opts.bgmFilename}`
+        : "🎵 從音樂庫選擇（待挑選）";
+    case "ai":
+      return opts.bgmFilename
+        ? `🎼 AI 配樂：${opts.bgmFilename}`
+        : "🎼 AI 生成配樂（待產生）";
+    case "upload":
+      return opts.bgmFilename
+        ? `📁 已上傳：${opts.bgmFilename}`
+        : "📁 自行上傳（待選檔）";
+  }
+}
+
+function formatVisualSummary(project: ProjectDetail | null): string {
+  if (!project) return "載入中…";
+  const parts: string[] = [];
+  if (project.watermark_path) {
+    const scalePct = Math.round((project.watermark_scale ?? 0.1) * 100);
+    parts.push(`浮水印 ✓ ${scalePct}%`);
+  } else {
+    parts.push("浮水印 — 未上傳");
+  }
+  const sizeLabel: Record<SubtitleSize, string> = {
+    small: "小",
+    medium: "中",
+    large: "大",
+  };
+  const posLabel: Record<SubtitlePosition, string> = {
+    top: "上",
+    middle: "中",
+    bottom: "下",
+  };
+  parts.push(
+    `字幕 ${sizeLabel[project.subtitle_size]}${posLabel[project.subtitle_position]}方`,
+  );
+  return parts.join(" · ");
+}
+
+function bgmFilenameFromPath(path: string | null | undefined): string | null {
+  if (!path) return null;
+  const sep = path.lastIndexOf("/");
+  return sep >= 0 ? path.slice(sep + 1) : path;
+}
+
+interface SettingsGroupProps {
+  title: string;
+  summary: string;
+  children: React.ReactNode;
+}
+
+function SettingsGroup({ title, summary, children }: SettingsGroupProps) {
+  const [collapsed, setCollapsed] = useState(false);
+  return (
+    <section
+      className={
+        "settings-group" + (collapsed ? " settings-group--collapsed" : "")
+      }
+    >
+      <button
+        type="button"
+        className="settings-group__head"
+        aria-expanded={!collapsed}
+        onClick={() => setCollapsed((c) => !c)}
+      >
+        <span className="settings-group__chevron" aria-hidden>
+          {collapsed ? "▸" : "▾"}
+        </span>
+        <span className="settings-group__title">{title}</span>
+        <span className="settings-group__summary mono">{summary}</span>
+      </button>
+      {!collapsed && <div className="settings-group__body">{children}</div>}
+    </section>
+  );
+}
+
+interface EditSettingsBlockProps {
+  durationSec: number;
+  setDurationSec: (n: number) => void;
+  stylePreset: ClipStylePreset;
+  setStylePreset: (v: ClipStylePreset) => void;
+  stabilize: boolean;
+  setStabilize: (v: boolean) => void;
+  subtitlesOn: boolean;
+  setSubtitlesOn: (v: boolean) => void;
+  transitionsOn: boolean;
+  setTransitionsOn: (v: boolean) => void;
+  autoReframe: boolean;
+  setAutoReframe: (v: boolean) => void;
+  triggering: boolean;
+  validProjectId: number;
+  project: ProjectDetail | null;
+  setProject: (p: ProjectDetail) => void;
+  currentBgmSource: BgmSource;
+  setCurrentBgmSource: (s: BgmSource) => void;
+}
+
+// v0.20.2 — single source of the settings UI, used by both the
+// "尚未產生剪輯" initial card and the "已完成" review card so the
+// two states render identically aside from the surrounding actions.
+function EditSettingsBlock(props: EditSettingsBlockProps) {
+  const bgmFilename = bgmFilenameFromPath(props.project?.bgm_path);
+  const basicSummary = formatBasicSummary({
+    durationSec: props.durationSec,
+    stylePreset: props.stylePreset,
+    stabilize: props.stabilize,
+    subtitlesOn: props.subtitlesOn,
+    transitionsOn: props.transitionsOn,
+    autoReframe: props.autoReframe,
+  });
+  const bgmSummary = formatBgmSummary({
+    source: props.currentBgmSource,
+    bgmFilename,
+  });
+  const visualSummary = formatVisualSummary(props.project);
+
+  return (
+    <div className="edit-settings">
+      <SettingsGroup title="基本剪輯設定" summary={basicSummary}>
+        <DurationPicker
+          value={props.durationSec}
+          onChange={props.setDurationSec}
+          disabled={props.triggering}
+        />
+        <StylePresetPicker
+          value={props.stylePreset}
+          onChange={props.setStylePreset}
+          disabled={props.triggering}
+        />
+        <RenderOptions
+          stabilize={props.stabilize}
+          setStabilize={props.setStabilize}
+          subtitlesOn={props.subtitlesOn}
+          setSubtitlesOn={props.setSubtitlesOn}
+          transitionsOn={props.transitionsOn}
+          setTransitionsOn={props.setTransitionsOn}
+          autoReframe={props.autoReframe}
+          setAutoReframe={props.setAutoReframe}
+          disabled={props.triggering}
+        />
+      </SettingsGroup>
+
+      <SettingsGroup title="配樂" summary={bgmSummary}>
+        <BgmSourcePicker
+          projectId={props.validProjectId}
+          bgmPath={props.project?.bgm_path}
+          onProjectUpdated={props.setProject}
+          disabled={props.triggering}
+          stylePreset={props.stylePreset}
+          onSourceChange={props.setCurrentBgmSource}
+        />
+      </SettingsGroup>
+
+      <SettingsGroup title="視覺疊加" summary={visualSummary}>
+        <WatermarkPicker
+          projectId={props.validProjectId}
+          project={props.project}
+          onProjectUpdated={props.setProject}
+          disabled={props.triggering}
+        />
+        <SubtitleStyleEditor
+          project={props.project}
+          onProjectUpdated={props.setProject}
+          disabled={props.triggering || !props.subtitlesOn}
+        />
+      </SettingsGroup>
+    </div>
+  );
+}
+
 interface ProgressTrackerProps {
   steps: Record<string, string> | null | undefined;
 }
@@ -597,6 +808,12 @@ export default function ProjectEdit() {
   // v0.18 — clip-style preset (fast / slow / commercial / artistic /
   // custom). ``custom`` is the legacy free-form default.
   const [stylePreset, setStylePreset] = useState<ClipStylePreset>("custom");
+  // v0.20.2 — observed source from <BgmSourcePicker>. Lets the
+  // section-title summary line stay in sync without lifting the
+  // picker's full state (it has lots of internal AI / library state
+  // we don't need up here). Default mirrors the picker's seed:
+  // "upload" if a BGM is already on file, "none" otherwise.
+  const [currentBgmSource, setCurrentBgmSource] = useState<BgmSource>("none");
   // v0.14.5 — project detail (mostly for bgm_path so the BGM upload
   // button can show "目前：filename.mp3"). Fetched once on mount and
   // refreshed after a successful BGM upload.
@@ -862,17 +1079,11 @@ export default function ProjectEdit() {
             AI 會根據腳本與素材的逐字稿、場景、運鏡，挑選最適合的片段並依節奏拼接成
             一支 9:16 / 4:5 / 1:1 的成品影片，並燒入繁體中文字幕。
           </p>
-          <DurationPicker
-            value={durationSec}
-            onChange={setDurationSec}
-            disabled={triggering}
-          />
-          <StylePresetPicker
-            value={stylePreset}
-            onChange={setStylePreset}
-            disabled={triggering}
-          />
-          <RenderOptions
+          <EditSettingsBlock
+            durationSec={durationSec}
+            setDurationSec={setDurationSec}
+            stylePreset={stylePreset}
+            setStylePreset={setStylePreset}
             stabilize={stabilize}
             setStabilize={setStabilize}
             subtitlesOn={subtitlesOn}
@@ -881,25 +1092,12 @@ export default function ProjectEdit() {
             setTransitionsOn={setTransitionsOn}
             autoReframe={autoReframe}
             setAutoReframe={setAutoReframe}
-            disabled={triggering}
-          />
-          <BgmSourcePicker
-            projectId={validProjectId}
-            bgmPath={project?.bgm_path}
-            onProjectUpdated={setProject}
-            disabled={triggering}
-            stylePreset={stylePreset}
-          />
-          <WatermarkPicker
-            projectId={validProjectId}
+            triggering={triggering}
+            validProjectId={validProjectId}
             project={project}
-            onProjectUpdated={setProject}
-            disabled={triggering}
-          />
-          <SubtitleStyleEditor
-            project={project}
-            onProjectUpdated={setProject}
-            disabled={triggering || !subtitlesOn}
+            setProject={setProject}
+            currentBgmSource={currentBgmSource}
+            setCurrentBgmSource={setCurrentBgmSource}
           />
           <div className="edit-card__actions">
             <button
@@ -1000,17 +1198,11 @@ export default function ProjectEdit() {
                 </button>
               </div>
             </div>
-            <DurationPicker
-              value={durationSec}
-              onChange={setDurationSec}
-              disabled={triggering}
-            />
-            <StylePresetPicker
-              value={stylePreset}
-              onChange={setStylePreset}
-              disabled={triggering}
-            />
-            <RenderOptions
+            <EditSettingsBlock
+              durationSec={durationSec}
+              setDurationSec={setDurationSec}
+              stylePreset={stylePreset}
+              setStylePreset={setStylePreset}
               stabilize={stabilize}
               setStabilize={setStabilize}
               subtitlesOn={subtitlesOn}
@@ -1019,25 +1211,12 @@ export default function ProjectEdit() {
               setTransitionsOn={setTransitionsOn}
               autoReframe={autoReframe}
               setAutoReframe={setAutoReframe}
-              disabled={triggering}
-            />
-            <BgmSourcePicker
-              projectId={validProjectId}
-              bgmPath={project?.bgm_path}
-              onProjectUpdated={setProject}
-              disabled={triggering}
-              stylePreset={stylePreset}
-            />
-            <WatermarkPicker
-              projectId={validProjectId}
+              triggering={triggering}
+              validProjectId={validProjectId}
               project={project}
-              onProjectUpdated={setProject}
-              disabled={triggering}
-            />
-            <SubtitleStyleEditor
-              project={project}
-              onProjectUpdated={setProject}
-              disabled={triggering || !subtitlesOn}
+              setProject={setProject}
+              currentBgmSource={currentBgmSource}
+              setCurrentBgmSource={setCurrentBgmSource}
             />
             <div className="edit-card__advanced-row">
               <Link
