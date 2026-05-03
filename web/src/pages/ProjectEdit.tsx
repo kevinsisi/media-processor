@@ -8,6 +8,7 @@ import SubtitleEditor from "../components/SubtitleEditor";
 import SubtitleStyleEditor from "../components/SubtitleStyleEditor";
 import WatermarkPicker from "../components/WatermarkPicker";
 import type {
+  ClipStylePreset,
   DraftComment,
   DraftDetail,
   DraftSummary,
@@ -305,6 +306,118 @@ function DurationPicker({ value, onChange, disabled }: DurationPickerProps) {
   );
 }
 
+// v0.18 — clip-style preset picker. Each card maps to a backend
+// StylePresetParams bundle: span bounds, transition allowlist, BGM
+// hint. The fifth "custom" card keeps the legacy free-form behaviour
+// (no preset applied; planner uses its defaults).
+interface StylePresetCard {
+  value: ClipStylePreset;
+  label: string;
+  icon: string;
+  spanHint: string;
+  transitionHint: string;
+  bgmHint: string;
+}
+
+const STYLE_PRESET_CARDS: readonly StylePresetCard[] = [
+  {
+    value: "fast",
+    label: "快節奏",
+    icon: "⚡",
+    spanHint: "片段 3–5 秒",
+    transitionHint: "wipe / slide / circle",
+    bgmHint: "高能量電子 / 搖滾 130–150 BPM",
+  },
+  {
+    value: "slow",
+    label: "慢節奏",
+    icon: "🌊",
+    spanHint: "片段 8–15 秒",
+    transitionHint: "dissolve / fade",
+    bgmHint: "柔和氛圍音 60–80 BPM",
+  },
+  {
+    value: "commercial",
+    label: "商業感",
+    icon: "🏷️",
+    spanHint: "片段 5–8 秒",
+    transitionHint: "slide / wipe / fade-black",
+    bgmHint: "Corporate 配樂 90–110 BPM",
+  },
+  {
+    value: "artistic",
+    label: "文青風",
+    icon: "🎨",
+    spanHint: "片段 3–12 秒（不規則）",
+    transitionHint: "fade / fade-white",
+    bgmHint: "Acoustic / indie 木吉他 80–100 BPM",
+  },
+  {
+    value: "custom",
+    label: "自訂",
+    icon: "✦",
+    spanHint: "由 AI 自由決定",
+    transitionHint: "依素材內容挑選",
+    bgmHint: "依素材內容建議",
+  },
+] as const;
+
+interface StylePresetPickerProps {
+  value: ClipStylePreset;
+  onChange: (next: ClipStylePreset) => void;
+  disabled?: boolean;
+}
+
+function StylePresetPicker({
+  value,
+  onChange,
+  disabled,
+}: StylePresetPickerProps) {
+  return (
+    <fieldset className="style-preset-picker" disabled={disabled}>
+      <legend className="style-preset-picker__legend">剪輯風格預設</legend>
+      <p className="style-preset-picker__hint mono">
+        一鍵切換片段長度、轉場類型與配樂風格建議。
+      </p>
+      <div
+        className="style-preset-picker__grid"
+        role="radiogroup"
+        aria-label="剪輯風格預設"
+      >
+        {STYLE_PRESET_CARDS.map((card) => {
+          const selected = card.value === value;
+          return (
+            <button
+              key={card.value}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              className={
+                "style-preset-card" +
+                (selected ? " style-preset-card--selected" : "")
+              }
+              disabled={disabled}
+              onClick={() => onChange(card.value)}
+            >
+              <span className="style-preset-card__icon" aria-hidden>
+                {card.icon}
+              </span>
+              <span className="style-preset-card__label">{card.label}</span>
+              <span className="style-preset-card__hint mono">
+                {card.spanHint}
+                <br />
+                轉場：{card.transitionHint}
+                <br />
+                配樂：{card.bgmHint}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </fieldset>
+  );
+}
+
 interface EditOptionToggleProps {
   label: string;
   hint: string;
@@ -481,6 +594,9 @@ export default function ProjectEdit() {
   // without tracking_json, so leaving this on is safe even on a half-
   // analyzed project.
   const [autoReframe, setAutoReframe] = useState<boolean>(true);
+  // v0.18 — clip-style preset (fast / slow / commercial / artistic /
+  // custom). ``custom`` is the legacy free-form default.
+  const [stylePreset, setStylePreset] = useState<ClipStylePreset>("custom");
   // v0.14.5 — project detail (mostly for bgm_path so the BGM upload
   // button can show "目前：filename.mp3"). Fetched once on mount and
   // refreshed after a successful BGM upload.
@@ -616,6 +732,7 @@ export default function ProjectEdit() {
           subtitles: subtitlesOn,
           transitions: transitionsOn,
           auto_reframe: autoReframe,
+          style_preset: stylePreset,
         });
         // The API now creates the Draft row synchronously, so resp.draft_id
         // is always a real id. Switch the selected version to it immediately
@@ -647,6 +764,7 @@ export default function ProjectEdit() {
       subtitlesOn,
       transitionsOn,
       autoReframe,
+      stylePreset,
       refreshDrafts,
     ],
   );
@@ -749,6 +867,11 @@ export default function ProjectEdit() {
             onChange={setDurationSec}
             disabled={triggering}
           />
+          <StylePresetPicker
+            value={stylePreset}
+            onChange={setStylePreset}
+            disabled={triggering}
+          />
           <RenderOptions
             stabilize={stabilize}
             setStabilize={setStabilize}
@@ -765,6 +888,7 @@ export default function ProjectEdit() {
             bgmPath={project?.bgm_path}
             onProjectUpdated={setProject}
             disabled={triggering}
+            stylePreset={stylePreset}
           />
           <WatermarkPicker
             projectId={validProjectId}
@@ -881,6 +1005,11 @@ export default function ProjectEdit() {
               onChange={setDurationSec}
               disabled={triggering}
             />
+            <StylePresetPicker
+              value={stylePreset}
+              onChange={setStylePreset}
+              disabled={triggering}
+            />
             <RenderOptions
               stabilize={stabilize}
               setStabilize={setStabilize}
@@ -897,6 +1026,7 @@ export default function ProjectEdit() {
               bgmPath={project?.bgm_path}
               onProjectUpdated={setProject}
               disabled={triggering}
+              stylePreset={stylePreset}
             />
             <WatermarkPicker
               projectId={validProjectId}

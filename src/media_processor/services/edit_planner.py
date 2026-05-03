@@ -83,10 +83,129 @@ _EMOTION_SHIFT_TRANSITION: str = "circlecrop"
 # circlecrop). Old serialised plans that still carry ``dissolve`` get
 # coerced to TRANSITION_DEFAULT on load — see ``_safe_transition``.
 VALID_TRANSITIONS: frozenset[str] = frozenset(
-    {"wipeleft", "slideright", "circlecrop"}
+    {
+        # default ("custom") preset transitions
+        "wipeleft",
+        "slideright",
+        "circlecrop",
+        # v0.18 — additional transitions enabled for slow / artistic /
+        # commercial presets. Renderer accepts the same set.
+        "fade",
+        "dissolve",
+        "fadeblack",
+        "fadewhite",
+    }
 )
 TRANSITION_DEFAULT: str = "wipeleft"
 TRANSITION_DURATION_S: float = 0.5
+
+
+# v0.18 — clip-style preset parameter bundle. Each preset biases the
+# planner's span bounds, the per-asset Gemini prompt, the transition
+# allowlist, and a one-line BGM hint surfaced by the music-suggestion
+# endpoint. ``custom`` keeps legacy behaviour (no preset applied).
+@dataclass(frozen=True)
+class StylePresetParams:
+    name: str
+    min_span_ms: int
+    max_span_ms: int
+    transition_allowlist: frozenset[str]
+    default_transition: str
+    bgm_hint: str  # injected into the music-suggestion prompt
+    prompt_hint: str  # injected into the per-asset score prompt
+    irregular_lengths: bool = False  # artistic preset: keep span variation
+
+
+STYLE_PRESET_FAST = StylePresetParams(
+    name="fast",
+    min_span_ms=3000,
+    max_span_ms=5000,
+    transition_allowlist=frozenset({"wipeleft", "slideright", "circlecrop"}),
+    default_transition="wipeleft",
+    bgm_hint=(
+        "高能量、快節奏、強勁節拍 (130-150 BPM)，電子或搖滾，鼓點密集"
+    ),
+    prompt_hint=(
+        "【剪輯風格 = 快節奏】每段請挑選 3-5 秒短而有力的段落，"
+        "轉場限定 wipeleft / slideright / circlecrop，避免柔和淡出。"
+    ),
+)
+
+STYLE_PRESET_SLOW = StylePresetParams(
+    name="slow",
+    min_span_ms=8000,
+    max_span_ms=15000,
+    transition_allowlist=frozenset({"dissolve", "fade", "fadeblack"}),
+    default_transition="dissolve",
+    bgm_hint=(
+        "柔和、緩慢、放鬆的氛圍音樂 (60-80 BPM)，環境音、鋼琴、弦樂"
+    ),
+    prompt_hint=(
+        "【剪輯風格 = 慢節奏】每段請挑選 8-15 秒較長段落，留白與情緒沉澱優先，"
+        "轉場限定 dissolve / fade / fadeblack。"
+    ),
+)
+
+STYLE_PRESET_COMMERCIAL = StylePresetParams(
+    name="commercial",
+    min_span_ms=5000,
+    max_span_ms=8000,
+    transition_allowlist=frozenset({"slideright", "wipeleft", "fadeblack"}),
+    default_transition="slideright",
+    bgm_hint=(
+        "專業、潔淨、商業感的 corporate 配樂 (90-110 BPM)，現代電子合成或乾淨吉他"
+    ),
+    prompt_hint=(
+        "【剪輯風格 = 商業感】每段請挑選 5-8 秒、表達清楚有重點的段落，"
+        "轉場限定 slideright / wipeleft / fadeblack，俐落不花俏。"
+    ),
+)
+
+STYLE_PRESET_ARTISTIC = StylePresetParams(
+    name="artistic",
+    min_span_ms=3000,
+    max_span_ms=12000,
+    transition_allowlist=frozenset({"fade", "fadewhite", "fadeblack"}),
+    default_transition="fade",
+    bgm_hint=(
+        "acoustic / indie 木吉他、民謠、文青風 (80-100 BPM)，溫暖人聲或環境氛圍"
+    ),
+    prompt_hint=(
+        "【剪輯風格 = 文青風】每段長度可在 3-12 秒之間自由變化，"
+        "刻意製造不規則節奏與停頓感，轉場限定 fade / fadewhite / fadeblack。"
+    ),
+    irregular_lengths=True,
+)
+
+STYLE_PRESET_CUSTOM = StylePresetParams(
+    name="custom",
+    min_span_ms=1500,
+    max_span_ms=6000,
+    transition_allowlist=frozenset({"wipeleft", "slideright", "circlecrop"}),
+    default_transition="wipeleft",
+    bgm_hint="",
+    prompt_hint="",
+)
+
+
+STYLE_PRESETS: dict[str, StylePresetParams] = {
+    "fast": STYLE_PRESET_FAST,
+    "slow": STYLE_PRESET_SLOW,
+    "commercial": STYLE_PRESET_COMMERCIAL,
+    "artistic": STYLE_PRESET_ARTISTIC,
+    "custom": STYLE_PRESET_CUSTOM,
+}
+
+
+def resolve_style_preset(name: str | None) -> StylePresetParams:
+    """Map a preset string (or None) to its parameter bundle.
+
+    Unknown / missing values fall back to ``custom`` so a typo in a
+    legacy stored draft can't crash the planner.
+    """
+    if not name:
+        return STYLE_PRESET_CUSTOM
+    return STYLE_PRESETS.get(name.strip().lower(), STYLE_PRESET_CUSTOM)
 
 
 def _coerce_legacy_transition(name: str) -> str:
@@ -349,6 +468,7 @@ MAX_SEGMENT_DURATION_S = 6.0
 _ASSET_SCORE_PROMPT = (
     "你是影片剪輯助手，正在評估「一段」素材是否適合放進最終剪輯。\n"
     "你只需要看這段素材本身——其他素材會由其他助手獨立評估，最後由系統合併。\n\n"
+    "{style_preset_block}"
     "{prior_feedback_block}"
     "整支片要傳達的腳本：\n{script_body}\n\n"
     "這段素材：\n"
@@ -363,16 +483,14 @@ _ASSET_SCORE_PROMPT = (
     " 1. score (0-100)：這段對最終剪輯的相關度與品質\n"
     " 2. position：這段適合放在 opening / middle / closing；"
     "若品質太低或與腳本完全無關回 skip\n"
-    " 3. best_span_ms：這段「最值得用」的 1.5–6 秒時間範圍 "
+    " 3. best_span_ms：這段「最值得用」的 {span_min_s}–{span_max_s} 秒時間範圍 "
     "[start_ms, end_ms]，必須在 [0, {duration_ms}] 之內\n"
     " 4. source_kind：scripted（照腳本講的部分）或 improv（自然發揮 / 情緒亮點）\n"
     " 5. transition_to_next：這段播完後若銜接「下一段」適合的轉場效果，"
-    "從 wipeleft / slideright / circlecrop 擇一。請避免 dissolve / fade —"
-    "  系統已停用這兩種轉場。\n"
-    "    指引：場景大跳（室內↔戶外、人物↔產品、不同地點）用 wipeleft 或 slideright；"
-    "    情緒大跳（平靜↔激動 / 嚴肅↔驚喜 / 開頭↔結尾）用 circlecrop；"
-    "    每兩三段之間切換方向（wipeleft ↔ slideright）讓視覺節奏不單調，"
-    "    避免整支片連續用同一種。\n\n"
+    "從 {transition_choices} 擇一。\n"
+    "    指引：場景大跳（室內↔戶外、人物↔產品、不同地點）用拉開差距的銳利轉場；"
+    "    情緒大跳（平靜↔激動 / 嚴肅↔驚喜 / 開頭↔結尾）用視覺較強烈的轉場；"
+    "    每兩三段之間適度切換以避免整支片連續用同一種。\n\n"
     "嚴格輸出 JSON：\n"
     "{{\n"
     f'  "schema_version": "{ASSET_SCORE_SCHEMA_VERSION}",\n'
@@ -380,10 +498,23 @@ _ASSET_SCORE_PROMPT = (
     '  "position": "opening" | "middle" | "closing" | "skip",\n'
     '  "best_span_ms": [<start_ms>, <end_ms>],\n'
     '  "source_kind": "scripted" | "improv",\n'
-    '  "transition_to_next": "wipeleft" | "slideright" | "circlecrop",\n'
+    '  "transition_to_next": <{transition_choices} 之一>,\n'
     '  "reason": "<一句話原因>"\n'
     "}}\n"
 )
+
+
+def _format_style_preset_block(style: StylePresetParams) -> str:
+    """Render the optional style-preset banner above the script body.
+
+    Empty string when style is ``custom`` so the legacy prompt shape
+    stays exactly the same; the four named presets push their hint up
+    front so the model treats span-length and transition choice as
+    constraints, not suggestions.
+    """
+    if not style.prompt_hint:
+        return ""
+    return f"{style.prompt_hint}\n\n"
 
 
 def _format_prior_feedback_block(prior_feedback: str) -> str:
@@ -409,8 +540,11 @@ def _build_asset_prompt(
     script_body: str,
     *,
     prior_feedback: str = "",
+    style: StylePresetParams = STYLE_PRESET_CUSTOM,
 ) -> str:
+    transition_choices = " / ".join(sorted(style.transition_allowlist))
     return _ASSET_SCORE_PROMPT.format(
+        style_preset_block=_format_style_preset_block(style),
         prior_feedback_block=_format_prior_feedback_block(prior_feedback),
         script_body=script_body.strip() or "（無腳本）",
         asset_id=asset.id,
@@ -421,6 +555,9 @@ def _build_asset_prompt(
         emotion=_format_emotion(asset),
         transcript=_format_transcript(transcript),
         coverage=_format_coverage(coverage),
+        span_min_s=f"{style.min_span_ms / 1000:.1f}",
+        span_max_s=f"{style.max_span_ms / 1000:.1f}",
+        transition_choices=transition_choices,
     )
 
 
@@ -534,6 +671,7 @@ def _parse_asset_score(
     *,
     asset_id: int,
     asset_duration_ms: int,
+    style: StylePresetParams = STYLE_PRESET_CUSTOM,
 ) -> _AssetScore:
     """Validate one per-asset Gemini response. Raises EditPlanInvalidError."""
     candidates = payload.get("candidates")
@@ -578,17 +716,19 @@ def _parse_asset_score(
         end_ms = int(span_raw[1])
     except (TypeError, ValueError) as exc:
         raise EditPlanInvalidError(f"asset {asset_id}: span values not int") from exc
-    # Clamp into [0, duration] and shrink to MAX_SPAN_MS keeping the start.
+    # Clamp into [0, duration] using the style's span bounds (or the
+    # legacy MIN_SPAN_MS / MAX_SPAN_MS for the ``custom`` preset).
+    min_span = style.min_span_ms
+    max_span = style.max_span_ms
     start_ms = max(0, min(start_ms, asset_duration_ms - 1))
-    end_ms = max(start_ms + MIN_SPAN_MS, min(end_ms, asset_duration_ms))
-    if end_ms - start_ms > MAX_SPAN_MS:
-        end_ms = start_ms + MAX_SPAN_MS
+    end_ms = max(start_ms + min_span, min(end_ms, asset_duration_ms))
+    if end_ms - start_ms > max_span:
+        end_ms = start_ms + max_span
     if end_ms > asset_duration_ms:
-        # Asset shorter than MIN_SPAN_MS — skip downstream by force-position=skip
-        # would be cleaner, but for now return the whole asset and let assembly
-        # decide.
+        # Asset shorter than min_span — return the whole asset and let
+        # assembly decide whether to keep it.
         end_ms = asset_duration_ms
-        start_ms = max(0, end_ms - MIN_SPAN_MS)
+        start_ms = max(0, end_ms - min_span)
 
     kind = str(data.get("source_kind", "")).strip().lower()
     if kind not in _VALID_SOURCE_KINDS:
@@ -596,11 +736,12 @@ def _parse_asset_score(
             f"asset {asset_id}: source_kind must be in {_VALID_SOURCE_KINDS}, got {kind!r}"
         )
 
-    # Coerce unknown / missing transition to the safe default rather than
-    # rejecting the whole response — a typo here doesn't ruin the cut plan.
+    # Coerce unknown / missing transition to the style's default rather
+    # than rejecting the whole response. A model that picks a transition
+    # outside the style allowlist gets snapped to the preset default.
     transition = str(data.get("transition_to_next", "")).strip().lower()
-    if transition not in VALID_TRANSITIONS:
-        transition = TRANSITION_DEFAULT
+    if transition not in style.transition_allowlist:
+        transition = style.default_transition
 
     reason = str(data.get("reason", "")).strip() or "(no reason)"
     return _AssetScore(
@@ -688,9 +829,12 @@ def _effective_target_ms(target_duration_ms: int, num_chosen: int) -> int:
 def _extended_span(
     score: _AssetScore,
     extra_ms: int,
+    *,
+    max_span_ms: int = MAX_SPAN_MS,
 ) -> tuple[int, int]:
     """Stretch ``best_span_ms`` by up to ``extra_ms`` without exceeding
-    ``MAX_SPAN_MS`` or running past the asset's actual duration.
+    ``max_span_ms`` (style-aware) or running past the asset's actual
+    duration.
 
     Used by the duration-fill pass after every candidate is exhausted
     but the accumulated total is still under target. Grows the span
@@ -701,7 +845,7 @@ def _extended_span(
     if extra_ms <= 0:
         return start, end
     asset_end = max(end, score.asset_duration_ms)
-    span_cap = min(MAX_SPAN_MS, asset_end - 0)  # never exceed asset
+    span_cap = min(max_span_ms, asset_end - 0)  # never exceed asset
     cur = end - start
     room_ahead = max(0, asset_end - end)
     grow_ahead = min(extra_ms, room_ahead, max(0, span_cap - cur))
@@ -718,6 +862,8 @@ def _extended_span(
 def _assemble_plan(
     scores: list[_AssetScore],
     target_duration_ms: int,
+    *,
+    style: StylePresetParams = STYLE_PRESET_CUSTOM,
 ) -> list[CutPlanSegment]:
     """Local cut-plan assembly with rhythm-aware motion ordering.
 
@@ -834,7 +980,7 @@ def _assemble_plan(
     if deficit > 0 and chosen:
         per_cut_extra = (deficit + len(chosen) - 1) // len(chosen)
         for i, c in enumerate(chosen):
-            new_span = _extended_span(c, per_cut_extra)
+            new_span = _extended_span(c, per_cut_extra, max_span_ms=style.max_span_ms)
             cur_span = extended_spans[i]
             cur_dur = cur_span[1] - cur_span[0]
             new_dur = new_span[1] - new_span[0]
@@ -848,13 +994,21 @@ def _assemble_plan(
 
     # ---- Materialise. Escalate transition to ``circlecrop`` whenever
     # the next cut's dominant emotion is a different bucket (dynamic
-    # vs static), so the visual jolt mirrors the emotional jolt.
+    # vs static), so the visual jolt mirrors the emotional jolt — but
+    # only if the style preset's allowlist permits it (slow / artistic
+    # presets that ban circlecrop fall back to the style default).
     out: list[CutPlanSegment] = []
     for i, s in enumerate(chosen):
         next_emotion = chosen[i + 1].dominant_emotion if i + 1 < len(chosen) else None
         transition = s.transition_to_next
         if next_emotion is not None and _is_emotion_shift(s.dominant_emotion, next_emotion):
-            transition = _EMOTION_SHIFT_TRANSITION
+            transition = (
+                _EMOTION_SHIFT_TRANSITION
+                if _EMOTION_SHIFT_TRANSITION in style.transition_allowlist
+                else style.default_transition
+            )
+        if transition not in style.transition_allowlist:
+            transition = style.default_transition
         start, end = extended_spans[i]
         out.append(
             CutPlanSegment(
@@ -1036,6 +1190,7 @@ async def _score_one_asset(
     timeout_s: float,
     client: httpx.AsyncClient,
     prior_feedback: str = "",
+    style: StylePresetParams = STYLE_PRESET_CUSTOM,
 ) -> _AssetScore:
     """Single-asset Gemini call with key rotation on 429 / 5xx / transport.
 
@@ -1046,7 +1201,12 @@ async def _score_one_asset(
     unparseable body.
     """
     prompt = _build_asset_prompt(
-        asset, transcript, coverage, script_body, prior_feedback=prior_feedback
+        asset,
+        transcript,
+        coverage,
+        script_body,
+        prior_feedback=prior_feedback,
+        style=style,
     )
     body = {
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
@@ -1087,6 +1247,7 @@ async def _score_one_asset(
                 response.json(),
                 asset_id=asset.id,
                 asset_duration_ms=int(asset.duration_ms),
+                style=style,
             )
             # Attach motion + emotion context for rhythm-aware assembly
             # and renderer-side zoompan / transition decisions. We do
@@ -1123,6 +1284,7 @@ async def plan(
     base_url: str,
     timeout_s: float,
     target_duration_ms: int = DEFAULT_TARGET_DURATION_MS,
+    style_preset: str = "custom",
 ) -> CutPlan:
     """Build a CutPlan via per-asset parallel Gemini calls + local assembly.
 
@@ -1136,6 +1298,7 @@ async def plan(
     if not api_keys:
         raise EditPlanError("no API keys configured for edit planner")
 
+    style = resolve_style_preset(style_preset)
     ctx = await _load_project_context(session, project_id)
     if not ctx.assets:
         raise EditPlanEmptyError("no assets to score")
@@ -1154,6 +1317,7 @@ async def plan(
                 timeout_s=timeout_s,
                 client=client,
                 prior_feedback=ctx.prior_feedback,
+                style=style,
             )
             for i, asset in enumerate(ctx.assets)
         ]
@@ -1191,7 +1355,7 @@ async def plan(
             f"(quota={quota_failures}, invalid={invalid_failures}, other={other_failures})"
         )
 
-    cut_segments = _assemble_plan(scores, target_duration_ms)
+    cut_segments = _assemble_plan(scores, target_duration_ms, style=style)
     if not cut_segments:
         raise EditPlanInvalidError(
             f"assembly produced no segments from {len(scores)} scored assets "
@@ -1202,7 +1366,8 @@ async def plan(
         f"per-asset fanout: {len(scores)}/{len(results)} assets scored "
         f"(quota_fails={quota_failures}, invalid={invalid_failures}); "
         f"chose {len(cut_segments)} cuts totalling "
-        f"{sum(s.asset_end_ms - s.asset_start_ms for s in cut_segments)}ms"
+        f"{sum(s.asset_end_ms - s.asset_start_ms for s in cut_segments)}ms; "
+        f"style={style.name}"
     )
     logger.info("edit-planner: %s", notes)
 
@@ -1372,14 +1537,17 @@ __all__ = [
     "ASSET_SCORE_SCHEMA_VERSION",
     "DEFAULT_TARGET_DURATION_MS",
     "SCHEMA_VERSION",
+    "STYLE_PRESETS",
     "CutPlan",
     "CutPlanSegment",
     "EditPlanEmptyError",
     "EditPlanError",
     "EditPlanInvalidError",
     "EditPlanQuotaError",
+    "StylePresetParams",
     "deserialise_plan",
     "heuristic_fallback",
     "plan",
+    "resolve_style_preset",
     "serialise_plan",
 ]

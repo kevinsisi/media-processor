@@ -14,6 +14,10 @@ interface BgmSourcePickerProps {
   bgmPath: string | null | undefined;
   onProjectUpdated: (project: ProjectDetail) => void;
   disabled?: boolean;
+  // v0.18 — when set, the music-suggestion API is called with this
+  // preset so the suggested BGM matches the rhythm picked on the edit
+  // screen. ``custom`` (or omitted) means no preset hint.
+  stylePreset?: string;
 }
 
 function bgmFilename(bgmPath: string | null | undefined): string | null {
@@ -42,6 +46,7 @@ export default function BgmSourcePicker({
   bgmPath,
   onProjectUpdated,
   disabled,
+  stylePreset,
 }: BgmSourcePickerProps) {
   const [source, setSource] = useState<Source>(() =>
     bgmPath ? "upload" : "none",
@@ -115,7 +120,7 @@ export default function BgmSourcePicker({
       setAiPromptLoading(true);
       setAiError(null);
       try {
-        const s = await apiClient.fetchMusicSuggestion(projectId);
+        const s = await apiClient.fetchMusicSuggestion(projectId, stylePreset);
         // Only write into the textarea on the initial fetch (the user
         // hasn't started editing yet) OR when the caller explicitly
         // asked for a replace via the 「重新產生建議」 button. This
@@ -137,7 +142,7 @@ export default function BgmSourcePicker({
         setAiPromptLoading(false);
       }
     },
-    [projectId],
+    [projectId, stylePreset],
   );
 
   const loadAiStatus = useCallback(async () => {

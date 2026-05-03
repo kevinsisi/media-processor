@@ -98,6 +98,22 @@ class CutSourceKind(StrEnum):
     IMPROV = "improv"
 
 
+class ClipStylePreset(StrEnum):
+    """v0.18 — preset bundles that bias planner span / transition / BGM hints.
+
+    ``custom`` keeps the legacy behaviour (planner picks freely within the
+    project profile defaults). The other four bias the per-asset Gemini
+    prompt + local assembly toward a target rhythm and feed a one-line
+    musical hint into the music-suggestion endpoint.
+    """
+
+    FAST = "fast"
+    SLOW = "slow"
+    COMMERCIAL = "commercial"
+    ARTISTIC = "artistic"
+    CUSTOM = "custom"
+
+
 PROJECT_STATUS_VALUES: tuple[str, ...] = tuple(s.value for s in ProjectStatus)
 DRAFT_STATUS_VALUES: tuple[str, ...] = tuple(s.value for s in DraftStatus)
 REVIEW_ACTION_VALUES: tuple[str, ...] = tuple(a.value for a in ReviewAction)
@@ -108,3 +124,4 @@ ASSET_STATUS_VALUES: tuple[str, ...] = tuple(s.value for s in AssetStatus)
 ANALYSIS_STEP_VALUES: tuple[str, ...] = tuple(s.value for s in AnalysisStep)
 EDIT_STEP_VALUES: tuple[str, ...] = tuple(s.value for s in EditStep)
 CUT_SOURCE_KIND_VALUES: tuple[str, ...] = tuple(s.value for s in CutSourceKind)
+CLIP_STYLE_PRESET_VALUES: tuple[str, ...] = tuple(s.value for s in ClipStylePreset)

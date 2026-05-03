@@ -35,6 +35,7 @@ def render_draft(
     subtitles: bool = True,
     transitions: bool = True,
     auto_reframe: bool = True,
+    style_preset: str = "custom",
 ) -> dict[str, Any]:
     """RQ job — produce the next-version draft mp4 for ``project_id``.
 
@@ -61,7 +62,7 @@ def render_draft(
     logger.info(
         "render_draft: project_id=%d draft_id=%s force=%s target_duration_ms=%s "
         "skip_plan=%s subtitles_from_db=%s stabilize=%s subtitles=%s transitions=%s "
-        "auto_reframe=%s",
+        "auto_reframe=%s style_preset=%s",
         project_id,
         draft_id,
         force,
@@ -72,6 +73,7 @@ def render_draft(
         subtitles,
         transitions,
         auto_reframe,
+        style_preset,
     )
     # Local import keeps the api container free of ffmpeg / heavy deps.
     from media_processor.services.edit_orchestrator import run_render
@@ -90,6 +92,7 @@ def render_draft(
             subtitles_enabled=subtitles,
             transitions_enabled=transitions,
             auto_reframe_enabled=auto_reframe,
+            style_preset=style_preset,
         )
     )
 

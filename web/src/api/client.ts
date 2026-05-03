@@ -185,9 +185,16 @@ export class ApiClient {
 
   // ----- v0.15 — AI BGM gen + music library -----
 
-  fetchMusicSuggestion(projectId: number): Promise<MusicSuggestion> {
+  fetchMusicSuggestion(
+    projectId: number,
+    stylePreset?: string,
+  ): Promise<MusicSuggestion> {
+    const qs =
+      stylePreset && stylePreset !== "custom"
+        ? `?style_preset=${encodeURIComponent(stylePreset)}`
+        : "";
     return this.get<MusicSuggestion>(
-      `/projects/${projectId}/music-suggestion`,
+      `/projects/${projectId}/music-suggestion${qs}`,
     );
   }
 

@@ -655,7 +655,22 @@ TRANSITION_DURATION_S: float = 0.5
 # legacy value from a stored plan is coerced to TRANSITION_DEFAULT
 # inside ``_safe_transition`` so older serialised plans still render.
 VALID_TRANSITIONS: frozenset[str] = frozenset(
-    {"wipeleft", "slideright", "circlecrop"}
+    {
+        # v0.14.3 default set — assertive variants.
+        "wipeleft",
+        "slideright",
+        "circlecrop",
+        # v0.18 — re-introduced for the slow / artistic / commercial style
+        # presets. These are valid ffmpeg xfade filter values; the
+        # original removal in v0.14.3 was a UX choice ("every reel looked
+        # the same"), not a tech limitation. The default style ("custom")
+        # still picks from the assertive set above; only the named slow
+        # / artistic / commercial presets opt in to these.
+        "fade",
+        "dissolve",
+        "fadeblack",
+        "fadewhite",
+    }
 )
 TRANSITION_DEFAULT: str = "wipeleft"
 

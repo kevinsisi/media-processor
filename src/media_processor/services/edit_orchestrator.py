@@ -461,7 +461,12 @@ async def _load_subtitle_srt_from_db(draft_id: int) -> str:
     return subtitles.render_srt(cues)
 
 
-async def _plan_stage(project_id: int, target_duration_ms: int) -> CutPlan:
+async def _plan_stage(
+    project_id: int,
+    target_duration_ms: int,
+    *,
+    style_preset: str = "custom",
+) -> CutPlan:
     """Run the Gemini planner with key-pool + fallback."""
     async with async_session_maker() as session:
         api_keys = await get_llm_api_keys(session)
@@ -478,6 +483,7 @@ async def _plan_stage(project_id: int, target_duration_ms: int) -> CutPlan:
                     base_url=_GEMINI_BASE_URL,
                     timeout_s=settings.llm_timeout_s,
                     target_duration_ms=target_duration_ms,
+                    style_preset=style_preset,
                 )
         except edit_planner.EditPlanEmptyError:
             raise
@@ -516,6 +522,7 @@ async def run_render(
     subtitles_enabled: bool = True,
     transitions_enabled: bool = True,
     auto_reframe_enabled: bool = True,
+    style_preset: str = "custom",
 ) -> dict[str, Any]:
     """Run the full M5 pipeline for ``project_id`` and return a summary.
 
@@ -589,7 +596,11 @@ async def run_render(
                 len(plan.segments),
             )
         else:
-            plan = await _plan_stage(project_id, target_duration_ms)
+            plan = await _plan_stage(
+                project_id,
+                target_duration_ms,
+                style_preset=style_preset,
+            )
             await _persist_plan(handle, plan)
     except Exception as exc:  # noqa: BLE001 — record + abort.
         reason = _failure_reason(exc)

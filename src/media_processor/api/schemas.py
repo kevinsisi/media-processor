@@ -42,6 +42,9 @@ SubtitleOutlineWidthLiteral = Literal["none", "thin", "thick"]
 # the format doesn't match.
 SUBTITLE_COLOR_PATTERN = r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$"
 
+# v0.18 — clip-style preset that biases planner span / transition / BGM hint.
+ClipStylePresetLiteral = Literal["fast", "slow", "commercial", "artistic", "custom"]
+
 
 class ProjectSummary(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -211,6 +214,10 @@ class DraftSummary(BaseModel):
     progress_steps: dict[str, str] | None = None
     mp4_url: str | None = None
     subtitle_url: str | None = None
+    # v0.18 — preset that biased the planner for this draft. Default
+    # ``custom`` keeps legacy behaviour for old rows that pre-date the
+    # column.
+    style_preset: ClipStylePresetLiteral = "custom"
 
 
 class DraftSegmentOut(BaseModel):
@@ -272,6 +279,10 @@ class EditTriggerRequest(BaseModel):
     # output aspect. Assets without tracking data quietly fall back
     # to the static centered crop.
     auto_reframe: bool = True
+    # v0.18 — clip-style preset that biases planner span / transition /
+    # BGM hint. ``custom`` keeps the legacy free-form behaviour; the
+    # four named presets steer the model toward a coherent rhythm.
+    style_preset: ClipStylePresetLiteral = "custom"
 
 
 class EditTriggerResponse(BaseModel):
