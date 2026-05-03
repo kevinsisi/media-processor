@@ -325,6 +325,35 @@ class DraftReorderRequest(BaseModel):
     orders: list[int] = Field(..., min_length=1, max_length=200)
 
 
+# ---------- v0.20 — timeline editor segment-level mutations ----------
+
+
+class DraftSegmentSplitRequest(BaseModel):
+    """Body for POST /drafts/{id}/segments/{seg_id}/split. ``at_ms`` is an
+    on-timeline offset (the same coordinate space the playhead uses) and
+    must fall strictly inside the segment's
+    ``[on_timeline_start_ms, on_timeline_end_ms)`` range — the endpoint
+    rejects splits at the exact edges to avoid zero-length halves."""
+
+    at_ms: int = Field(..., ge=0)
+
+
+class DraftSegmentPatch(BaseModel):
+    """Body for PATCH /drafts/{id}/segments/{seg_id}. Every field is
+    optional; only present fields are written. Bounds are validated
+    server-side against ``Asset.duration_ms`` (asset-time fields) and
+    against the renderer's known transition / volume ranges."""
+
+    asset_start_ms: int | None = Field(default=None, ge=0)
+    asset_end_ms: int | None = Field(default=None, ge=1)
+    transition: str | None = Field(default=None, min_length=1, max_length=64)
+    voice_volume: float | None = Field(default=None, ge=0.0, le=1.5)
+    # bgm_volume can be set to ``None`` to clear the override (= use the
+    # mixer's default ducking curve) — distinguish "not provided" from
+    # "explicitly null" via ``model_fields_set`` on the parsed model.
+    bgm_volume: float | None = Field(default=None, ge=0.0, le=1.5)
+
+
 class SubtitleCueOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

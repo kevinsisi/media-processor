@@ -285,6 +285,26 @@ export interface DraftReorderRequest {
   orders: number[];
 }
 
+// ----- v0.20 — timeline editor segment-level mutations -----
+
+export interface DraftSegmentSplitRequest {
+  // On-timeline ms; must fall strictly inside the target segment.
+  at_ms: number;
+}
+
+export interface DraftSegmentPatch {
+  // All optional. Asset-time bounds validated server-side against
+  // Asset.duration_ms; transition validated against the renderer's
+  // whitelist; volumes clamped to [0.0, 1.5].
+  asset_start_ms?: number;
+  asset_end_ms?: number;
+  transition?: string;
+  voice_volume?: number;
+  // Set to null explicitly to clear the override (= mixer default
+  // ducking curve). Omit to leave unchanged.
+  bgm_volume?: number | null;
+}
+
 export interface SubtitleCueOut {
   idx: number;
   start_ms: number;

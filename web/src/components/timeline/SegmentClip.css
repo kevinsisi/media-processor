@@ -1,0 +1,75 @@
+.seg-clip {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  display: flex;
+  align-items: stretch;
+  background: linear-gradient(
+    180deg,
+    rgba(74, 122, 217, 0.65) 0%,
+    rgba(74, 122, 217, 0.45) 100%
+  );
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  cursor: pointer;
+  user-select: none;
+  overflow: hidden;
+  box-sizing: border-box;
+  transition: border-color 80ms ease;
+}
+
+.seg-clip:hover {
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
+.seg-clip--selected {
+  border-color: var(--accent, #ffd34a);
+  box-shadow: 0 0 0 2px rgba(255, 211, 74, 0.4);
+}
+
+.seg-clip__handle {
+  width: 8px;
+  flex-shrink: 0;
+  background: rgba(0, 0, 0, 0.35);
+  cursor: ew-resize;
+  position: relative;
+}
+
+.seg-clip__handle:hover {
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.seg-clip__handle::after {
+  content: "";
+  position: absolute;
+  top: 30%;
+  bottom: 30%;
+  left: 50%;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.6);
+  transform: translateX(-50%);
+}
+
+.seg-clip__body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 4px 6px;
+  min-width: 0;
+  font-size: 0.7rem;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+.seg-clip__label {
+  font-weight: 600;
+}
+
+.seg-clip__transition {
+  opacity: 0.75;
+  font-size: 0.6rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

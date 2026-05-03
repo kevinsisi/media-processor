@@ -1,0 +1,39 @@
+.rotate-hint {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 70vh;
+  padding: var(--space-6, 32px);
+  text-align: center;
+  gap: var(--space-3, 12px);
+}
+
+.rotate-hint__icon {
+  font-size: 64px;
+  line-height: 1;
+  animation: rotate-hint-wobble 2.4s ease-in-out infinite;
+}
+
+@keyframes rotate-hint-wobble {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(-15deg); }
+  75% { transform: rotate(15deg); }
+}
+
+.rotate-hint__title {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+.rotate-hint__body {
+  margin: 0;
+  max-width: 28ch;
+  color: var(--text-secondary);
+}
+
+.rotate-hint__body--muted {
+  font-size: 0.85em;
+  opacity: 0.7;
+}

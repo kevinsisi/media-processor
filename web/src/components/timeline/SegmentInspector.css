@@ -1,0 +1,115 @@
+.seg-inspector {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3, 12px);
+  padding: var(--space-3, 12px);
+  background: var(--surface-2, rgba(0, 0, 0, 0.2));
+  border-radius: 8px;
+  height: 100%;
+  box-sizing: border-box;
+  overflow-y: auto;
+}
+
+.seg-inspector--empty {
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  font-size: 0.9em;
+}
+
+.seg-inspector__header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding-bottom: var(--space-2, 8px);
+}
+
+.seg-inspector__title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.seg-inspector__asset {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  word-break: break-all;
+}
+
+.seg-inspector__error {
+  padding: 8px;
+  background: rgba(230, 74, 74, 0.15);
+  border: 1px solid rgba(230, 74, 74, 0.4);
+  border-radius: 4px;
+  color: #ffb4b4;
+  font-size: 0.8rem;
+}
+
+.seg-inspector__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3, 12px);
+}
+
+.seg-inspector__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.seg-inspector__field input[type="number"],
+.seg-inspector__field select {
+  padding: 4px 6px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--text-primary);
+  font-size: 0.85rem;
+}
+
+.seg-inspector__field input[type="range"] {
+  accent-color: var(--accent, #4a7ad9);
+}
+
+.seg-inspector__bgm-toggle {
+  margin-top: 4px;
+  padding: 2px 6px;
+  font-size: 0.7rem;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: transparent;
+  color: var(--text-primary);
+  border-radius: 4px;
+  cursor: pointer;
+  align-self: flex-start;
+}
+
+.seg-inspector__actions {
+  display: flex;
+  gap: var(--space-2, 8px);
+  flex-wrap: wrap;
+  margin-top: auto;
+}
+
+.cta--danger {
+  background: #c34a4a;
+  border-color: #c34a4a;
+  color: #fff;
+}
+
+.cta--danger:hover {
+  background: #d35a5a;
+}
+
+.cta--danger[disabled] {
+  background: rgba(195, 74, 74, 0.4);
+  cursor: not-allowed;
+}
+
+@media (orientation: landscape) and (max-width: 1023px) {
+  .seg-inspector__grid {
+    grid-template-columns: 1fr;
+  }
+}

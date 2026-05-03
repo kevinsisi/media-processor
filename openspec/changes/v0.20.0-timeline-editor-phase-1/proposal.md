@@ -42,8 +42,9 @@ Response: DraftDetail
 
 - Computes `split_at_asset_ms = asset_start_ms + (at_ms - on_timeline_start_ms)`.
 - Validates: `on_timeline_start_ms < at_ms < on_timeline_end_ms` (strict; refuses split exactly at edge to avoid zero-length segments).
-- Mutates the original row: `asset_end_ms` and `on_timeline_end_ms` move to the split point. `transition` is moved to the new (right-half) row; original row's `transition` becomes `"cut"` (no transition between the two halves so the split is seamless).
-- Inserts a new row immediately after, with the right-half asset/timeline range and inherited `voice_volume`, `bgm_volume`, `source_kind`, `plan_reason`, `reframe_keyframes`. New row gets a fresh `id`; `order` is the original's `order + 1` (subsequent segments shift +1).
+- Mutates the original row: `asset_end_ms` and `on_timeline_end_ms` move to the split point. `transition` is left unchanged.
+- Inserts a new row immediately after, with the right-half asset/timeline range and inherited `voice_volume`, `bgm_volume`, `source_kind`, `plan_reason`, `reframe_keyframes`, **and the same `transition` as the original** (so the new row's "transition to whatever was originally next" matches what the original row used to do). New row gets a fresh `id`; `order` is the original's `order + 1` (subsequent segments shift +1).
+- **Known minor artifact**: the boundary between the two halves of a split clip ends up using whatever transition the original had set (e.g. a 0.5 s wipe between two halves of the same shot). A "hard cut" semantic would require per-pair variable xfade duration, which couples to `subtitles.TRANSITION_OVERLAP_MS` and is deferred. The Inspector lets the operator change either half's `transition` to `fade` / `dissolve` for a softer split look.
 - Calls `_reflow_segments_and_cut_plan(draft)`.
 
 #### `PATCH /drafts/{draft_id}/segments/{seg_id}`

@@ -1,0 +1,104 @@
+.timeline-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3, 12px);
+  padding: var(--space-3, 12px);
+  height: calc(100vh - 60px); /* leave room for AppHeader */
+  box-sizing: border-box;
+}
+
+.timeline-editor--loading,
+.timeline-editor--error {
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: var(--space-3, 12px);
+}
+
+.timeline-editor__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3, 12px);
+  padding: var(--space-2, 8px) var(--space-3, 12px);
+  background: var(--surface-1, rgba(0, 0, 0, 0.25));
+  border-radius: 8px;
+  flex-wrap: wrap;
+}
+
+.timeline-editor__back {
+  color: var(--text-primary);
+  text-decoration: none;
+  font-size: 0.85rem;
+}
+
+.timeline-editor__back:hover {
+  text-decoration: underline;
+}
+
+.timeline-editor__title {
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.timeline-editor__dirty {
+  color: #ffd34a;
+  font-size: 0.75rem;
+}
+
+.timeline-editor__error {
+  padding: 8px 12px;
+  background: rgba(230, 74, 74, 0.15);
+  border: 1px solid rgba(230, 74, 74, 0.4);
+  border-radius: 4px;
+  color: #ffb4b4;
+  font-size: 0.85rem;
+}
+
+.timeline-editor__main {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  grid-template-rows: 1fr auto;
+  grid-template-areas:
+    "preview canvas"
+    "preview inspector";
+  gap: var(--space-3, 12px);
+  min-height: 0;
+}
+
+.timeline-editor__preview {
+  grid-area: preview;
+  min-height: 0;
+}
+
+.timeline-editor__canvas {
+  grid-area: canvas;
+  min-height: 0;
+  min-width: 0;
+}
+
+.timeline-editor__inspector {
+  grid-area: inspector;
+  max-height: 280px;
+  min-height: 200px;
+}
+
+/* Mobile landscape — same 1/3 + 2/3 split, but inspector becomes a
+   bottom-sheet style overlay. Phase 1 keeps it inline; if width is
+   really tight, stack inspector under canvas. */
+@media (orientation: landscape) and (max-width: 1023px) {
+  .timeline-editor__main {
+    grid-template-columns: 1fr 2fr;
+    grid-template-rows: 1fr auto;
+    grid-template-areas:
+      "preview canvas"
+      "inspector inspector";
+  }
+  .timeline-editor__inspector {
+    max-height: 200px;
+  }
+}
+
+.timeline-editor__header--mobile {
+  width: 100%;
+}

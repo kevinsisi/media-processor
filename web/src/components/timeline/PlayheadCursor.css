@@ -1,0 +1,31 @@
+.playhead {
+  position: absolute;
+  top: 0;
+  width: 1px;
+  pointer-events: none;
+  z-index: 6;
+}
+
+.playhead__handle {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 12px;
+  height: 16px;
+  background: #e64a4a;
+  border-radius: 0 0 6px 6px;
+  cursor: ew-resize;
+  pointer-events: auto;
+}
+
+.playhead__line {
+  position: absolute;
+  top: 16px;
+  bottom: 0;
+  left: 0;
+  width: 1px;
+  background: #e64a4a;
+  box-shadow: 0 0 4px rgba(230, 74, 74, 0.7);
+  pointer-events: none;
+}

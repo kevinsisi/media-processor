@@ -7,7 +7,7 @@
   - Body schema `DraftSegmentSplitRequest { at_ms: int }`.
   - 404 if draft / segment not found; 400 if `at_ms` not strictly inside `(on_timeline_start_ms, on_timeline_end_ms)`.
   - Computes `split_at_asset_ms`, mutates the original row, inserts a new row (`order = original.order + 1`), shifts `order` of subsequent rows.
-  - Moves `transition` to the new (right-half) row; original's `transition` becomes `"cut"`.
+  - New row inherits the original's `transition` value; original's `transition` is left unchanged. (Hard-cut semantic deferred — see proposal.)
   - Two-phase parking-offset for `order` reassignment (same trick as reorder).
   - Calls `_reflow_segments_and_cut_plan(draft)`.
   - Does NOT enqueue render. Returns `DraftDetail`.

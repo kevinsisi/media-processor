@@ -18,6 +18,8 @@ import type {
   DraftExportRequest,
   DraftExportResponse,
   DraftReorderRequest,
+  DraftSegmentPatch,
+  DraftSegmentSplitRequest,
   DraftSummary,
   EditTriggerRequest,
   EditTriggerResponse,
@@ -431,6 +433,61 @@ export class ApiClient {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
+  }
+
+  // ----- v0.20 — timeline editor segment-level mutations -----
+  //
+  // None of these auto-enqueue a render. Use ``reorderDraftSegments``
+  // with the current order list to fire the existing skip-plan render
+  // path once the operator clicks the timeline editor's "Apply"
+  // button.
+
+  splitDraftSegment(
+    draftId: number,
+    segId: number,
+    payload: DraftSegmentSplitRequest,
+  ): Promise<DraftDetail> {
+    return this.request<DraftDetail>(
+      `/drafts/${draftId}/segments/${segId}/split`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  patchDraftSegment(
+    draftId: number,
+    segId: number,
+    payload: DraftSegmentPatch,
+  ): Promise<DraftDetail> {
+    return this.request<DraftDetail>(
+      `/drafts/${draftId}/segments/${segId}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  async deleteDraftSegment(draftId: number, segId: number): Promise<void> {
+    await this.request<void>(`/drafts/${draftId}/segments/${segId}`, {
+      method: "DELETE",
+    });
+  }
+
+  // Resolve a public URL for an asset's source MP4 so a <video> element
+  // can scrub it directly. ``asset.file_path`` is the absolute
+  // in-container path like ``/app/media/assets/12/IMG_1234.MOV``; we
+  // pull the last two path components ({project_id}/{filename}) and
+  // bolt them onto ``/media/assets`` (which is StaticFiles-mounted by
+  // api/main.py and reverse-proxied under ``/api`` in prod).
+  assetVideoUrl(asset: { file_path: string }): string {
+    const parts = asset.file_path.replace(/\\/g, "/").split("/").filter(Boolean);
+    const tail = parts.slice(-2).join("/");
+    return `${this.baseUrl}/media/assets/${tail}`;
   }
 
   fetchDraftSubtitles(draftId: number): Promise<SubtitleCueOut[]> {

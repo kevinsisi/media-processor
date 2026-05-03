@@ -1,0 +1,44 @@
+.preview-pane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2, 8px);
+  padding: var(--space-3, 12px);
+  background: var(--surface-2, rgba(0, 0, 0, 0.2));
+  border-radius: 8px;
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.preview-pane__viewport {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+  border-radius: 6px;
+  overflow: hidden;
+  /* Default 16:9 aspect; mobile-landscape overrides to 9:16 below. */
+  aspect-ratio: 16 / 9;
+  width: 100%;
+}
+
+.preview-pane__video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.preview-pane__empty {
+  color: var(--text-secondary);
+  font-size: 0.85em;
+  padding: var(--space-4, 16px);
+}
+
+@media (orientation: landscape) and (max-width: 1023px) {
+  /* Mobile landscape — preview shifts to 9:16 since most short-form
+     reels are vertical. */
+  .preview-pane__viewport {
+    aspect-ratio: 9 / 16;
+    max-height: 70vh;
+  }
+}

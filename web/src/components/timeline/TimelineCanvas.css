@@ -1,0 +1,112 @@
+.timeline-canvas {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--surface-2, rgba(0, 0, 0, 0.2));
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.timeline-canvas__scroll {
+  flex: 1;
+  overflow-x: auto;
+  overflow-y: hidden;
+  position: relative;
+  cursor: crosshair;
+  background:
+    repeating-linear-gradient(
+      90deg,
+      transparent 0,
+      transparent 79px,
+      rgba(255, 255, 255, 0.04) 79px,
+      rgba(255, 255, 255, 0.04) 80px
+    );
+}
+
+.timeline-canvas__inner {
+  position: relative;
+  min-height: 100%;
+}
+
+.timeline-canvas__ruler {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.timeline-canvas__tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.timeline-canvas__tick-label {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  font-size: 0.65rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.timeline-canvas__track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  background: rgba(255, 255, 255, 0.03);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.timeline-canvas__track--video {
+  background: rgba(74, 122, 217, 0.05);
+}
+
+.timeline-canvas__track--bgm {
+  background: rgba(100, 180, 100, 0.05);
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+}
+
+.timeline-canvas__bgm-bar {
+  height: calc(100% - 8px);
+  background: linear-gradient(
+    90deg,
+    rgba(100, 180, 100, 0.5) 0%,
+    rgba(100, 180, 100, 0.3) 100%
+  );
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  color: #fff;
+  font-size: 0.75rem;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.timeline-canvas__bgm-label {
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+
+.timeline-canvas__bgm-empty {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-style: italic;
+}
+
+.timeline-canvas__zoom {
+  padding: 4px 8px;
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  background: rgba(0, 0, 0, 0.3);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}

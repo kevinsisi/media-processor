@@ -7,6 +7,7 @@ import ProjectEdit from "./pages/ProjectEdit";
 import ProjectList from "./pages/ProjectList";
 import Review from "./pages/Review";
 import Settings from "./pages/Settings";
+import TimelineEditor from "./pages/TimelineEditor";
 import Upload from "./pages/Upload";
 
 export default function App() {
@@ -19,6 +20,10 @@ export default function App() {
         <Route path="/projects/:id/upload" element={<Upload />} />
         <Route path="/projects/:id/assets" element={<ProjectAnalysis />} />
         <Route path="/projects/:id/edit" element={<ProjectEdit />} />
+        <Route
+          path="/projects/:projectId/edit/timeline/:draftId"
+          element={<TimelineEditor />}
+        />
         <Route path="/projects/:id/review" element={<Review />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/health" element={<Health />} />

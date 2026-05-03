@@ -1,0 +1,107 @@
+.transport {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3, 12px);
+  padding: var(--space-2, 8px) var(--space-3, 12px);
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 8px;
+  flex-wrap: wrap;
+}
+
+.transport__primary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3, 12px);
+}
+
+.transport__play {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: none;
+  background: var(--accent, #4a7ad9);
+  color: #fff;
+  font-size: 1rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.transport__play:hover {
+  background: var(--accent-hover, #5a8ae9);
+}
+
+.transport__time {
+  color: var(--text-secondary);
+  font-size: 0.85em;
+}
+
+.transport__speed {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2, 8px);
+  flex: 1;
+  min-width: 220px;
+  justify-content: flex-end;
+}
+
+.transport__speed-quick {
+  display: flex;
+  gap: 4px;
+}
+
+.transport__quick {
+  padding: 4px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: transparent;
+  color: var(--text-primary);
+  border-radius: 4px;
+  font-size: 0.75em;
+  cursor: pointer;
+}
+
+.transport__quick:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.transport__quick--active {
+  background: var(--accent, #4a7ad9);
+  border-color: var(--accent, #4a7ad9);
+  color: #fff;
+}
+
+.transport__slider {
+  flex: 1;
+  min-width: 80px;
+  max-width: 200px;
+  accent-color: var(--accent, #4a7ad9);
+}
+
+.transport__speed-readout,
+.transport__speed-input {
+  min-width: 4em;
+  text-align: right;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.2);
+  color: var(--text-primary);
+  font-size: 0.85em;
+  cursor: pointer;
+}
+
+.transport__speed-input {
+  cursor: text;
+}
+
+@media (max-width: 480px) {
+  .transport {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .transport__speed {
+    justify-content: space-between;
+  }
+}

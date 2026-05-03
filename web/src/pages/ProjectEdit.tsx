@@ -1039,6 +1039,17 @@ export default function ProjectEdit() {
               onProjectUpdated={setProject}
               disabled={triggering || !subtitlesOn}
             />
+            <div className="edit-card__advanced-row">
+              <Link
+                to={`/projects/${validProjectId}/edit/timeline/${draft.id}`}
+                className="cta cta--secondary edit-card__advanced-link"
+              >
+                進階編輯 ✨
+              </Link>
+              <span className="edit-card__advanced-hint">
+                打開時間軸視圖，可裁切、分割、刪除片段
+              </span>
+            </div>
             <DraggableTimeline
               draft={draft}
               videoRef={videoRef as React.RefObject<HTMLVideoElement>}

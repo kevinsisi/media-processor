@@ -25,12 +25,15 @@ from media_processor.api.schemas import (
     DraftPatchResponse,
     DraftReorderRequest,
     DraftSegmentOut,
+    DraftSegmentPatch,
+    DraftSegmentSplitRequest,
     SegmentVolumeOut,
     SegmentVolumePatch,
     SubtitleCueOut,
     SubtitleCuePatch,
 )
 from media_processor.models import (
+    Asset,
     AssetSegment,
     AssetTag,
     Draft,
@@ -379,7 +382,63 @@ async def create_draft_comment(
     return DraftCommentOut.model_validate(comment)
 
 
-# ---------- M7.1 — timeline reorder ----------
+# ---------- M7.1 / v0.20 — timeline reorder + segment-level mutations ----------
+
+
+# v0.20 — renderer transition whitelist mirror. Imported lazily inside the
+# patch endpoint so a pure-DB unit test that doesn't touch the renderer
+# can still exercise the row-mutation path; this module-level constant is
+# the cached frozenset reused across calls.
+_RENDERER_VALID_TRANSITIONS: frozenset[str] | None = None
+
+
+def _valid_transitions() -> frozenset[str]:
+    global _RENDERER_VALID_TRANSITIONS
+    if _RENDERER_VALID_TRANSITIONS is None:
+        from media_processor.services.video_renderer import VALID_TRANSITIONS
+
+        _RENDERER_VALID_TRANSITIONS = VALID_TRANSITIONS
+    return _RENDERER_VALID_TRANSITIONS
+
+
+async def _reflow_segments_and_cut_plan(draft: Draft) -> None:
+    """Re-cursor ``on_timeline_*_ms`` left-to-right and regenerate
+    ``cut_plan_json["segments"]`` so a downstream skip-plan render reads
+    the current row state.
+
+    Caller responsibilities:
+      - Has already mutated ``draft.segments`` (added/removed/edited
+        rows) AND assigned correct ``order`` values via the two-phase
+        parking-offset trick to dodge the ``UNIQUE(draft_id, order)``
+        constraint.
+      - Owns the surrounding ``await session.commit()`` and any
+        ``draft.status`` / ``progress_steps_json`` resets.
+
+    The helper is intentionally side-effect-free on the session — it
+    only mutates row attributes — so callers compose freely.
+    """
+    cursor_ms = 0
+    new_plan_segments: list[dict[str, Any]] = []
+    for seg in sorted(draft.segments, key=lambda s: s.order):
+        duration = max(1, (seg.asset_end_ms or 0) - (seg.asset_start_ms or 0))
+        seg.on_timeline_start_ms = cursor_ms
+        seg.on_timeline_end_ms = cursor_ms + duration
+        cursor_ms += duration
+        if seg.asset_id is not None and seg.asset_start_ms is not None and seg.asset_end_ms is not None:
+            new_plan_segments.append(
+                {
+                    "order": int(seg.order),
+                    "asset_id": int(seg.asset_id),
+                    "asset_start_ms": int(seg.asset_start_ms),
+                    "asset_end_ms": int(seg.asset_end_ms),
+                    "source_kind": str(seg.source_kind or "scripted"),
+                    "reason": str(seg.plan_reason or ""),
+                    "transition_to_next": str(seg.transition or "dissolve"),
+                }
+            )
+    blob: dict[str, Any] = dict(draft.cut_plan_json or {})
+    blob["segments"] = new_plan_segments
+    draft.cut_plan_json = blob
 
 
 @router.patch("/{draft_id}/order", response_model=DraftDetail)
@@ -428,34 +487,13 @@ async def reorder_draft_segments(
         seg.order = parking_offset + tmp_idx
     await session.flush()
 
-    cursor_ms = 0
-    new_plan_segments: list[dict[str, Any]] = []
     for new_order, seg_id in enumerate(requested_ids):
-        seg = by_id[seg_id]
-        duration = max(1, (seg.asset_end_ms or 0) - (seg.asset_start_ms or 0))
-        seg.order = new_order
-        seg.on_timeline_start_ms = cursor_ms
-        seg.on_timeline_end_ms = cursor_ms + duration
-        cursor_ms += duration
-        if seg.asset_id is not None and seg.asset_start_ms is not None and seg.asset_end_ms is not None:
-            new_plan_segments.append(
-                {
-                    "order": new_order,
-                    "asset_id": int(seg.asset_id),
-                    "asset_start_ms": int(seg.asset_start_ms),
-                    "asset_end_ms": int(seg.asset_end_ms),
-                    "source_kind": str(seg.source_kind or "scripted"),
-                    "reason": str(seg.plan_reason or ""),
-                    "transition_to_next": str(seg.transition or "dissolve"),
-                }
-            )
+        by_id[seg_id].order = new_order
 
-    # Update the stored cut_plan_json so a downstream skip-plan render
-    # can reload the same shape without losing metadata. Fields outside
-    # ``segments`` are preserved.
-    blob: dict[str, Any] = dict(draft.cut_plan_json or {})
-    blob["segments"] = new_plan_segments
-    draft.cut_plan_json = blob
+    # Re-cursor the timeline + regenerate cut_plan_json from the current
+    # rows. Shared helper — the v0.20 segment-level endpoints
+    # (split / patch / delete) call this same routine.
+    await _reflow_segments_and_cut_plan(draft)
 
     draft.status = DraftStatus.PENDING.value
     draft.progress_steps_json = {}
@@ -471,6 +509,286 @@ async def reorder_draft_segments(
 
     await session.refresh(draft, attribute_names=["segments"])
     return serialise_draft_detail(draft)
+
+
+# ---------- v0.20 — timeline editor segment-level endpoints ----------
+#
+# These three endpoints mutate the DB only — no render is enqueued.
+# The operator hits the existing PATCH /drafts/{id}/order with the
+# current order list to fire a skip-plan re-render once they're done
+# editing (the "Apply / Re-render" button on the timeline editor's
+# header). Decoupling avoids a worker run after every trim/split when
+# the operator is iterating fast.
+
+
+async def _load_draft_with_segments(
+    draft_id: int,
+    session: AsyncSession,
+) -> Draft:
+    stmt = select(Draft).where(Draft.id == draft_id).options(selectinload(Draft.segments))
+    draft = (await session.execute(stmt)).scalar_one_or_none()
+    if draft is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="draft not found")
+    return draft
+
+
+def _segment_or_404(draft: Draft, seg_id: int) -> DraftSegment:
+    for seg in draft.segments:
+        if seg.id == seg_id:
+            return seg
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="segment not found")
+
+
+@router.post(
+    "/{draft_id}/segments/{seg_id}/split",
+    response_model=DraftDetail,
+)
+async def split_draft_segment(
+    draft_id: int,
+    seg_id: int,
+    payload: DraftSegmentSplitRequest,
+    session: SessionDep,
+) -> DraftDetail:
+    """Split one segment into two halves at ``at_ms`` (on-timeline ms).
+
+    ``at_ms`` must be strictly inside the segment's
+    ``[on_timeline_start_ms, on_timeline_end_ms)`` window — splits at
+    the exact edges are rejected to avoid zero-length halves.
+
+    The new (right-half) row inherits the original's ``transition``,
+    ``voice_volume``, ``bgm_volume``, ``source_kind``, ``plan_reason``
+    and ``reframe_keyframes``. The original row is shortened to the
+    split point and its ``transition`` is preserved (a "hard cut" at
+    the split boundary is deferred — see proposal).
+
+    Does NOT enqueue a render. Returns the updated ``DraftDetail``.
+    """
+    draft = await _load_draft_with_segments(draft_id, session)
+    seg = _segment_or_404(draft, seg_id)
+
+    if seg.asset_id is None or seg.asset_start_ms is None or seg.asset_end_ms is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="segment is missing asset bindings; cannot split",
+        )
+
+    at_ms = int(payload.at_ms)
+    if not (seg.on_timeline_start_ms < at_ms < seg.on_timeline_end_ms):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"at_ms ({at_ms}) must be strictly inside "
+                f"({seg.on_timeline_start_ms}, {seg.on_timeline_end_ms})"
+            ),
+        )
+
+    split_at_asset_ms = seg.asset_start_ms + (at_ms - seg.on_timeline_start_ms)
+    if not (seg.asset_start_ms < split_at_asset_ms < seg.asset_end_ms):
+        # Defensive — the on-timeline check above should make this
+        # impossible, but a misaligned row could trip it.
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="computed asset-time split point fell outside the asset window",
+        )
+
+    # Capture the right-half ranges BEFORE we shrink the original row.
+    right_half_asset_end = seg.asset_end_ms
+    right_half_on_timeline_end = seg.on_timeline_end_ms
+
+    # Capture pre-split ordering so we know where to insert the new row.
+    old_segments_in_order = sorted(draft.segments, key=lambda s: s.order)
+
+    # Park existing rows at guaranteed-unused negative offsets so the
+    # final renumber pass doesn't collide with the
+    # UNIQUE(draft_id, order) constraint mid-flush.
+    parking_offset = -1 - 2 * len(old_segments_in_order)
+    for tmp_idx, s in enumerate(old_segments_in_order):
+        s.order = parking_offset + tmp_idx
+    await session.flush()
+
+    # Shrink the original (left half).
+    seg.asset_end_ms = split_at_asset_ms
+    seg.on_timeline_end_ms = at_ms
+
+    # Build the right half. Inherits everything; gets a parked order
+    # that's lower than any in old_segments so it won't collide.
+    new_seg = DraftSegment(
+        draft_id=draft.id,
+        order=parking_offset - 1,
+        asset_segment_id=seg.asset_segment_id,
+        asset_id=seg.asset_id,
+        asset_start_ms=split_at_asset_ms,
+        asset_end_ms=right_half_asset_end,
+        on_timeline_start_ms=at_ms,
+        on_timeline_end_ms=right_half_on_timeline_end,
+        reframe_keyframes=seg.reframe_keyframes,
+        transition=seg.transition,
+        blurred_source_path=seg.blurred_source_path,
+        source_kind=seg.source_kind,
+        plan_reason=seg.plan_reason,
+        voice_volume=seg.voice_volume,
+        bgm_volume=seg.bgm_volume,
+    )
+    session.add(new_seg)
+    await session.flush()  # assigns new_seg.id; orders all parked.
+
+    # Renumber: walk pre-split rows in their old order; drop the new
+    # row in immediately after the original.
+    final_sequence: list[DraftSegment] = []
+    for s in old_segments_in_order:
+        final_sequence.append(s)
+        if s.id == seg.id:
+            final_sequence.append(new_seg)
+    for new_order, s in enumerate(final_sequence):
+        s.order = new_order
+    await session.flush()
+
+    await _reflow_segments_and_cut_plan(draft)
+    await session.commit()
+    await session.refresh(draft, attribute_names=["segments"])
+    return serialise_draft_detail(draft)
+
+
+@router.patch(
+    "/{draft_id}/segments/{seg_id}",
+    response_model=DraftDetail,
+)
+async def patch_draft_segment(
+    draft_id: int,
+    seg_id: int,
+    payload: DraftSegmentPatch,
+    session: SessionDep,
+) -> DraftDetail:
+    """Trim / re-flag one segment. Every field on ``DraftSegmentPatch``
+    is optional; only present fields are written.
+
+    ``asset_start_ms`` / ``asset_end_ms`` are validated against
+    ``Asset.duration_ms`` and against each other (start < end). The
+    on-timeline cursor is recomputed from the new asset-window length
+    via the shared reflow helper, so subsequent segments shift to fill
+    or open the gap.
+
+    Does NOT enqueue a render. Returns the updated ``DraftDetail``.
+    """
+    draft = await _load_draft_with_segments(draft_id, session)
+    seg = _segment_or_404(draft, seg_id)
+    fields_set = payload.model_fields_set
+
+    # Resolve the new asset-window first so we can validate against the
+    # asset's true duration before mutating anything.
+    new_start = seg.asset_start_ms
+    new_end = seg.asset_end_ms
+    if "asset_start_ms" in fields_set and payload.asset_start_ms is not None:
+        new_start = int(payload.asset_start_ms)
+    if "asset_end_ms" in fields_set and payload.asset_end_ms is not None:
+        new_end = int(payload.asset_end_ms)
+
+    if new_start is not None and new_end is not None and new_start >= new_end:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"asset_start_ms ({new_start}) must be < asset_end_ms ({new_end})",
+        )
+
+    # Validate against the asset's recorded duration so we can't trim
+    # past the source. Only loaded when an asset-time field was actually
+    # touched.
+    if ("asset_start_ms" in fields_set or "asset_end_ms" in fields_set) and seg.asset_id is not None:
+        asset = await session.get(Asset, seg.asset_id)
+        if asset is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="segment's asset is missing; cannot trim",
+            )
+        if new_start is not None and new_start < 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="asset_start_ms must be ≥ 0",
+            )
+        if new_end is not None and asset.duration_ms is not None and new_end > asset.duration_ms:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"asset_end_ms ({new_end}) must be ≤ asset duration ({asset.duration_ms})"
+                ),
+            )
+
+    if (
+        "transition" in fields_set
+        and payload.transition is not None
+        and payload.transition not in _valid_transitions()
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"transition '{payload.transition}' is not in the renderer's "
+                "whitelist"
+            ),
+        )
+
+    # All checks passed — apply.
+    if "asset_start_ms" in fields_set and payload.asset_start_ms is not None:
+        seg.asset_start_ms = int(payload.asset_start_ms)
+    if "asset_end_ms" in fields_set and payload.asset_end_ms is not None:
+        seg.asset_end_ms = int(payload.asset_end_ms)
+    if "transition" in fields_set and payload.transition is not None:
+        seg.transition = payload.transition
+    if "voice_volume" in fields_set and payload.voice_volume is not None:
+        seg.voice_volume = float(payload.voice_volume)
+    if "bgm_volume" in fields_set:
+        # bgm_volume can be set to None explicitly (= clear override).
+        seg.bgm_volume = (
+            float(payload.bgm_volume) if payload.bgm_volume is not None else None
+        )
+
+    await _reflow_segments_and_cut_plan(draft)
+    await session.commit()
+    await session.refresh(draft, attribute_names=["segments"])
+    return serialise_draft_detail(draft)
+
+
+@router.delete(
+    "/{draft_id}/segments/{seg_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_draft_segment(
+    draft_id: int,
+    seg_id: int,
+    session: SessionDep,
+) -> None:
+    """Remove one segment from a draft and reflow.
+
+    Refuses with 409 if removing the segment would leave the draft with
+    zero segments (a draft with no cut plan can't render).
+
+    Does NOT enqueue a render.
+    """
+    draft = await _load_draft_with_segments(draft_id, session)
+    seg = _segment_or_404(draft, seg_id)
+
+    if len(draft.segments) <= 1:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="cannot delete the last remaining segment",
+        )
+
+    # Park survivors at negative offsets so the deletion + renumber
+    # doesn't trip the UNIQUE(draft_id, order) constraint mid-flush.
+    survivors = [s for s in draft.segments if s.id != seg.id]
+    parking_offset = -1 - len(draft.segments)
+    for tmp_idx, s in enumerate(sorted(survivors, key=lambda x: x.order)):
+        s.order = parking_offset + tmp_idx
+    await session.delete(seg)
+    await session.flush()
+
+    for new_order, s in enumerate(sorted(survivors, key=lambda x: x.order)):
+        s.order = new_order
+    await session.flush()
+
+    # Reload draft.segments — the deleted row is gone and ``draft``'s
+    # cached relationship still holds it until refreshed.
+    await session.refresh(draft, attribute_names=["segments"])
+    await _reflow_segments_and_cut_plan(draft)
+    await session.commit()
 
 
 # ---------- M7.2 — subtitle inline edit ----------

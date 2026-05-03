@@ -48,7 +48,7 @@ class StaticCacheMiddleware(BaseHTTPMiddleware):
 
 app = FastAPI(
     title="media-processor API",
-    version="0.19.0",
+    version="0.20.0",
 )
 
 app.include_router(health.router)
@@ -69,6 +69,7 @@ for _media_dir in (
     settings.drafts_dir,
     settings.bgm_dir,
     settings.watermark_dir,
+    settings.assets_dir,
 ):
     with contextlib.suppress(OSError):
         Path(_media_dir).mkdir(parents=True, exist_ok=True)
@@ -113,4 +114,14 @@ app.mount(
     "/media/watermarks",
     StaticFiles(directory=settings.watermark_dir, check_dir=False),
     name="watermarks",
+)
+# v0.20 — serve uploaded source assets so the timeline-editor preview
+# pane can scrub the original MP4 via a native <video> element.
+# StaticFiles already speaks Range: so seek-to-position works without a
+# custom streaming endpoint. No cache header — same trade-off as BGM:
+# a re-uploaded asset at the same path appears immediately.
+app.mount(
+    "/media/assets",
+    StaticFiles(directory=settings.assets_dir, check_dir=False),
+    name="assets",
 )
