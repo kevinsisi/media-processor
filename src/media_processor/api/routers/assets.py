@@ -329,6 +329,13 @@ async def get_asset_tracking(
             if not isinstance(t, dict):
                 continue
             frames = list(t.get("frames") or [])
+            # v0.22.2 — drop noise tracks from the picker. The raw
+            # tracking_json blob keeps every detection so we can lower
+            # the threshold without re-analysing; the operator just
+            # never sees sub-second YOLO flickers (mis-classifications
+            # during fast motion / occlusion) as selectable subjects.
+            if len(frames) < object_tracking.MIN_TRACK_FRAMES:
+                continue
             tracks.append(
                 TrackingTrackOut(
                     object_index=int(t.get("object_index", 0)),
@@ -344,7 +351,7 @@ async def get_asset_tracking(
         # one-track view from ``frames`` so the picker has something
         # to render before the user re-runs the tracking step.
         legacy_frames = list(blob.get("frames") or [])
-        if legacy_frames:
+        if len(legacy_frames) >= object_tracking.MIN_TRACK_FRAMES:
             tracks.append(
                 TrackingTrackOut(
                     object_index=0,
