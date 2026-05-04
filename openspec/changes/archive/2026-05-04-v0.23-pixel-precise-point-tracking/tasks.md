@@ -47,11 +47,17 @@
 - [x] 5.5 Test update: `tests/unit/test_video_renderer.py::test_cut_segments_writes_intermediates` unpacks the new tuple return and asserts `reframed_flags == [False, False]` for the no-tracking case.
 - [x] 5.6 Verified live: re-rendered draft 40 (project 4) at 0.23.4. Lamborghini badge centred at output time 25s, 26s, 28s in v15.mp4 — symptom gone.
 
-## 6. Memory + docs + version bumps
+## 6. Sendcmd duplicate-timestamp dispatcher fix (0.23.5)
 
-- [x] 6.1 `memory/v023_point_tracking.md` — covers all four gotchas (opencv must be in api image, modal commit math via state not getBoundingClientRect, no `transition: transform` on click target, overlay px math via renderRect not `% 100%`, dynamic crop + vidstab conflict).
-- [x] 6.2 `memory/MEMORY.md` index entry refreshed for v0.23.4 final state.
-- [x] 6.3 `ROADMAP.md` — Phase 9.8 section + sub-task headings + table row.
-- [x] 6.4 `CLAUDE.md` — current-version, archive list, render pipeline pointers, asset model alembic chain.
-- [x] 6.5 Version bumped to 0.23.0 / 0.23.1 / 0.23.2 / 0.23.3 / 0.23.4 in `pyproject.toml` + `src/media_processor/api/main.py` + `web/package.json` (one bump per release).
-- [x] 6.6 Each release branched as `claude/v0.23.X-<topic>`, merged --no-ff into `main`, pushed; docker compose build + up -d on the dispatch host; `/health` smoke-tested.
+- [x] 6.1 `services/auto_reframe.write_sendcmd_file` rewritten to emit ONE directive per timestamp with `,` separating the x and y commands (`0.0000 crop@reframe x 264, crop@reframe y 436;`) instead of two same-timestamp directives. Halves the dispatch rate from 60 Hz to 30 Hz, sidestepping the ffmpeg 4.4 sendcmd dispatcher quirk that silently drops the second-and-onward directive when multiple share a start_time at high rate. Inline comment in the function explains the trap so a future cleanup doesn't naively split them back onto two lines.
+- [x] 6.2 Diagnostic isolation that nailed the cause: piped the production sendcmd file straight into `ffmpeg -vf "sendcmd=…,crop@reframe=…,scale=…,setsar=1"` outside the orchestrator pipeline (rules out vidstab, concat, BGM mix, watermark) — same offset reproduced. Then sparse versions at 1 Hz / 3 Hz / 10 Hz / 15 Hz with the same two-line-per-timestamp format all WORK; 30 Hz two-lines fails; 30 Hz one-line (x only) works. Combination = high-rate dispatch + duplicate timestamps is the trigger.
+- [x] 6.3 Verified live: re-rendered draft 41 / v16.mp4 at 0.23.5. Lamborghini badge centred at output time 17 s, 19 s, 20 s (was offset ~36 % from left at t=20 s on v0.23.4 even with the vidstab skip). Subject no longer drifts during the segment.
+
+## 7. Memory + docs + version bumps
+
+- [x] 7.1 `memory/v023_point_tracking.md` — covers all five gotchas (opencv must be in api image, modal commit math via state not getBoundingClientRect, no `transition: transform` on click target, overlay px math via renderRect not `% 100%`, dynamic crop + vidstab conflict, sendcmd duplicate-timestamp dispatcher quirk).
+- [x] 7.2 `memory/MEMORY.md` index entry refreshed through v0.23.5 final state.
+- [x] 7.3 `ROADMAP.md` — Phase 9.8 section with five sub-task subsections (9.8.1–9.8.5) + table row updated.
+- [x] 7.4 `CLAUDE.md` — current-version, archive list, render pipeline pointers (auto_reframe sendcmd grammar callout, _cut_segment bool return).
+- [x] 7.5 Version bumped to 0.23.0 / 0.23.1 / 0.23.2 / 0.23.3 / 0.23.4 / 0.23.5 in `pyproject.toml` + `src/media_processor/api/main.py` + `web/package.json` (one bump per release).
+- [x] 7.6 Each release branched as `claude/v0.23.X-<topic>`, merged --no-ff into `main`, pushed; docker compose build + up -d on the dispatch host; `/health` smoke-tested.
