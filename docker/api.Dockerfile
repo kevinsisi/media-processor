@@ -31,6 +31,22 @@ RUN pip install --no-cache-dir --upgrade pip \
         "pyyaml>=6.0.2" \
         "httpx>=0.28.0"
 
+# v0.23.1 — OpenCV is needed for two inline endpoints that the api
+# container handles synchronously (NOT delegated to the GPU worker):
+#   * mode=custom (CSRT user-drawn ROI, services/object_tracking.
+#     track_custom_roi)
+#   * mode=point (LK pixel-precise tracking, services/point_tracking.
+#     track_point)
+# Both currently use ``asyncio.to_thread`` from the FastAPI handler,
+# which means cv2 has to be importable inside the api process. The
+# ``-headless`` variant skips Qt/GUI bindings (the api container has
+# no display) but keeps the contrib trackers (CSRT, MIL, etc.). numpy
+# pinned to the same range the worker uses to avoid wheel mismatches
+# when both containers share a mounted package cache.
+RUN pip install --no-cache-dir \
+        "opencv-python-headless>=4.10.0,<5.0" \
+        "numpy>=1.26.0,<3.0"
+
 COPY src/ ./src/
 COPY profiles/ ./profiles/
 COPY alembic.ini ./
