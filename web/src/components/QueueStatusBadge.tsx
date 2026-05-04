@@ -46,17 +46,24 @@ export default function QueueStatusBadge() {
     }
   }, [open, refresh]);
 
-  const running = status?.running ?? null;
+  // v0.27.0 — multi-worker can have N concurrent running jobs;
+  // surface that count in the chip so a busy moment reads as
+  // "處理中 3 +2" rather than the pre-0.27 boolean "處理中 +2".
+  const runningCount = status?.running.length ?? 0;
   const queuedCount = status?.queued.length ?? 0;
-  const totalDepth = (running ? 1 : 0) + queuedCount;
+  const totalDepth = runningCount + queuedCount;
 
-  const variant = running
-    ? "queue-badge--running"
-    : queuedCount > 0
-      ? "queue-badge--queued"
-      : "queue-badge--idle";
+  const variant =
+    runningCount > 0
+      ? "queue-badge--running"
+      : queuedCount > 0
+        ? "queue-badge--queued"
+        : "queue-badge--idle";
 
-  const label = running ? `處理中 +${queuedCount}` : `排隊 ${queuedCount}`;
+  const label =
+    runningCount > 0
+      ? `處理中 ${runningCount} +${queuedCount}`
+      : `排隊 ${queuedCount}`;
 
   return (
     <>
@@ -67,7 +74,9 @@ export default function QueueStatusBadge() {
         aria-label={`排隊狀態：${label}（共 ${totalDepth} 個任務）`}
         title="點擊查看排隊"
       >
-        {running && <span className="queue-badge__pulse" aria-hidden="true" />}
+        {runningCount > 0 && (
+          <span className="queue-badge__pulse" aria-hidden="true" />
+        )}
         <span className="queue-badge__label">{label}</span>
       </button>
       <QueueStatusModal open={open} onClose={() => setOpen(false)} />

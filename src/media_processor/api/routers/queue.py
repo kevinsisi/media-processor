@@ -86,15 +86,22 @@ class QueueJobItem(BaseModel):
 class QueueStatusOut(BaseModel):
     """Response for ``GET /queue/status``.
 
-    ``running`` is at most one item (single-worker setup). ``queued``
-    is in dispatch order across all three queues, but RQ doesn't
-    expose a single global priority across queues — the worker
-    consumes ``analysis`` then ``editing`` then ``bgm`` per its
-    listen list. We surface them in that same order so the UI's
-    "你排第 N 位" claim matches the worker's actual dispatch order.
+    ``running`` is the list of jobs currently held by some worker's
+    StartedJobRegistry. v0.27.0 widened this from a single optional
+    item to a list because the multi-worker compose runs five
+    concurrent processes (1 analysis + 3 editing + 1 bgm) so up to
+    five jobs can be live at once. Pre-0.27 single-worker deploys
+    return a list with at most one entry.
+
+    ``queued`` is in dispatch order across all three queues, walking
+    ``analysis → editing → bgm`` in the worker pickup order. The
+    multi-worker setup means a queued job may actually start on any
+    free worker for that queue — ``position`` still reflects "you're
+    Nth in line on your queue", which is what the operator cares
+    about.
     """
 
-    running: QueueJobItem | None = None
+    running: list[QueueJobItem]
     queued: list[QueueJobItem]
 
 
@@ -234,26 +241,26 @@ _QUEUE_ORDER: tuple[QueueName, ...] = ("analysis", "editing", "bgm")
 async def queue_status(session: SessionDep) -> QueueStatusOut:
     redis = _redis()
 
-    running: QueueJobItem | None = None
+    running: list[QueueJobItem] = []
     queued: list[QueueJobItem] = []
     queued_pos = 0
 
     for qname in _QUEUE_ORDER:
         queue = Queue(qname, connection=redis)
 
-        # StartedJobRegistry holds the work-horse'd job for this
-        # queue. With a single worker process across all three
-        # queues, only ONE of the three registries is non-empty at
-        # any moment — but iterate them all for correctness.
+        # StartedJobRegistry holds every job currently held by a
+        # worker for this queue. Pre-0.27 we had ONE worker
+        # listening on all three queues so only one registry was
+        # ever non-empty; v0.27.0's multi-worker setup runs 1
+        # analysis + 3 editing + 1 bgm processes so up to five
+        # jobs may be live concurrently. Collect them all.
         registry = StartedJobRegistry(qname, connection=redis)
         for job_id in registry.get_job_ids():
             try:
                 job = Job.fetch(job_id, connection=redis)
             except NoSuchJobError:
                 continue
-            item = _job_to_item(job, qname, "running")
-            if running is None:
-                running = item
+            running.append(_job_to_item(job, qname, "running"))
 
         for job_id in queue.get_job_ids():
             try:
@@ -263,8 +270,7 @@ async def queue_status(session: SessionDep) -> QueueStatusOut:
             queued.append(_job_to_item(job, qname, "queued", position=queued_pos))
             queued_pos += 1
 
-    items = ([running] if running is not None else []) + queued
-    await _resolve_project_links(session, items)
+    await _resolve_project_links(session, running + queued)
     return QueueStatusOut(running=running, queued=queued)
 
 

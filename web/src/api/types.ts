@@ -806,7 +806,11 @@ export interface QueueJobItem {
 }
 
 export interface QueueStatusOut {
-  running: QueueJobItem | null;
+  // v0.27.0 — multi-worker: up to 5 concurrent running jobs (1
+  // analysis + 3 editing + 1 bgm). Pre-0.27 returned at most one
+  // item but always shaped as `running | null`; the new shape is
+  // a list so the FE can render every live render in parallel.
+  running: QueueJobItem[];
   queued: QueueJobItem[];
 }
 

@@ -125,7 +125,7 @@ export default function QueueStatusModal({
 
   if (!open) return null;
 
-  const running = data?.running ?? null;
+  const running = data?.running ?? [];
   const queued = data?.queued ?? [];
 
   return (
@@ -158,27 +158,48 @@ export default function QueueStatusModal({
         {error && <p className="queue-modal__error">{error}</p>}
 
         <section className="queue-modal__section">
-          <h3 className="queue-modal__section-title">目前處理中</h3>
-          {running ? (
-            <div
-              className={
-                highlightDraftId != null && running.draft_id === highlightDraftId
-                  ? "queue-modal__row queue-modal__row--running queue-modal__row--mine"
-                  : "queue-modal__row queue-modal__row--running"
-              }
-            >
-              <div className="queue-modal__row-main">
-                <span className="queue-modal__pulse" aria-hidden="true" />
-                <span className="queue-modal__row-label">{jobLabel(running)}</span>
-              </div>
-              <div className="queue-modal__row-meta">
-                {running.elapsed_s != null
-                  ? `已進行 ${fmtElapsed(running.elapsed_s)}`
-                  : "已開始"}
-              </div>
-            </div>
-          ) : (
+          {/* v0.27.0 — up to 5 concurrent running jobs (multi-worker
+              setup: 1 analysis + 3 editing + 1 bgm). Pre-0.27 the
+              single-worker setup capped this at 1. */}
+          <h3 className="queue-modal__section-title">
+            目前處理中（{running.length}）
+          </h3>
+          {running.length === 0 ? (
             <p className="queue-modal__empty">— 沒有任務在跑</p>
+          ) : (
+            <ul className="queue-modal__list">
+              {running.map((job) => {
+                const isMine =
+                  highlightDraftId != null && job.draft_id === highlightDraftId;
+                return (
+                  <li
+                    key={job.job_id}
+                    className={
+                      isMine
+                        ? "queue-modal__row queue-modal__row--running queue-modal__row--mine"
+                        : "queue-modal__row queue-modal__row--running"
+                    }
+                  >
+                    <div className="queue-modal__row-main">
+                      <span className="queue-modal__pulse" aria-hidden="true" />
+                      <span className="queue-modal__row-label">
+                        {jobLabel(job)}
+                      </span>
+                      {isMine && (
+                        <span className="queue-modal__row-mine-tag">
+                          你的任務
+                        </span>
+                      )}
+                    </div>
+                    <div className="queue-modal__row-meta">
+                      {job.elapsed_s != null
+                        ? `已進行 ${fmtElapsed(job.elapsed_s)}`
+                        : "已開始"}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
           )}
         </section>
 

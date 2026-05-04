@@ -55,10 +55,34 @@ services:
     ports:
       - "0.0.0.0:8523:80"
 
-  # M4 — GPU-enabled RQ worker for analysis jobs (Whisper STT, Gemini
-  # Vision scene tagging, OpenCV motion, Gemini coverage compare).
-  # Requires nvidia-container-toolkit on the host.
-  worker:
+  # v0.27.0 — multi-worker fan-out. Pre-0.27 we ran ONE worker
+  # container that listened on all three queues; a slow MusicGen
+  # generation could head-of-line block an analysis run, and we
+  # could only render one cut at a time even when the AMD 3700X
+  # had seven idle cores.
+  #
+  # The split: GPU work stays serialised (worker-analysis +
+  # worker-bgm share the single RTX 2070), but CPU-bound editing
+  # jobs run three abreast. All three services boot from the same
+  # worker image — ``__main__`` takes the queue name as a CLI arg
+  # so a single Dockerfile produces one image and per-service
+  # ``command:`` picks the queue. Containers without
+  # ``deploy.resources.devices`` don't see the GPU; CUDA libs in
+  # the base image stay dormant since the editing job functions
+  # don't import torch / whisper / musicgen.
+  #
+  # Hardware target: AMD 3700X (8C/16T, ~7 cores left after the
+  # api + analysis + bgm + redis + postgres baseline) + 48 GB
+  # RAM + RTX 2070 8 GB (Whisper medium ≈ 1.5 GB, MusicGen-small
+  # fp32 ≈ 4 GB — both fit when only one runs at a time, which
+  # is the common case since analysis is upload-time and BGM is
+  # render-time).
+
+  # GPU worker for the analysis queue: Whisper STT, YOLO tracking,
+  # Gemini Vision scene tagging, MediaPipe emotion, OpenCV motion
+  # detect. Single instance — model load + GPU memory are the
+  # bottleneck, not concurrency.
+  worker-analysis:
     build:
       context: .
       dockerfile: docker/worker.Dockerfile
@@ -69,6 +93,76 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    command: ["python", "-m", "media_processor.workers", "analysis"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    volumes:
+      - ./src:/app/src:ro
+      - ./profiles:/app/profiles:ro
+      - "${MEDIA_STORAGE_DIR:-./.local/media}:/app/media"
+
+  # CPU workers for the editing queue: ffmpeg cut + concat +
+  # vidstab + subtitle burn + watermark + BGM mix. Three replicas
+  # so three drafts render in parallel on the spare cores. Each
+  # ffmpeg invocation already uses multiple threads, but the
+  # per-segment encoding (libx264 veryfast) leaves enough
+  # headroom that three concurrent renders finish noticeably
+  # faster than three serial ones. No GPU reservation — the
+  # editing path doesn't import torch / whisper / musicgen, so
+  # the CUDA libs in the image stay unused.
+  #
+  # Scale via:
+  #
+  #   docker compose up -d --scale worker-editing=3 worker-editing
+  #
+  # ``deploy.replicas`` is honoured by ``docker stack`` but
+  # ignored by plain ``docker compose``, so the ``--scale`` arg
+  # is load-bearing. Documented in CLAUDE.md so the next deploy
+  # remembers it.
+  worker-editing:
+    build:
+      context: .
+      dockerfile: docker/worker.Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["python", "-m", "media_processor.workers", "editing"]
+    deploy:
+      replicas: 3
+    volumes:
+      - ./src:/app/src:ro
+      - ./profiles:/app/profiles:ro
+      - "${MEDIA_STORAGE_DIR:-./.local/media}:/app/media"
+
+  # GPU worker for the bgm queue: MusicGen-small (text → 30 s
+  # WAV). Shares the RTX 2070 with worker-analysis; the two
+  # queues are independent and the actual GPU contention is rare
+  # because analysis fires at upload time and BGM fires at render
+  # time. A second container is better than co-listening on one
+  # worker because MusicGen's ~4 GB VRAM footprint stays warm
+  # between jobs and would otherwise block Whisper loads on the
+  # same process.
+  worker-bgm:
+    build:
+      context: .
+      dockerfile: docker/worker.Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["python", "-m", "media_processor.workers", "bgm"]
     deploy:
       resources:
         reservations:
