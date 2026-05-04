@@ -153,6 +153,44 @@ def _build_bgm_volume_expr(
     return expr
 
 
+def _probe_video_duration_s(video_path: Path) -> float | None:
+    """Best-effort ``ffprobe`` of a video's container duration in seconds.
+
+    Used by :func:`mix_bgm` to compute the start time of the BGM tail
+    fade. Returns ``None`` on any failure so the caller can skip the
+    fade gracefully (rather than fail the whole render). Not worth
+    its own module — it's only ever called from one place.
+    """
+    if shutil.which("ffprobe") is None:
+        return None
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                str(video_path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10.0,
+            check=True,
+        )
+    except (FileNotFoundError, subprocess.SubprocessError):
+        return None
+    raw = result.stdout.strip()
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
 def mix_bgm(
     video_path: Path,
     bgm_path: Path,
@@ -160,6 +198,7 @@ def mix_bgm(
     output_path: Path,
     *,
     segments: list[SegmentVolume] | None = None,
+    fade_out_sec: float = 0.0,
 ) -> None:
     """Re-encode ``video_path``'s audio with BGM mixed in under voice ducking.
 
@@ -170,6 +209,16 @@ def mix_bgm(
     ``segments`` (v0.17) optionally adds per-segment voice / BGM gain
     overrides. ``None`` (or empty list) keeps the M6.4 behaviour: voice
     plays at original gain, BGM follows the auto-duck curve.
+
+    ``fade_out_sec`` (v0.24.0) appends ``afade=t=out`` to the BGM
+    track so the music tapers into silence over the last N seconds.
+    ``0.0`` (default) keeps the pre-0.24.0 hard-cut behaviour. The
+    fade is on the BGM track only — voice already gets cut by
+    ``-shortest`` matching the video, so fading voice would just
+    pre-empt the operator's choice of where the speech ends. Probes
+    the video duration via ``ffprobe`` to compute the fade start
+    offset; on probe failure the fade is silently skipped (the mix
+    still ships, just without the taper).
     """
     if shutil.which("ffmpeg") is None and not _is_fake():
         raise BgmMixError("ffmpeg not on PATH")
@@ -188,6 +237,17 @@ def mix_bgm(
     seg_list: list[SegmentVolume] = list(segments or [])
     voice_expr = _build_voice_volume_expr(seg_list)
     bgm_expr = _build_bgm_volume_expr(cues, seg_list)
+
+    # v0.24.0 — compose the BGM tail-fade tail. Skip the fade when
+    # the duration probe fails (no point starting at NaN) or when
+    # the requested fade is zero / longer than the video.
+    bgm_fade_filter = ""
+    if fade_out_sec > 0.0:
+        duration_s = _probe_video_duration_s(video_path) if not _is_fake() else None
+        if duration_s is not None and duration_s > 0.0:
+            fade_dur = min(fade_out_sec, duration_s)
+            fade_start = max(0.0, duration_s - fade_dur)
+            bgm_fade_filter = f",afade=t=out:st={fade_start:.3f}:d={fade_dur:.3f}"
     output_path.parent.mkdir(parents=True, exist_ok=True)
     # v0.21.5 — ``-stream_loop -1`` on the BGM input loops the source
     # track until ffmpeg's output duration limit kicks in. Combined with
@@ -213,7 +273,7 @@ def mix_bgm(
         "-filter_complex",
         (
             f"[0:a]volume=eval=frame:volume='{voice_expr}'[voice];"
-            f"[1:a]volume=eval=frame:volume='{bgm_expr}'[bgm];"
+            f"[1:a]volume=eval=frame:volume='{bgm_expr}'{bgm_fade_filter}[bgm];"
             f"[voice][bgm]amix=inputs=2:duration=first:dropout_transition=2[aout]"
         ),
         "-map",

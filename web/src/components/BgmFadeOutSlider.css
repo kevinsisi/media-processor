@@ -1,0 +1,50 @@
+/* v0.24.0 — BGM tail-fade slider styling. Sits inside the BGM
+   SettingsGroup, matches the visual weight of <SubjectClassPicker>. */
+
+.bgm-fade-out {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 0.85rem;
+}
+
+.bgm-fade-out__head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+}
+
+.bgm-fade-out__title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.bgm-fade-out__value {
+  font-size: 0.9rem;
+  color: rgba(255, 215, 130, 0.95);
+  font-variant-numeric: tabular-nums;
+}
+
+.bgm-fade-out__saving {
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.55);
+  margin-left: auto;
+}
+
+.bgm-fade-out__slider {
+  width: 100%;
+  accent-color: rgba(255, 215, 130, 0.95);
+}
+
+.bgm-fade-out__hint {
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.55);
+  margin: 0;
+}
+
+.bgm-fade-out__error {
+  font-size: 0.82rem;
+  color: rgba(255, 120, 120, 0.95);
+  margin: 0;
+}

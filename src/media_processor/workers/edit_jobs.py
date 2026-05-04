@@ -33,7 +33,7 @@ def render_draft(
     subtitles_from_db: bool = False,
     stabilize: bool = True,
     subtitles: bool = True,
-    transitions: bool = True,
+    transitions: bool = False,
     auto_reframe: bool = True,
     style_preset: str = "custom",
 ) -> dict[str, Any]:

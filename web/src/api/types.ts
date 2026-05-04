@@ -64,6 +64,10 @@ export interface ProjectDetail {
   // show a "BGM ✓" chip when set; null = no BGM and the bgm render stage
   // no-ops.
   bgm_path: string | null;
+  // v0.24.0 — BGM tail-fade duration in seconds. ``0`` = pre-0.24.0
+  // hard-cut (music stops cold at the end of the video); positive
+  // values fade out over the last N seconds. Default 3.0 server-side.
+  bgm_fade_out_sec: number;
   // v0.18 — brand watermark / logo overlay. ``watermark_path`` is the
   // on-disk path; ``watermark_url`` is the public URL (with a cache-bust
   // query so re-uploads are picked up immediately). Layout fields carry

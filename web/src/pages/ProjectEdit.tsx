@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ApiError, apiClient } from "../api/client";
+import BgmFadeOutSlider from "../components/BgmFadeOutSlider";
 import BgmSourcePicker from "../components/BgmSourcePicker";
 import type { BgmSource } from "../components/BgmSourcePicker";
 import DraggableTimeline from "../components/DraggableTimeline";
@@ -700,6 +701,11 @@ function EditSettingsBlock(props: EditSettingsBlockProps) {
           stylePreset={props.stylePreset}
           onSourceChange={props.setCurrentBgmSource}
         />
+        <BgmFadeOutSlider
+          project={props.project}
+          onProjectUpdated={props.setProject}
+          disabled={props.triggering}
+        />
       </SettingsGroup>
 
       <SettingsGroup title="視覺疊加" summary={visualSummary}>
@@ -804,11 +810,14 @@ export default function ProjectEdit() {
   // v0.14.3 — digital stabilization toggle. Default on; user opts out
   // for tripod / gimbal projects to halve render time.
   const [stabilize, setStabilize] = useState<boolean>(true);
-  // v0.14.4 — subtitles + transitions toggles. Both default on (matches
-  // the API defaults). User can disable to ship a captionless mp4 or
-  // hard-cut version without re-rendering the source plan.
+  // v0.14.4 — subtitles + transitions toggles. ``subtitles`` defaults
+  // on. ``transitions`` defaults OFF as of v0.24.0 — every operator
+  // who tested fresh projects switched transitions off as their
+  // first action; the default now matches that workflow. Slow /
+  // artistic / commercial style presets that benefit from xfade can
+  // still re-enable the toggle on the trigger panel.
   const [subtitlesOn, setSubtitlesOn] = useState<boolean>(true);
-  const [transitionsOn, setTransitionsOn] = useState<boolean>(true);
+  const [transitionsOn, setTransitionsOn] = useState<boolean>(false);
   // v0.16 — auto-reframe (YOLO-tracked dynamic crop). Default on. The
   // backend silently falls back to the static centered crop for assets
   // without tracking_json, so leaving this on is safe even on a half-

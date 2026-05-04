@@ -76,6 +76,10 @@ class ProjectDetail(BaseModel):
     draft_count: int
     # M6.4 — populated when the project has an uploaded BGM track.
     bgm_path: str | None = None
+    # v0.24.0 — tail-fade duration (seconds) for the BGM mix. ``0`` =
+    # historical hard-cut. Default 3.0 s, capped at 10 s server-side
+    # (FE slider exposes 0..5 s for the common range).
+    bgm_fade_out_sec: float = 3.0
     # v0.18 — watermark / logo overlay settings. ``watermark_path`` is
     # null when the user hasn't uploaded a PNG yet; the layout fields
     # carry their defaults so the UI can render the picker pre-filled.
@@ -110,6 +114,19 @@ class WatermarkSettingsPatch(BaseModel):
     position: WatermarkPositionLiteral | None = None
     scale: float | None = Field(default=None, ge=0.02, le=0.5)
     opacity: float | None = Field(default=None, ge=0.0, le=1.0)
+
+
+class BgmFadeOutPatch(BaseModel):
+    """v0.24.0 — body for PATCH /projects/{id}/bgm-fade-out.
+
+    ``fade_out_sec`` is the tail-fade duration on the BGM mix. ``0``
+    keeps the pre-0.24.0 hard-cut behaviour; positive values append
+    ``afade=t=out`` so the music tapers into silence over the last
+    N seconds. The FE slider exposes 0..5 s; the server allows up
+    to 10 s as a safety belt.
+    """
+
+    fade_out_sec: float = Field(..., ge=0.0, le=10.0)
 
 
 class WatermarkPresetSaveRequest(BaseModel):
@@ -351,7 +368,13 @@ class EditTriggerRequest(BaseModel):
     # renderer falls back to the concat-demuxer plain mux (hard cuts,
     # no overlap). Useful for tight news-style edits where xfade
     # softens the cut energy too much.
-    transitions: bool = True
+    # v0.24.0 — default flipped to ``False``. Operator feedback said
+    # "every fresh project ships with transitions on and the first
+    # thing I do is turn them off"; the default now matches that
+    # workflow. Style presets that explicitly want transitions
+    # (``slow`` / ``artistic`` / ``commercial``) can still re-enable
+    # via the trigger panel.
+    transitions: bool = False
     # v0.16 — toggle auto-reframe (YOLO-tracked dynamic crop). Default
     # on: when an asset has tracking_json the renderer drives a
     # Kalman-smoothed crop that keeps the subject centered in the

@@ -97,7 +97,7 @@ def enqueue_project_edit(
     subtitles_from_db: bool = False,
     stabilize: bool = True,
     subtitles: bool = True,
-    transitions: bool = True,
+    transitions: bool = False,
     auto_reframe: bool = True,
     style_preset: str = "custom",
 ) -> str:
