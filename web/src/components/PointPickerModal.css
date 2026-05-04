@@ -86,10 +86,11 @@
   -webkit-user-drag: none;
   user-select: none;
   pointer-events: none;
-  /* The transform is set inline by the React component (zoom + pan).
-     We only set the transition so flickless wheel zoom feels
-     responsive but not jittery. */
-  transition: transform 80ms ease-out;
+  /* v0.23.2 — NO transition on transform. A click landing in the
+     middle of an in-flight wheel-zoom animation would otherwise see
+     the partway-through rect, not the final one, and commit the
+     wrong source pixel. ``will-change: transform`` still hints the
+     compositor to keep the layer GPU-friendly without easing. */
   will-change: transform;
 }
 .point-picker-modal__no-thumb {

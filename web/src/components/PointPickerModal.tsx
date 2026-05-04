@@ -12,12 +12,27 @@
 //     so a small jitter during tap doesn't misfire as drag
 //   * Backdrop click / Esc / cancel button closes without committing
 //
-// Coordinate math: the click's clientX/Y is mapped to the image's
-// post-transform bounding rect (``getBoundingClientRect()`` returns
-// the visible rect, transform-adjusted), then divided by that
-// rect's width/height to get 0..1 normalised source coords. This
-// works regardless of zoom level + pan offset since the image's
-// actual on-screen rect is what we measure against.
+// Coordinate math (v0.23.2 — manual computation):
+//
+// We DON'T use ``imgRef.getBoundingClientRect()`` because:
+//
+//   1. With ``max-width: 100%; max-height: 100%`` the <img> only
+//      fills the stage when its intrinsic dimensions exceed the
+//      container; for small thumbnails (e.g. 640×360 in an 1200×800
+//      stage) the element renders at its natural pixel size, which
+//      is harmless on its own but stacks badly with the transform
+//      origin assumptions in the wheel/pinch handlers.
+//   2. A CSS ``transition: transform 80ms`` on the image meant a
+//      click landing in the middle of a wheel-zoom transition saw
+//      the partway-through rect, not the final one. Even after
+//      removing the transition (v0.23.2), relying on the browser's
+//      bounding rect for transformed elements is more variable than
+//      computing it ourselves.
+//
+// Instead, we recompute the visible image rect from known state on
+// every click: stage rect + image natural dimensions + zoom + pan.
+// The wheel + pinch handlers anchor on the same model, so the
+// click→commit math + the zoom-anchor math always agree.
 
 import {
   useCallback,
@@ -51,6 +66,61 @@ const DRAG_THRESHOLD_PX = 4;
 interface Pan {
   x: number;
   y: number;
+}
+
+// v0.23.2 — fitted base size of the image inside the stage at zoom=1,
+// pan=(0,0). Mirrors the browser's behaviour for an <img> with
+// ``max-width: 100%; max-height: 100%`` and no explicit width/height:
+// keep the natural size unless either dimension exceeds the
+// container, in which case scale down preserving aspect.
+function fittedImageSize(
+  naturalW: number,
+  naturalH: number,
+  containerW: number,
+  containerH: number,
+): { w: number; h: number } {
+  if (naturalW <= 0 || naturalH <= 0 || containerW <= 0 || containerH <= 0) {
+    return { w: 0, h: 0 };
+  }
+  if (naturalW <= containerW && naturalH <= containerH) {
+    return { w: naturalW, h: naturalH };
+  }
+  const aspect = naturalW / naturalH;
+  const containerAspect = containerW / containerH;
+  if (aspect > containerAspect) {
+    return { w: containerW, h: containerW / aspect };
+  }
+  return { h: containerH, w: containerH * aspect };
+}
+
+// v0.23.2 — visible image rect on-screen given stage + transform
+// state. Same model the wheel/pinch handlers anchor on:
+//   1. Image base size = fittedImageSize within the stage
+//   2. Image is centred in the stage (flex centring)
+//   3. transform: translate(panX, panY) scale(zoom)
+//      — CSS reads right-to-left: scale FIRST around centre, THEN
+//      translate. The centre of the image is the stage centre, so
+//      the post-transform top-left is
+//        stage_centre - (base * zoom) / 2 + pan
+function visibleImageRect(
+  stage: DOMRect,
+  natW: number,
+  natH: number,
+  zoom: number,
+  pan: Pan,
+): { left: number; top: number; width: number; height: number } | null {
+  const base = fittedImageSize(natW, natH, stage.width, stage.height);
+  if (base.w === 0 || base.h === 0) return null;
+  const w = base.w * zoom;
+  const h = base.h * zoom;
+  const cx = stage.left + stage.width / 2;
+  const cy = stage.top + stage.height / 2;
+  return {
+    left: cx - w / 2 + pan.x,
+    top: cy - h / 2 + pan.y,
+    width: w,
+    height: h,
+  };
 }
 
 export default function PointPickerModal({
@@ -218,11 +288,28 @@ export default function PointPickerModal({
       dragRef.current = null;
       if (!wasClick || busy) return;
 
-      // Map click → 0..1 normalised source coords using the
-      // image's post-transform bounding rect.
+      // v0.23.2 — manual rect from state. ``imgRef.naturalWidth /
+      // naturalHeight`` is the thumbnail's intrinsic resolution
+      // (e.g. 640×360 for the asset's keyframe gallery JPEG); the
+      // normalised coords we emit are scale-invariant — the
+      // backend multiplies them by the source asset's full
+      // resolution, not the thumbnail's. As long as the thumbnail
+      // is the same crop / aspect as the source (which it is —
+      // ``services.thumbnails`` extracts from the source frame),
+      // norm at the thumbnail = norm at the source.
       const img = imgRef.current;
-      if (!img) return;
-      const rect = img.getBoundingClientRect();
+      if (!stage || !img) return;
+      const natW = img.naturalWidth;
+      const natH = img.naturalHeight;
+      if (!natW || !natH) return;
+      const rect = visibleImageRect(
+        stage.getBoundingClientRect(),
+        natW,
+        natH,
+        zoom,
+        pan,
+      );
+      if (!rect) return;
       const xCss = ev.clientX - rect.left;
       const yCss = ev.clientY - rect.top;
       if (xCss < 0 || yCss < 0 || xCss > rect.width || yCss > rect.height) {
@@ -234,7 +321,7 @@ export default function PointPickerModal({
         norm_y: Math.max(0, Math.min(1, yCss / rect.height)),
       });
     },
-    [busy, onCommit],
+    [busy, onCommit, zoom, pan],
   );
 
   // ---- Touch pinch ----
