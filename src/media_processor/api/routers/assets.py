@@ -588,6 +588,16 @@ async def patch_asset_tracking_target(
                 init_t_ms=frame_ms,
                 duration_ms=asset.duration_ms,
             )
+        except point_tracking_svc.PointTrackTimeoutError as exc:
+            # v0.27.3 — cooperative budget hit. Surface as 504 so the
+            # FE knows this is "too slow", not "broken". The error
+            # message includes the asset's resolution + duration so
+            # the operator can tell at a glance whether it's the
+            # 1728x3072 portrait that blew the budget.
+            raise HTTPException(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                detail=f"追蹤超時：{exc}",
+            ) from exc
         except (
             point_tracking_svc.PointTrackError,
             point_tracking_svc.PointTrackUnavailableError,

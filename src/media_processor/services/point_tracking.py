@@ -33,10 +33,32 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+
+# v0.27.3 — cooperative wall-clock budget for the LK loop.
+#
+# track_point runs at FULL source fps, doing cv2.read + calcOpticalFlowPyrLK
+# per frame. On a portrait 1728x3072 clip at 30 fps for 2 min that's
+# ~3600 forward frames + however many backward, decoding 5.3 MP frames
+# each — well past any sensible browser / proxy timeout. We had at
+# least one operator report "stuck on 追蹤中..." with no visible error.
+# Pre-0.27.3 the loop ran until done with no abort path, so the API
+# kept grinding on the threadpool while the FE's fetch had long
+# given up.
+#
+# 30 s is the budget. ~120 frames/s on a typical 1080p clip means
+# ~3600 frames fit comfortably; longer / larger clips bail with a
+# PointTrackTimeoutError that the endpoint translates into a 504
+# the FE shows as a toast. The check fires every BUDGET_CHECK_EVERY
+# frames so the per-iteration cost is a single time.monotonic()
+# call amortised across 30 LK steps.
+MAX_LK_DURATION_S: float = 30.0
+BUDGET_CHECK_EVERY: int = 30
 
 
 # Pyramidal Lucas-Kanade parameters. The OpenCV defaults are tuned
@@ -106,6 +128,18 @@ class PointTrackUnavailableError(PointTrackError):
     """OpenCV is not importable on this host."""
 
 
+class PointTrackTimeoutError(PointTrackError):
+    """The LK loop exceeded its wall-clock budget.
+
+    Raised cooperatively from inside the forward / backward passes
+    so a stuck request returns a 504 to the FE instead of grinding
+    in the API's threadpool until the operator gives up. The
+    partial trace is discarded — auto-reframe wants a measurement
+    on every frame, so half a trace is more dangerous than no
+    trace.
+    """
+
+
 def track_point(
     media_path: Path,
     *,
@@ -113,6 +147,7 @@ def track_point(
     init_norm_y: float,
     init_t_ms: int = 0,
     duration_ms: int | None = None,
+    time_budget_s: float | None = None,
 ) -> dict[str, Any]:
     """Track a single pixel through the video using LK optical flow.
 
@@ -186,6 +221,14 @@ def track_point(
     duration_ms = duration_ms or int(total_frames / max(1.0, fps) * 1000)
     interval_ms = 1000.0 / max(fps, 1.0)
 
+    # v0.27.3 — cooperative wall-clock budget. Raised inside the
+    # forward / backward loops every BUDGET_CHECK_EVERY frames so a
+    # 1728x3072@60fps / 2 min asset (which would otherwise grind for
+    # several minutes on the api threadpool) bails fast with a 504-
+    # mappable error rather than a silently-stuck FE spinner.
+    budget_s = MAX_LK_DURATION_S if time_budget_s is None else float(time_budget_s)
+    started_at = time.monotonic()
+
     # Resolve pixel coords from cv2's POST-rotation dimensions. This
     # is the only place the seed→pixel mapping happens; no other layer
     # reads Asset.resolution for tracking purposes.
@@ -213,6 +256,21 @@ def track_point(
     # without a re-sort at the end.
     backward: list[dict[str, Any]] = []
     forward: list[dict[str, Any]] = []
+
+    def _check_budget() -> None:
+        """Raise PointTrackTimeoutError if the wall-clock has run past
+        ``budget_s``. Called every BUDGET_CHECK_EVERY frames so the
+        time.monotonic() cost is amortised; the partial trace gathered
+        so far is discarded."""
+        elapsed = time.monotonic() - started_at
+        if elapsed > budget_s:
+            raise PointTrackTimeoutError(
+                f"point tracking exceeded {budget_s:.0f} s budget after "
+                f"{len(forward) + len(backward)} frames "
+                f"(asset {src_w}x{src_h} @ {fps:.1f} fps, "
+                f"{(duration_ms or 0) / 1000:.1f} s) — try a shorter "
+                "clip or pick a point with stronger texture"
+            )
 
     try:
         # ---- Seek to init frame ----
@@ -280,6 +338,8 @@ def track_point(
                 prev_pt = curr_pt
             prev_gray = curr_gray
             ts += interval_ms
+            if len(forward) % BUDGET_CHECK_EVERY == 0:
+                _check_budget()
 
         # ---- Backward pass: init → 0 ----
         # Re-seek to init then walk backward by reading consecutive
@@ -332,6 +392,8 @@ def track_point(
                 prev_pt = curr_pt
             prev_gray = curr_gray
             ts -= interval_ms
+            if len(backward) % BUDGET_CHECK_EVERY == 0:
+                _check_budget()
     finally:
         cap.release()
 
@@ -351,11 +413,14 @@ def track_point(
 
 
 __all__ = [
+    "BUDGET_CHECK_EVERY",
     "LK_MAX_ERR",
     "LK_MAX_ITER",
     "LK_MAX_LEVEL",
     "LK_WIN_SIZE",
+    "MAX_LK_DURATION_S",
     "PointTrackError",
+    "PointTrackTimeoutError",
     "PointTrackUnavailableError",
     "track_point",
 ]

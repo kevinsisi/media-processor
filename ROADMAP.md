@@ -2,7 +2,7 @@
 
 > **單一定位**：個人 / 小團隊用的「拍完就上傳，AI 直接給可發佈影片」的工具。
 > 目標 UX：手機優先、繁體中文、高級感、最少手動編輯。
-> 目前版本：**0.27.2**（M9.12.2 — QueueStatusModal 跑版修正：backdrop 不透明度提高 + 缺漏的 body padding/overflow-y/scroll 補齊）
+> 目前版本：**0.27.3**（M9.12.3 — 像素追蹤超時防護：track_point 30s wall-clock budget，1728×3072 / 長片不再卡「追蹤中…」永遠不動）
 
 ## Phase 進度速覽
 
@@ -31,7 +31,8 @@
 | M9.11 | 素材管理：單個 / 批次刪除 + analysis 列表 meta 行（長度・解析度・大小） | ✅ done | 0.26.0 |
 | M9.12 | 多 worker 平行：1 analysis + 3 editing + 1 bgm（AMD 3700X + RTX 2070 + 48GB RAM） | ✅ done | 0.27.0 |
 | M9.12.1 | 強制刪素材：force=true 同步把引用該素材的 draft 標為失敗 + 「素材已被刪除」feedback | ✅ done | 0.27.1 |
-| **M9.12.2** | **QueueStatusModal 跑版修正：backdrop 不透明度 + body 缺漏的 padding/overflow-y/scroll** | ✅ done | **0.27.2** |
+| M9.12.2 | QueueStatusModal 跑版修正：backdrop 不透明度 + body 缺漏的 padding/overflow-y/scroll | ✅ done | 0.27.2 |
+| **M9.12.3** | **像素追蹤超時防護：track_point 30 s 合作式 wall-clock budget + 504 映射** | ✅ done | **0.27.3** |
 | M10 | 多專案批次 + 社群直接發布 + AI 自動縮圖 | 🔮 future | 0.28.x+ |
 
 ---
