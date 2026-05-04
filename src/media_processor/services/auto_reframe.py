@@ -358,6 +358,70 @@ def compute_crop_path_from_custom_roi(
     )
 
 
+def compute_crop_path_from_point_track(
+    point_track: dict[str, Any] | None,
+    *,
+    target_aspect: str,
+    asset_start_ms: int,
+    asset_end_ms: int,
+    src_w: int | None = None,
+    src_h: int | None = None,
+) -> CropPath | None:
+    """v0.23 — auto-reframe centred on a single LK-tracked pixel.
+
+    ``point_track`` is ``Asset.point_tracking_json`` — per-frame
+    ``{t_ms, x, y, lost}`` records. We synthesise a tiny 1×1 bbox
+    centred on the point so ``compute_crop_path``'s existing centre-
+    of-bbox math (Kalman smoothing + max-delta clamp) works
+    unchanged. ``lost`` frames are kept verbatim — the LK pass
+    already froze them at the last good position so the Kalman
+    filter sees a continuous measurement series rather than gaps.
+    """
+    if not point_track:
+        return None
+    raw_frames = point_track.get("frames") or []
+    if not raw_frames:
+        return None
+    # Synthesise (x-0.5, y-0.5, w=1, h=1) so centre = (x, y) — the
+    # crop-path math centres on bbox midpoint and the 0.5 px nudge
+    # keeps coordinates non-negative without affecting Kalman input.
+    bbox_frames = []
+    for f in raw_frames:
+        if not isinstance(f, dict):
+            continue
+        try:
+            x = float(f["x"])
+            y = float(f["y"])
+            t_ms = int(f.get("t_ms", 0))
+        except (KeyError, TypeError, ValueError):
+            continue
+        bbox_frames.append(
+            {
+                "t_ms": t_ms,
+                "x": int(max(0.0, x - 0.5)),
+                "y": int(max(0.0, y - 0.5)),
+                "w": 1,
+                "h": 1,
+            }
+        )
+    if not bbox_frames:
+        return None
+    wrapped = {
+        "src_w": point_track.get("src_w"),
+        "src_h": point_track.get("src_h"),
+        "fps": point_track.get("fps"),
+        "frames": bbox_frames,
+    }
+    return compute_crop_path(
+        wrapped,
+        target_aspect=target_aspect,
+        asset_start_ms=asset_start_ms,
+        asset_end_ms=asset_end_ms,
+        src_w=src_w,
+        src_h=src_h,
+    )
+
+
 def write_sendcmd_file(path: CropPath, out_path: Path) -> Path:
     """Serialise a :class:`CropPath` to an ffmpeg sendcmd commands file.
 
@@ -413,5 +477,6 @@ __all__ = [
     "build_filter_chain",
     "compute_crop_path",
     "compute_crop_path_from_custom_roi",
+    "compute_crop_path_from_point_track",
     "write_sendcmd_file",
 ]

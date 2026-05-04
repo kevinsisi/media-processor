@@ -126,10 +126,11 @@ export function labelForTrackingSubject(name: string | null | undefined): string
   return TRACKING_SUBJECT_LABELS[name] ?? name;
 }
 
-// v0.17 — tracking-target picker modes.
+// v0.17 / v0.23 — tracking-target picker modes.
 export const TRACKING_MODE_LABELS: Record<string, string> = {
   auto: "自動",
   object: "指定物件",
+  point: "精準像素",
   custom: "自訂區域",
   fixed: "固定構圖",
   none: "不追蹤",

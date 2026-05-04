@@ -719,28 +719,48 @@ class TrackingDetailOut(BaseModel):
     tracks: list[TrackingTrackOut]
     # Currently active mode. ``None`` (== auto) means "follow the
     # dominant track"; ``-1`` means custom_roi; ``-2``/``-3`` disable
-    # auto-reframe.
+    # auto-reframe; ``-4`` means point_tracking (v0.23).
     tracked_object_index: int | None = None
     has_custom_roi: bool = False
+    # v0.23 — surfaces ``Asset.point_tracking_json`` presence so the
+    # FE can render a "this asset has an LK pixel-precise track"
+    # indicator on the picker. The full per-frame trace lives in DB
+    # only — the picker just needs the origin click + a yes/no.
+    has_point_track: bool = False
+    # v0.23 — verbatim user click that seeded the LK trace. Shape:
+    # ``{x: int, y: int, frame_ms: int, norm_x: float, norm_y: float}``
+    # so the FE can render a crosshair at the original click position
+    # on any thumbnail size. ``None`` when no point track has been run.
+    point_tracking_origin: dict[str, Any] | None = None
 
 
 class TrackingTargetRequest(BaseModel):
     """PATCH /assets/{id}/tracking-target — body.
 
-    ``mode`` picks the kind of target. ``object_index`` is required when
-    ``mode == "object"``; ``custom_roi`` is required when ``mode ==
-    "custom"``. Other modes ignore those fields.
+    ``mode`` picks the kind of target.
+
+    * ``object_index`` required when ``mode == "object"``
+    * ``custom_roi`` required when ``mode == "custom"`` — shape
+      ``{x, y, w, h, source_t_ms?}``
+    * ``point`` required when ``mode == "point"`` — shape
+      ``{norm_x, norm_y, frame_ms}``; ``norm_x`` / ``norm_y`` are
+      0..1 normalised so the FE can send display-space coords without
+      knowing the asset's native resolution.
+
+    Other modes ignore those fields.
     """
 
-    mode: Literal["auto", "object", "custom", "fixed", "none"]
+    mode: Literal["auto", "object", "custom", "point", "fixed", "none"]
     object_index: int | None = Field(default=None, ge=0)
     custom_roi: dict[str, Any] | None = None
+    point: dict[str, Any] | None = None
 
 
 class TrackingTargetResponse(BaseModel):
     asset_id: int
     tracked_object_index: int | None
     has_custom_roi: bool
+    has_point_track: bool = False
 
 
 # v0.17 — per-DraftSegment audio gain.

@@ -35,6 +35,7 @@ from media_processor.api.schemas import (
 )
 from media_processor.models import Asset, AssetTranscript, ScriptCoverage
 from media_processor.services import object_tracking
+from media_processor.services import point_tracking as point_tracking_svc
 from media_processor.services import thumbnails as thumbnails_svc
 from media_processor.services.queue import enqueue_asset_analysis, enqueue_asset_translate
 
@@ -287,6 +288,32 @@ async def get_asset_coverage(
 _SAMPLE_FRAME_LIMIT = 24
 
 
+def _asset_native_resolution(asset: Asset) -> tuple[int, int]:
+    """v0.23 — pull (src_w, src_h) for the asset.
+
+    Order of preference:
+      1. ``Asset.resolution`` — set by the upload pipeline as
+         ``"WxH"`` (e.g. ``"1920x1080"``).
+      2. ``Asset.tracking_json["src_w"/"src_h"]`` — fallback for
+         legacy uploads that didn't record resolution.
+      3. ``(0, 0)`` — caller treats as missing and 409s the request.
+    """
+    raw = getattr(asset, "resolution", None)
+    if isinstance(raw, str) and "x" in raw:
+        try:
+            sw, sh = raw.lower().split("x", 1)
+            return int(sw), int(sh)
+        except ValueError:
+            pass
+    blob = getattr(asset, "tracking_json", None)
+    if isinstance(blob, dict):
+        try:
+            return int(blob.get("src_w") or 0), int(blob.get("src_h") or 0)
+        except (TypeError, ValueError):
+            pass
+    return 0, 0
+
+
 def _downsample_frames(frames: list[dict[str, Any]]) -> list[list[int]]:
     if not frames:
         return []
@@ -372,6 +399,8 @@ async def get_asset_tracking(
         tracks=tracks,
         tracked_object_index=getattr(asset, "tracked_object_index", None),
         has_custom_roi=isinstance(getattr(asset, "custom_roi_json", None), dict),
+        has_point_track=isinstance(getattr(asset, "point_tracking_json", None), dict),
+        point_tracking_origin=getattr(asset, "point_tracking_origin", None),
     )
 
 
@@ -381,12 +410,15 @@ async def patch_asset_tracking_target(
     payload: TrackingTargetRequest,
     session: SessionDep,
 ) -> TrackingTargetResponse:
-    """Set which tracked object (or custom ROI) the renderer follows.
+    """Set which tracked object (or custom ROI / point) the renderer
+    follows.
 
     Modes:
       * ``auto``    → ``tracked_object_index = NULL`` (use dominant track)
       * ``object``  → ``tracked_object_index = N`` (must exist in tracking_json["tracks"])
       * ``custom``  → ``tracked_object_index = -1`` + run CSRT to fill ``custom_roi_json``
+      * ``point``   → ``tracked_object_index = -4`` + run pyramidal Lucas-Kanade to fill
+                      ``point_tracking_json`` from a single user-clicked pixel (v0.23)
       * ``fixed``   → ``tracked_object_index = -2`` (static centered crop)
       * ``none``    → ``tracked_object_index = -3`` (no auto-reframe at all)
     """
@@ -461,6 +493,75 @@ async def patch_asset_tracking_target(
             ) from exc
         asset.custom_roi_json = roi_json
         asset.tracked_object_index = -1
+    elif payload.mode == "point":
+        # v0.23 — pyramidal Lucas-Kanade pixel-precise tracking from a
+        # single user click. Coordinates arrive 0..1 normalised so the
+        # FE can pass display-space coords without knowing the asset's
+        # native resolution; we multiply through by the source size
+        # before handing to LK.
+        if not payload.point:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="mode=point requires point {norm_x, norm_y, frame_ms}",
+            )
+        try:
+            norm_x = float(payload.point["norm_x"])
+            norm_y = float(payload.point["norm_y"])
+            frame_ms = int(payload.point["frame_ms"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "point must contain norm_x (0..1), norm_y (0..1), "
+                    f"frame_ms (int): {exc}"
+                ),
+            ) from exc
+        if not (0.0 <= norm_x <= 1.0) or not (0.0 <= norm_y <= 1.0):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="point.norm_x / norm_y must be in [0, 1]",
+            )
+        # Resolve source resolution from Asset.resolution ("1920x1080")
+        # — falls back to the existing tracking_json src_w/src_h if
+        # resolution wasn't recorded (legacy uploads).
+        src_w, src_h = _asset_native_resolution(asset)
+        if src_w <= 0 or src_h <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "asset has no recorded resolution; analysis must run "
+                    "before pixel-precise tracking can seed coordinates"
+                ),
+            )
+        init_x = int(round(norm_x * src_w))
+        init_y = int(round(norm_y * src_h))
+        media_path = Path(asset.file_path)
+        try:
+            point_json = await asyncio.to_thread(
+                point_tracking_svc.track_point,
+                media_path,
+                init_x=init_x,
+                init_y=init_y,
+                init_t_ms=frame_ms,
+                duration_ms=asset.duration_ms,
+            )
+        except (
+            point_tracking_svc.PointTrackError,
+            point_tracking_svc.PointTrackUnavailableError,
+        ) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"point tracking failed: {exc}",
+            ) from exc
+        asset.point_tracking_json = point_json
+        asset.point_tracking_origin = {
+            "x": init_x,
+            "y": init_y,
+            "frame_ms": frame_ms,
+            "norm_x": norm_x,
+            "norm_y": norm_y,
+        }
+        asset.tracked_object_index = -4
     elif payload.mode == "fixed":
         asset.tracked_object_index = -2
     else:  # "none"
@@ -472,6 +573,7 @@ async def patch_asset_tracking_target(
         asset_id=asset_id,
         tracked_object_index=getattr(asset, "tracked_object_index", None),
         has_custom_roi=isinstance(getattr(asset, "custom_roi_json", None), dict),
+        has_point_track=isinstance(getattr(asset, "point_tracking_json", None), dict),
     )
 
 

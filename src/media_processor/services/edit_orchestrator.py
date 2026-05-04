@@ -376,6 +376,12 @@ async def _gather_render_inputs(
         tracking_by_asset: dict[int, dict[str, Any]] = {}
         tracking_target_by_asset: dict[int, int | None] = {}
         custom_roi_by_asset: dict[int, dict[str, Any]] = {}
+        # v0.23 — point_tracking_json (LK pixel-precise track) per
+        # asset. Loaded under the same gate as custom_roi: only when
+        # the column is non-empty so the renderer's dispatch can
+        # cleanly pick between -4 (point) / -1 (custom_roi) / ≥0
+        # (YOLO) sentinels.
+        point_track_by_asset: dict[int, dict[str, Any]] = {}
         # v0.18 — secondary-language translation segments per asset.
         secondary_segments_by_asset: dict[int, list[dict[str, Any]]] = {}
         for a in assets:
@@ -385,6 +391,9 @@ async def _gather_render_inputs(
             custom = getattr(a, "custom_roi_json", None)
             if isinstance(custom, dict) and custom.get("frames"):
                 custom_roi_by_asset[a.id] = dict(custom)
+            point_track = getattr(a, "point_tracking_json", None)
+            if isinstance(point_track, dict) and point_track.get("frames"):
+                point_track_by_asset[a.id] = dict(point_track)
             blob = getattr(a, "tracking_json", None)
             if isinstance(blob, dict) and (blob.get("frames") or blob.get("tracks")):
                 tracking_by_asset[a.id] = dict(blob)
@@ -408,6 +417,7 @@ async def _gather_render_inputs(
             tracking_by_asset,
             tracking_target_by_asset,
             custom_roi_by_asset,
+            point_track_by_asset,
             secondary_segments_by_asset,
         )
 
@@ -666,6 +676,7 @@ async def run_render(
         tracking_by_asset,
         tracking_target_by_asset,
         custom_roi_by_asset,
+        point_track_by_asset,
         secondary_segments_by_asset,
     ) = await _gather_render_inputs(project_id)
     if not subtitles_enabled:
@@ -805,6 +816,7 @@ async def run_render(
             tracking_by_asset=tracking_by_asset if auto_reframe_enabled else None,
             tracking_target_by_asset=tracking_target_by_asset if auto_reframe_enabled else None,
             custom_roi_by_asset=custom_roi_by_asset if auto_reframe_enabled else None,
+            point_track_by_asset=point_track_by_asset if auto_reframe_enabled else None,
             subtitle_style=subtitle_style if subtitles_enabled else None,
             on_progress=_sync_progress,
         )
