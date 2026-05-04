@@ -116,6 +116,35 @@ class WatermarkSettingsPatch(BaseModel):
     opacity: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
+class AssetBatchDeleteRequest(BaseModel):
+    """v0.26.0 — body for ``DELETE /projects/{id}/assets/batch``.
+
+    ``asset_ids`` is the list of Asset.id rows to wipe. Each is
+    deleted independently — a per-asset failure (e.g. one is still
+    referenced by an active draft) doesn't block the rest. The
+    endpoint returns a summary so the UI can list which ones
+    refused.
+    """
+
+    asset_ids: list[int] = Field(..., min_length=1)
+
+
+class AssetBatchDeleteResultItem(BaseModel):
+    """One row in the batch-delete summary response."""
+
+    asset_id: int
+    deleted: bool
+    reason: str | None = None  # populated when ``deleted=False``
+
+
+class AssetBatchDeleteOut(BaseModel):
+    """v0.26.0 — response for ``DELETE /projects/{id}/assets/batch``."""
+
+    deleted_count: int
+    blocked_count: int
+    results: list[AssetBatchDeleteResultItem]
+
+
 class BgmFadeOutPatch(BaseModel):
     """v0.24.0 — body for PATCH /projects/{id}/bgm-fade-out.
 
@@ -815,6 +844,15 @@ class AssetAnalysisItem(BaseModel):
     file_path: str
     filename: str
     duration_ms: int
+    # v0.26.0 — surface the source resolution (already stored on
+    # ``Asset.resolution`` from the upload-time ffprobe) and the
+    # on-disk file size (statted server-side at request time so we
+    # don't carry a stale cached value if the file is moved or
+    # truncated). ``None`` for either when the underlying source
+    # isn't available yet (resolution: ffprobe failed at upload;
+    # size: file missing on disk).
+    resolution: str | None = None
+    file_size_bytes: int | None = None
     status: str
     analysis_steps: dict[str, str] | None
     transcript_summary: TranscriptSummaryOut | None

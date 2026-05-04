@@ -52,6 +52,16 @@ function formatDuration(ms: number): string {
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
+// v0.26.0 — bytes → "45.2 MB" / "1.3 GB" / "240 KB". Falls back to a
+// dash for null / unknown so the asset card line stays uniform-width.
+function formatBytes(bytes: number | null | undefined): string {
+  if (bytes == null) return "—";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
 function formatPercent(ratio: number): string {
   return `${Math.round(ratio * 1000) / 10}%`;
 }
@@ -718,7 +728,15 @@ function AssetCard({
         </label>
         <div className="asset-card__title">
           <h3 className="asset-card__filename">{asset.filename}</h3>
-          <span className="asset-card__duration mono">{formatDuration(asset.duration_ms)}</span>
+          {/* v0.26.0 — single-line spec: duration · resolution · size.
+              Each segment falls back to a dash when the underlying
+              value is null so the line keeps a stable shape. */}
+          <span className="asset-card__meta mono">
+            {formatDuration(asset.duration_ms)}
+            {asset.resolution ? ` · ${asset.resolution}` : ""}
+            {" · "}
+            {formatBytes(asset.file_size_bytes)}
+          </span>
         </div>
         <span
           className={`asset-status asset-status--${asset.status}`}
@@ -1041,6 +1059,43 @@ export default function ProjectAnalysis() {
     [selectedIds, polling, clearSelection],
   );
 
+  // v0.26.0 — bulk asset delete. Confirms first; the API enforces
+  // the active-draft block but we surface the per-row outcomes so
+  // the operator can see which ones refused (and why) without
+  // re-reading server logs.
+  const runBatchDelete = useCallback(async () => {
+    if (selectedIds.size === 0 || validProjectId == null) return;
+    if (
+      !window.confirm(
+        `確定要刪除 ${selectedIds.size} 個素材？檔案、縮圖、追蹤資料都會一起清掉，無法復原。`,
+      )
+    ) {
+      return;
+    }
+    setBatchRunning(true);
+    setTriggerError(null);
+    const ids = Array.from(selectedIds);
+    try {
+      const summary = await apiClient.batchDeleteAssets(validProjectId, ids);
+      if (summary.blocked_count > 0) {
+        const blockedLines = summary.results
+          .filter((r) => !r.deleted)
+          .map((r) => `素材 #${r.asset_id}：${r.reason ?? "未知原因"}`)
+          .join("\n");
+        setTriggerError(
+          `刪除完成 ${summary.deleted_count} 個；${summary.blocked_count} 個被拒：\n${blockedLines}`,
+        );
+      }
+    } catch (err) {
+      setTriggerError(
+        `批次刪除失敗：${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    setBatchRunning(false);
+    clearSelection();
+    polling.refresh();
+  }, [selectedIds, validProjectId, polling, clearSelection]);
+
   const overallStatus = useMemo(() => {
     if (assets.length === 0) return "尚無素材";
     const counts: Record<string, number> = {};
@@ -1168,6 +1223,19 @@ export default function ProjectAnalysis() {
               title="所有步驟全部重跑，會覆寫手改字幕。"
             >
               強制重跑（覆寫手改）
+            </button>
+            {/* v0.26.0 — bulk delete. Server-side enforces the
+                active-draft block + cascade-cleans failed/rejected
+                drafts that reference the asset. The danger button
+                style is the affordance that this is destructive. */}
+            <button
+              type="button"
+              className="cta cta--danger"
+              onClick={() => void runBatchDelete()}
+              disabled={selectedIds.size === 0 || batchRunning}
+              title="刪除所選素材（檔案 + 縮圖 + 追蹤資料）。已被啟用中的 draft 用到的素材會被拒絕。"
+            >
+              刪除所選（{selectedIds.size}）
             </button>
           </div>
         </div>

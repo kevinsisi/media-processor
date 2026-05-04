@@ -9,6 +9,7 @@
 import type {
   AnalyzeRequest,
   AnalyzeResponse,
+  AssetBatchDeleteOut,
   AssetDetail,
   AssetThumbnailsOut,
   BgmGenerationStatus,
@@ -178,6 +179,37 @@ export class ApiClient {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ fade_out_sec: fadeOutSec }),
+      },
+    );
+  }
+
+  // v0.26.0 — single-asset deletion. Wipes the source file +
+  // thumbnails + tracking JSON + DB row. 409 when the asset is
+  // still used by an active draft (FE surfaces the message).
+  async deleteAsset(assetId: number): Promise<void> {
+    const url = `${this.baseUrl}/assets/${assetId}`;
+    const response = await this.fetchImpl(url, { method: "DELETE" });
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      throw new ApiError(response.status, url, text || response.statusText);
+    }
+  }
+
+  // v0.26.0 — batch asset delete with per-row outcomes. The
+  // response distinguishes "deleted" vs "blocked because of an
+  // active draft" so the FE can surface a partial-success summary
+  // ("3 deleted, 1 blocked: v3 still uses it") instead of an
+  // all-or-nothing 409.
+  batchDeleteAssets(
+    projectId: number,
+    assetIds: number[],
+  ): Promise<AssetBatchDeleteOut> {
+    return this.request<AssetBatchDeleteOut>(
+      `/projects/${projectId}/assets/batch`,
+      {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ asset_ids: assetIds }),
       },
     );
   }

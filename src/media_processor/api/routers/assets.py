@@ -34,6 +34,7 @@ from media_processor.api.schemas import (
     TranslateSubtitleResponse,
 )
 from media_processor.models import Asset, AssetTranscript, ScriptCoverage
+from media_processor.services import asset_management as asset_mgmt
 from media_processor.services import object_tracking
 from media_processor.services import point_tracking as point_tracking_svc
 from media_processor.services import thumbnails as thumbnails_svc
@@ -97,6 +98,34 @@ async def get_asset(
     if asset is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="asset not found")
     return _serialise_asset(asset)
+
+
+# v0.26.0 — single-asset deletion. Wipes the on-disk source +
+# thumbnails + tracking JSON + DB row. Refuses with 409 when at
+# least one Draft in pending / processing / ready_for_review /
+# approved still references the asset; failed / rejected drafts
+# are cascade-deleted in the same transaction so the user doesn't
+# have to babysit them.
+@router.delete("/{asset_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_asset(asset_id: int, session: SessionDep):
+    try:
+        await asset_mgmt.delete_asset(session, asset_id)
+    except asset_mgmt.AssetNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="asset not found",
+        ) from exc
+    except asset_mgmt.AssetInUseError as exc:
+        versions = ", ".join(f"v{v}" for v in exc.blocking_draft_versions)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"asset is still used by active draft(s) {versions}; "
+                "reject those drafts first or trigger a fresh render so the "
+                "old draft transitions out of the active set"
+            ),
+        ) from exc
+    await session.commit()
 
 
 @router.get("/{asset_id}/thumbnails", response_model=AssetThumbnailsOut)
