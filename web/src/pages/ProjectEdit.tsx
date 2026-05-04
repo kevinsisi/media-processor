@@ -1503,33 +1503,51 @@ export default function ProjectEdit() {
         </>
       )}
 
-      {showFailed && draft && (
-        <section className="edit-card edit-card--failed">
-          <h2 className="edit-card__title">剪輯失敗</h2>
-          <p className="edit-card__body">
-            渲染流程沒能跑完。下方的進度條會標出失敗在哪一階段；常見原因：素材不夠多、Gemini 無法服務、或某段素材的編碼有問題。
-          </p>
-          <ProgressTracker steps={draft.progress_steps} />
-          {draft.prompt_feedback && (
-            <details className="edit-card__error-details">
-              <summary>展開技術細節（給開發者參考）</summary>
-              <pre className="edit-card__error mono">
-                {draft.prompt_feedback}
-              </pre>
-            </details>
-          )}
-          <div className="edit-card__actions">
-            <button
-              type="button"
-              className="cta cta--primary"
-              onClick={() => void handleStartEdit(true)}
-              disabled={triggering}
-            >
-              {triggering ? "排隊中…" : "AI 重新選片段"}
-            </button>
-          </div>
-        </section>
-      )}
+      {showFailed && draft && (() => {
+        // v0.25.1 — orphan detection (server-side mark in
+        // GET /drafts/{id}) sets prompt_feedback to a recognisable
+        // string. Surface a friendlier copy + skip the progress
+        // bar (which would just show all steps as "等待" and read
+        // as a frozen render rather than a missing one).
+        const isOrphan = (draft.prompt_feedback || "").startsWith(
+          "render: orphaned",
+        );
+        return (
+          <section className="edit-card edit-card--failed">
+            <h2 className="edit-card__title">
+              {isOrphan ? "任務已遺失" : "剪輯失敗"}
+            </h2>
+            <p className="edit-card__body">
+              {isOrphan
+                ? "Worker 中斷、逾時或任務被清掉，渲染從未開始或沒能完成。請點下方按鈕重新提交。"
+                : "渲染流程沒能跑完。下方的進度條會標出失敗在哪一階段；常見原因：素材不夠多、Gemini 無法服務、或某段素材的編碼有問題。"}
+            </p>
+            {!isOrphan && <ProgressTracker steps={draft.progress_steps} />}
+            {draft.prompt_feedback && (
+              <details className="edit-card__error-details">
+                <summary>展開技術細節（給開發者參考）</summary>
+                <pre className="edit-card__error mono">
+                  {draft.prompt_feedback}
+                </pre>
+              </details>
+            )}
+            <div className="edit-card__actions">
+              <button
+                type="button"
+                className="cta cta--primary"
+                onClick={() => void handleStartEdit(true)}
+                disabled={triggering}
+              >
+                {triggering
+                  ? "排隊中…"
+                  : isOrphan
+                    ? "重新提交"
+                    : "AI 重新選片段"}
+              </button>
+            </div>
+          </section>
+        );
+      })()}
 
       {selectedDraftId !== null && <DraftComments draftId={selectedDraftId} />}
 

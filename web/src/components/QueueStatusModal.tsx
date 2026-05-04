@@ -151,6 +151,10 @@ export default function QueueStatusModal({
           </button>
         </header>
 
+        {/* v0.25.1 — scrollable body so the sticky header stays
+            visible on a long queue. */}
+        <div className="queue-modal__body">
+
         {error && <p className="queue-modal__error">{error}</p>}
 
         <section className="queue-modal__section">
@@ -226,6 +230,7 @@ export default function QueueStatusModal({
             </ol>
           )}
         </section>
+        </div>
       </div>
     </div>
   );
