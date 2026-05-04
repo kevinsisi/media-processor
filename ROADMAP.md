@@ -2,7 +2,7 @@
 
 > **單一定位**：個人 / 小團隊用的「拍完就上傳，AI 直接給可發佈影片」的工具。
 > 目標 UX：手機優先、繁體中文、高級感、最少手動編輯。
-> 目前版本：**0.23.5**（M9.8 — 像素級單點追蹤：Lucas-Kanade + 全螢幕點選 modal + 座標換算修正 + 動態裁切後跳過 vidstab + sendcmd 雙 directive 規避 ffmpeg dispatcher quirk）
+> 目前版本：**0.23.7**（M9.8 — 像素級單點追蹤；6 + 1 連續修正：LK pipeline → modal → modal/crosshair 座標 → vidstab 衝突 → sendcmd duplicate-timestamp → bbox 中心 rounding → 旋轉素材 norm→pixel 用 cv2 維度）
 
 ## Phase 進度速覽
 
@@ -25,7 +25,7 @@
 | M9.5 | 時間軸編輯器 Phase 1 + UX 收斂 | ✅ done | 0.20.0 – 0.20.3 |
 | M9.6 | 轉場 flag 持久化 + 配樂自動觸發 + 主角類別 auto-trim | ✅ done | 0.21.0 – 0.21.6 |
 | M9.7 | UI/UX 全面收斂（路由修正 + 標籤具體化 + 失敗收摺 + 假進度條移除） | ✅ done | 0.22.0 |
-| **M9.8** | **像素級單點追蹤（Lucas-Kanade）+ 全螢幕點選 modal + 座標換算 + vidstab 衝突 + sendcmd 規避修正** | ✅ done | **0.23.0 – 0.23.5** |
+| **M9.8** | **像素級單點追蹤（Lucas-Kanade）+ 全螢幕 modal + 5 處座標 / 渲染 / dispatcher / 旋轉根因修正** | ✅ done | **0.23.0 – 0.23.7** |
 | M10 | 多專案批次 + 社群直接發布 + AI 自動縮圖 | 🔮 future | 0.24.x+ |
 
 ---
@@ -304,6 +304,17 @@ YOLO 物件追蹤對「我要追那個 logo」這種子-像素需求精度不夠
 - 根因：ffmpeg 4.4 的 sendcmd 在「同一個 start_time 有多個 directive」且總體 dispatch 速率 ≥ 30 Hz 時，會默默丟棄 second-and-onward 的 directive。`auto_reframe.write_sendcmd_file` 之前每個 frame 寫兩行（一行 x、一行 y，共用 timestamp），共 250 directives over 4 s — 解析 log 看每行都進 queue，但 runtime 只有第一個 x 被套到 crop filter，後面所有 update 都丟了，crop 凍結在 initial 值。
 - 排查路徑：拆 chain 從 cut → vidstab → concat 一路驗證 — cut 階段的 seg_NNNN.mp4 單獨拿 ffmpeg 重 render 仍偏；同一 sendcmd 改成 1 Hz / 3 Hz / 10 Hz / 15 Hz 的 sparse 版本都正常；30 Hz 但只寫 x（不寫 y）也正常。確認 bug 在 duplicate-timestamp 的高頻 dispatch 而不是 rate 本身。
 - 修法：`write_sendcmd_file` 改寫成每個 timestamp 一行，x 跟 y 用 `,` 分隔在同一個 directive 裡（`0.0000 crop@reframe x 264, crop@reframe y 436;`）。Dispatch rate 從 60 Hz 降到 30 Hz，避開 dispatcher quirk。format 仍合 ffmpeg sendcmd grammar（`,` 在 directive 內分隔 commands、`;` 結束 directive）。
+
+### 9.8.6 bbox 中心 rounding（0.23.6）
+- `compute_crop_path_from_point_track` 之前合成 `(int(x-0.5), int(y-0.5), w=1, h=1)` 的 1×1 bbox，希望讓 `compute_crop_path` 的 `cx = x + w//2` 算式落在 LK 像素上。但 `int(x-0.5)` 在浮點 LK output（如 864.3）上會 floor 成 863，後面 `+ 1//2 = 0` 沒有補正，centre 比真實 LK 像素左 1 px。在 1728-wide 來源 + crop_zoom=0.75 之下足以讓長 pan 看起來「差一點才中央」。
+- 修法：改成 `(int(round(x)), int(round(y)), w=0, h=0)`，centre = round(x)，沒有任何系統性偏移。
+
+### 9.8.7 旋轉素材 norm → pixel 用 cv2 維度（0.23.7）
+- 症狀：v0.23.6 之後大部分素材都中央對齊，但用戶反饋「車頭片段偏左」一直存在 — 不是「過頭」，是同一個方向的固定偏差。
+- 根因 — 等到追蹤每一步座標才發現的旋轉 metadata mismatch：asset 18（DJI 4K 直拍）的檔案存的是 3840×2160 landscape stream + `rotate=270` tag + `Display Matrix rotation=90` side data。ffprobe 看到 stream 寫 width=3840，所以 `Asset.resolution = "3840x2160"`。但縮圖（ffmpeg 自動套 rotate）跟 OpenCV 4.13（預設 `CAP_PROP_ORIENTATION_AUTO=1`）讀的都是旋轉後的 2160×3840 portrait。API 之前用 `_asset_native_resolution(asset)` → 3840 乘上 norm_x，把 0.481 算成 init_x=1848，clamp 到 cv2 的 2160 寬之後落在 86%（不是用戶想的 48%）。LK 從錯的像素開始追蹤，整段都偏。其他 9 個素材是原生 portrait（1728×3072，沒 rotation metadata），所以這個 bug 只在那一個旋轉素材上出現。
+- 排查路徑：把整條座標鏈印出來 — origin (norm, x, y)、point_tracking_json.src_w/h、cv2 dims；發現 asset 18 唯一一個 `Asset.resolution.W ≠ point_tracking_json.src_w`（3840 vs 2160）。對 ffprobe 跑 `-show_streams` 看到 `TAG:rotate=270` 跟 `Display Matrix rotation=90`。
+- 修法：重構 `services.point_tracking.track_point` 改吃 `init_norm_x` / `init_norm_y`，內部開 cv2 之後讀 `CAP_PROP_FRAME_WIDTH/HEIGHT`（旋轉後維度）才換成像素 — 整個 pipeline 對 source dimension 只有「cv2 看到什麼」這個唯一真理。API endpoint 把 norm 直接傳下去，再把回傳的 pixel 寫進 `Asset.point_tracking_origin` 給前端 crosshair 顯示用。
+- Migration：之前的旋轉素材已存的 `point_tracking_json` row 因為 init_pixel 在錯的座標空間，必須在 UI 上重新 pick 一次。原生 portrait 素材不受影響，同一個 norm 在新舊兩種程式碼下都解析到同一像素。
 
 ---
 

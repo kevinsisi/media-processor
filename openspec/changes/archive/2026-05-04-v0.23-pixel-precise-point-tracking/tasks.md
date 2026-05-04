@@ -53,11 +53,26 @@
 - [x] 6.2 Diagnostic isolation that nailed the cause: piped the production sendcmd file straight into `ffmpeg -vf "sendcmd=…,crop@reframe=…,scale=…,setsar=1"` outside the orchestrator pipeline (rules out vidstab, concat, BGM mix, watermark) — same offset reproduced. Then sparse versions at 1 Hz / 3 Hz / 10 Hz / 15 Hz with the same two-line-per-timestamp format all WORK; 30 Hz two-lines fails; 30 Hz one-line (x only) works. Combination = high-rate dispatch + duplicate timestamps is the trigger.
 - [x] 6.3 Verified live: re-rendered draft 41 / v16.mp4 at 0.23.5. Lamborghini badge centred at output time 17 s, 19 s, 20 s (was offset ~36 % from left at t=20 s on v0.23.4 even with the vidstab skip). Subject no longer drifts during the segment.
 
-## 7. Memory + docs + version bumps
+## 7. Bbox-centre rounding (0.23.6)
 
-- [x] 7.1 `memory/v023_point_tracking.md` — covers all five gotchas (opencv must be in api image, modal commit math via state not getBoundingClientRect, no `transition: transform` on click target, overlay px math via renderRect not `% 100%`, dynamic crop + vidstab conflict, sendcmd duplicate-timestamp dispatcher quirk).
-- [x] 7.2 `memory/MEMORY.md` index entry refreshed through v0.23.5 final state.
-- [x] 7.3 `ROADMAP.md` — Phase 9.8 section with five sub-task subsections (9.8.1–9.8.5) + table row updated.
-- [x] 7.4 `CLAUDE.md` — current-version, archive list, render pipeline pointers (auto_reframe sendcmd grammar callout, _cut_segment bool return).
-- [x] 7.5 Version bumped to 0.23.0 / 0.23.1 / 0.23.2 / 0.23.3 / 0.23.4 / 0.23.5 in `pyproject.toml` + `src/media_processor/api/main.py` + `web/package.json` (one bump per release).
-- [x] 7.6 Each release branched as `claude/v0.23.X-<topic>`, merged --no-ff into `main`, pushed; docker compose build + up -d on the dispatch host; `/health` smoke-tested.
+- [x] 7.1 `compute_crop_path_from_point_track` synthesises a degenerate `(int(round(x)), int(round(y)), 0, 0)` bbox per LK frame instead of `(int(x-0.5), int(y-0.5), 1, 1)`. Pre-fix the `int(x-0.5)` floor on a fractional LK output gave a centre 1 px LEFT of the tracked pixel; the `+ 1//2 = 0` add-back didn't correct it. Sub-pixel on its own but enough at crop_zoom=0.75 to make long pans look "almost but not quite centred."
+
+## 8. Rotation-aware norm→pixel resolution (0.23.7)
+
+- [x] 8.1 `services/point_tracking.track_point` signature changed to take `init_norm_x` / `init_norm_y` (0..1 normalised) instead of `init_x` / `init_y` pixel coords. The function opens `cv2.VideoCapture`, reads `CAP_PROP_FRAME_WIDTH/HEIGHT` (post-rotation, because OpenCV 4.13 defaults `CAP_PROP_ORIENTATION_AUTO=1`), and resolves to pixel coords there. Single source of truth for the seed→pixel mapping.
+- [x] 8.2 `track_point` returns the resolved pixel coords in `result["init"]["x"]` / `["y"]` so the API endpoint can mirror them into `Asset.point_tracking_origin` for the FE crosshair.
+- [x] 8.3 API endpoint (`PATCH /assets/{id}/tracking-target` mode=point) drops the `_asset_native_resolution` lookup, passes `norm_x` / `norm_y` straight through to `track_point`, and reads pixel coords back from the LK result.
+- [x] 8.4 FAKE-path stub uses 1920×1080 as the default display resolution so existing tests' assertion shape is preserved.
+- [x] 8.5 Diagnosis path that surfaced the bug: traced every coordinate hop end-to-end (origin x/y, point_tracking_json src_w/src_h, cv2 dims) for every point-tracked asset on the live project; spotted that asset 18 was the only one where `Asset.resolution.W = 3840` mismatched `point_tracking_json.src_w = 2160`. ffprobe `-show_streams` confirmed `TAG:rotate=270` + `Display Matrix rotation=90` on the asset. Other 9 assets in the project are natively portrait (no rotation), which is why the bug only surfaced on the front-of-car shot.
+- [x] 8.6 Verified live: re-picked + re-rendered draft 41 / v16.mp4 at 0.23.7. Front-of-car (asset 18) segment now centres on the user's clicked point throughout (was ~38 % from left at all timestamps within the segment on v0.23.6).
+- [x] 8.7 Tests: `tests/unit/test_point_tracking.py` migrated to the new `init_norm_x` / `init_norm_y` signature; behavioural assertions unchanged.
+- [x] 8.8 Migration note (no code change required, FE-driven): existing `point_tracking_json` rows for rotated assets store an init pixel in the wrong coord space; user re-picks through the UI to refresh. Non-rotated assets are unaffected.
+
+## 9. Memory + docs + version bumps
+
+- [x] 9.1 `memory/v023_point_tracking.md` — covers all six gotchas (opencv must be in api image, modal commit math via state not getBoundingClientRect, no `transition: transform` on click target, overlay px math via renderRect not `% 100%`, dynamic crop + vidstab conflict, sendcmd duplicate-timestamp dispatcher quirk, rotation-aware norm→pixel via cv2 dims).
+- [x] 9.2 `memory/MEMORY.md` + `project_media_processor_v2.md` snapshot refreshed through v0.23.7.
+- [x] 9.3 `ROADMAP.md` — Phase 9.8 section with seven sub-task subsections (9.8.1–9.8.7) + table row updated.
+- [x] 9.4 `CLAUDE.md` — current-version line; `services/point_tracking.py` pointer notes the cv2-dim seed contract.
+- [x] 9.5 Version bumped through 0.23.0 / 0.23.1 / 0.23.2 / 0.23.3 / 0.23.4 / 0.23.5 / 0.23.6 / 0.23.7 in `pyproject.toml` + `src/media_processor/api/main.py` + `web/package.json` (one bump per release).
+- [x] 9.6 Each release branched as `claude/v0.23.X-<topic>`, merged --no-ff into `main`, pushed; docker compose build + up -d on the dispatch host; `/health` smoke-tested. Branches pruned local + remote after merge.
