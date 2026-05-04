@@ -76,8 +76,8 @@ Mirror locations (`.claude/skills/`, `.gemini/skills/`, `.opencode/skills/`, `.g
 ## Project Architecture Pointers
 
 CLAUDE.md is meta-rules; concrete project state lives elsewhere. When you need to understand what's currently in the codebase, prefer in this order:
-- `ROADMAP.md` — Phase 6–10 全程路線圖（已完成/規劃中），含每個 sub-task 驗收標準。新對話開頭先讀這個就能對齊大方向。**目前版本：0.24.0。**
-- `openspec/changes/` — current in-flight proposals + tasks. Completed milestones live under `openspec/changes/archive/YYYY-MM-DD-<name>/`. Archived through 0.24.x: M6 0.12.0 / M7 0.13.0 / M8 0.14.0 / M8.1 0.14.x / **v0.18 watermark / v0.19 subtitle-style + i18n + presets / v0.20 timeline + UX / v0.21 transitions + BGM + subject_class / v0.22 UI/UX 收斂 / v0.23 pixel-precise point tracking / v0.24 BGM fade + transitions default + voice_volume bug**.
+- `ROADMAP.md` — Phase 6–10 全程路線圖（已完成/規劃中），含每個 sub-task 驗收標準。新對話開頭先讀這個就能對齊大方向。**目前版本：0.25.0。**
+- `openspec/changes/` — current in-flight proposals + tasks. Completed milestones live under `openspec/changes/archive/YYYY-MM-DD-<name>/`. Archived through 0.25.x: M6 0.12.0 / M7 0.13.0 / M8 0.14.0 / M8.1 0.14.x / **v0.18 watermark / v0.19 subtitle-style + i18n + presets / v0.20 timeline + UX / v0.21 transitions + BGM + subject_class / v0.22 UI/UX 收斂 / v0.23 pixel-precise point tracking / v0.24 BGM fade + transitions default + voice_volume bug / v0.25 RQ queue inspector**.
 - The auto-memory index at `~/.claude/projects/D--GitClone--HomeProject-media-processor/memory/MEMORY.md` — non-obvious deploy / runtime quirks (Tailscale routing, GPU runtime, drafts/BGM storage, key pools, MusicGen, vidstab, YOLO tracking, alembic parallel-branch hazard, render flag persistence).
 - `skills/gemini-prompts/` — 4 個 reusable Gemini prompt skill（asset-score / scene-tag / script-coverage / llm-patcher），改 prompt 前先看這裡。
 - The code itself — render pipeline:
@@ -96,6 +96,7 @@ CLAUDE.md is meta-rules; concrete project state lives elsewhere. When you need t
   - `models/asset.py` — `tracking_json` (v0.16) / `tracked_object_index` + `custom_roi_json` (v0.17, alembic 0012) / `subtitle_secondary_*` (v0.19, alembic 0017) / `point_tracking_json` + `point_tracking_origin` (v0.23.0, alembic 0021); `tracked_object_index = -4` is the new sentinel for "use point_tracking_json"
   - `api/routers/drafts.py` — segment-level CRUD endpoints (v0.20.0 split / patch / delete + `_reflow_segments_and_cut_plan`); skip-plan re-render endpoints accept `render_flags` body override (v0.21.3); `_draft_render_flags(draft, override)` resolves per-flag with priority body > snapshot > all-True
   - `api/routers/projects.py` — `_project_detail` is the single canonical builder (v0.20.3 fold of duplicate); `subject_class` PATCH + `detected-classes` GET (v0.21.0)
+  - `api/routers/queue.py` — RQ queue inspector (v0.25.0). `GET /queue/status` returns `{running, queued[]}` walking the worker's listen order (analysis → editing → bgm); each item carries kind / position / project context. `DELETE /queue/jobs/{id}` calls `rq.Job.cancel()` on queued jobs (409 on running — domain-specific cancel handles those). Powers the FE header badge + "查看排隊" modal so the operator can see what's blocking and drop their own pending job.
 
 ## When To Remove Or Replace Skills
 

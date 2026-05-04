@@ -2,7 +2,7 @@
 
 > **單一定位**：個人 / 小團隊用的「拍完就上傳，AI 直接給可發佈影片」的工具。
 > 目標 UX：手機優先、繁體中文、高級感、最少手動編輯。
-> 目前版本：**0.24.0**（操作體驗 / bug 修補 bundle — 配樂淡出、轉場預設不勾、`voice_volume=0` 被默默吃掉的 root-cause 修補）
+> 目前版本：**0.25.0**（M9.10 — RQ queue inspector：worker 在忙什麼、佇列多深、能直接取消還沒開跑的任務）
 
 ## Phase 進度速覽
 
@@ -26,8 +26,9 @@
 | M9.6 | 轉場 flag 持久化 + 配樂自動觸發 + 主角類別 auto-trim | ✅ done | 0.21.0 – 0.21.6 |
 | M9.7 | UI/UX 全面收斂（路由修正 + 標籤具體化 + 失敗收摺 + 假進度條移除） | ✅ done | 0.22.0 |
 | M9.8 | 像素級單點追蹤（Lucas-Kanade）+ 全螢幕 modal + 5 處座標 / 渲染 / dispatcher / 旋轉根因修正 | ✅ done | 0.23.0 – 0.23.7 |
-| **M9.9** | **配樂淡出 + 轉場預設不勾 + voice_volume=0 silent-drop 根因修正** | ✅ done | **0.24.0** |
-| M10 | 多專案批次 + 社群直接發布 + AI 自動縮圖 | 🔮 future | 0.25.x+ |
+| M9.9 | 配樂淡出 + 轉場預設不勾 + voice_volume=0 silent-drop 根因修正 | ✅ done | 0.24.0 |
+| **M9.10** | **RQ queue inspector + 取消排隊任務（透明化 worker 狀態）** | ✅ done | **0.25.0** |
+| M10 | 多專案批次 + 社群直接發布 + AI 自動縮圖 | 🔮 future | 0.26.x+ |
 
 ---
 
@@ -342,7 +343,27 @@ YOLO 物件追蹤對「我要追那個 logo」這種子-像素需求精度不夠
 
 ---
 
-## 🔮 Phase 10（M10）— 工作流規模化（0.25.x+）
+## ✅ Phase 9.10（M9.10）— RQ queue inspector（已完成 0.25.0）
+
+操作者反饋：剪輯卡在「排隊中…」時，UI 唯一給的訊息就是那個字串本身，看不到 worker 在忙什麼、不知道輪到自己要等多久、也沒有辦法取消前面的任務或自己的任務。
+
+詳細 OpenSpec：`openspec/changes/archive/2026-05-04-v0.25-queue-inspector/`。
+
+### 9.10.1 後端：`api/routers/queue.py`
+- `GET /queue/status` 走 worker 的 listen 順序（analysis → editing → bgm）回 `{running, queued[]}`。每個 item 帶 `job_id`、`queue`、`kind`（server-side 從 RQ `func_name` 對映出 analyze / translate / render / export / bgm / unknown）、`state`、`position`、`enqueued_at`、`started_at`、`elapsed_s`，加上 best-effort 的 `project_id` / `project_name` / `asset_id` / `draft_id`，前端不需要再查就能直接 render 「{專案名} 的 {kind}」。Asset-bound jobs 用 batch query 從 `Asset.project_id` backfill；draft-bound 同理走 `Draft.project_id`。
+- `DELETE /queue/jobs/{job_id}` 取消還沒開跑的任務。Running 的會 409（live render 的 ffmpeg / Whisper 子程序需要 domain-specific cancel — `POST /drafts/{id}/cancel`，不是這個 generic endpoint）；找不到 404；正確取消 204。底層走 `rq.Job.cancel()`。
+
+### 9.10.2 前端：`<QueueStatusModal>` + `<QueueStatusBadge>`
+- `<QueueStatusModal>` 是完整 modal：running job 用綠色 + 軟脈動 highlight，queued 列表帶 position 數字、enqueued waiting 時間、每行一個「取消」按鈕；caller 傳 `highlightDraftId` 讓「自己的任務」上一層琥珀 outline。打開時每 3 秒 poll、每 1 秒 tick 已等時間（不重新打 API）。取消是 optimistic（先在本地 drop，再 refresh 拿真實狀態）。
+- `<QueueStatusBadge>` 是 header 上的小 chip，每 5 秒 poll 一次顯示「排隊 N」。Idle/queued/running 三種狀態各自配色，running 帶呼吸脈動。點擊開同一個 modal — 不管使用者在哪個頁，都能用同一個 view 看到 worker 狀態。
+- ProjectEdit 的「排隊中…」卡片新增「查看排隊」按鈕，打開 modal 時帶 `highlightDraftId={selectedDraftId}`，使用者自己排在哪一位一眼可見。
+
+### 9.10.3 為什麼是 single-worker 的限制
+worker 容器是 single-process，listen `analysis editing bgm` 三個 queue，同時只有一個 job 在跑。response 的 `running` 因此最多一個 item；`queued[].position` 也因此能跟 worker 真正的 dispatch 順序對齊（不是各 queue 獨立計數）。當未來真要 scale 到多 worker，這個 invariants 會破，schema 不變但 `position` 的語意得改成「同 queue 內的位置」，FE 顯示也會跟著調。
+
+---
+
+## 🔮 Phase 10（M10）— 工作流規模化（0.26.x+）
 
 ### 10.1 批次專案
 - 一次拉一整批（同主題、同 BGM、不同產品 / 不同型號）
