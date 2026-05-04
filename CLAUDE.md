@@ -91,8 +91,8 @@ CLAUDE.md is meta-rules; concrete project state lives elsewhere. When you need t
   - `services/vidstab.py` two-pass digital stabilization (v0.14.3)
   - `services/subtitles.py` builds drawtext-burned cues with `TRANSITION_OVERLAP_MS` accounting (M6.1 / M7.2)
 - The code itself — schema + API surface:
-  - `models/project.py` — `bgm_path` (M6.4), `watermark_*` (v0.18, alembic 0014), `subtitle_*` (v0.19, alembic 0015), `subject_class` (v0.21.0, alembic 0018)
-  - `models/draft.py` — `cut_plan_json` / `bgm_path` (v0.16.2) / `style_preset` (v0.19, alembic 0016) / `render_flags_json` (v0.21.1, alembic 0019 — snapshot of trigger-time toggle states for skip-plan re-renders)
+  - `models/project.py` — `bgm_path` (M6.4), `watermark_*` (v0.18, alembic 0014), `subtitle_*` (v0.19, alembic 0015), `subject_class` (v0.21.0, alembic 0018), `bgm_fade_out_sec` (v0.24.0, alembic 0022 — float seconds, default 3.0; drives `afade=t=out` on the BGM mix)
+  - `models/draft.py` — `cut_plan_json` / `bgm_path` (v0.16.2) / `style_preset` (v0.19, alembic 0016) / `render_flags_json` (v0.21.1, alembic 0019 — snapshot of trigger-time toggle states for skip-plan re-renders) / `render_retry_count` (v0.25.1, alembic 0023 — orphan-watchdog auto-retry counter, reset to 0 on every explicit user re-trigger)
   - `models/asset.py` — `tracking_json` (v0.16) / `tracked_object_index` + `custom_roi_json` (v0.17, alembic 0012) / `subtitle_secondary_*` (v0.19, alembic 0017) / `point_tracking_json` + `point_tracking_origin` (v0.23.0, alembic 0021); `tracked_object_index = -4` is the new sentinel for "use point_tracking_json"
   - `api/routers/drafts.py` — segment-level CRUD endpoints (v0.20.0 split / patch / delete + `_reflow_segments_and_cut_plan`); skip-plan re-render endpoints accept `render_flags` body override (v0.21.3); `_draft_render_flags(draft, override)` resolves per-flag with priority body > snapshot > all-True
   - `api/routers/projects.py` — `_project_detail` is the single canonical builder (v0.20.3 fold of duplicate); `subject_class` PATCH + `detected-classes` GET (v0.21.0)
