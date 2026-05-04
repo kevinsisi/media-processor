@@ -1,0 +1,192 @@
+/* v0.25.0 — RQ queue inspector modal. Centred dialog over a
+   semi-opaque backdrop, capped at a comfortable mobile-plus width. */
+
+.queue-modal__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 250;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.queue-modal {
+  background: rgba(20, 22, 28, 0.98);
+  color: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  width: min(560px, 100%);
+  max-height: 85vh;
+  overflow-y: auto;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
+  padding: 1rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.queue-modal__head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.queue-modal__title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  flex: 1;
+}
+
+.queue-modal__close {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: rgba(255, 255, 255, 0.85);
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  font-size: 1.05rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.queue-modal__close:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.queue-modal__section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.queue-modal__section-title {
+  margin: 0;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.7);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.queue-modal__empty {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 0.85rem;
+}
+
+.queue-modal__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.queue-modal__row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 0.7rem;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+
+.queue-modal__row--running {
+  background: rgba(120, 200, 130, 0.1);
+  border-color: rgba(120, 200, 130, 0.25);
+}
+
+.queue-modal__row--mine {
+  outline: 1px solid rgba(255, 215, 130, 0.6);
+  outline-offset: 1px;
+}
+
+.queue-modal__row-main {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.queue-modal__row-pos {
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.55);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.queue-modal__row-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.queue-modal__row-mine-tag {
+  font-size: 0.72rem;
+  background: rgba(255, 215, 130, 0.2);
+  color: rgba(255, 215, 130, 0.95);
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.queue-modal__row-meta {
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.55);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.queue-modal__pulse {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: rgba(120, 200, 130, 0.95);
+  box-shadow: 0 0 0 0 rgba(120, 200, 130, 0.6);
+  animation: queue-pulse 1.6s ease-out infinite;
+}
+
+@keyframes queue-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(120, 200, 130, 0.7);
+  }
+  100% {
+    box-shadow: 0 0 0 8px rgba(120, 200, 130, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .queue-modal__pulse {
+    animation: none;
+  }
+}
+
+.queue-modal__cancel {
+  background: rgba(220, 110, 110, 0.18);
+  color: rgba(255, 200, 200, 0.95);
+  border: 1px solid rgba(220, 110, 110, 0.4);
+  border-radius: 6px;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.82rem;
+  cursor: pointer;
+  min-height: 32px;
+}
+.queue-modal__cancel:hover:not(:disabled) {
+  background: rgba(220, 110, 110, 0.3);
+}
+.queue-modal__cancel:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.queue-modal__error {
+  margin: 0;
+  font-size: 0.82rem;
+  color: rgba(255, 130, 130, 0.95);
+}
