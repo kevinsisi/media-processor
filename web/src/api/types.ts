@@ -563,6 +563,13 @@ export interface AssetAnalysisItem {
   file_path: string;
   filename: string;
   duration_ms: number;
+  // v0.26.0 — surface source resolution + on-disk byte size so the
+  // analysis-page card can render a one-line spec underneath the
+  // filename ("1:23 · 1080×1920 · 45.2 MB"). Both ``null`` when
+  // the underlying source isn't queryable (resolution: ffprobe
+  // failed at upload; size: file missing on disk).
+  resolution?: string | null;
+  file_size_bytes?: number | null;
   status: string;
   analysis_steps: Record<string, string> | null;
   transcript_summary: TranscriptSummaryOut | null;
@@ -803,3 +810,24 @@ export interface QueueStatusOut {
   queued: QueueJobItem[];
 }
 
+
+// v0.26.0 — batch asset delete. The endpoint returns per-row outcomes
+// so the FE can list which assets refused (e.g. still used by an
+// active draft) instead of hiding them behind a single "請重試"
+// blanket. ``reason`` is null when the row was deleted; otherwise a
+// terse human-readable string.
+export interface AssetBatchDeleteResultItem {
+  asset_id: number;
+  deleted: boolean;
+  reason: string | null;
+}
+
+export interface AssetBatchDeleteRequest {
+  asset_ids: number[];
+}
+
+export interface AssetBatchDeleteOut {
+  deleted_count: number;
+  blocked_count: number;
+  results: AssetBatchDeleteResultItem[];
+}

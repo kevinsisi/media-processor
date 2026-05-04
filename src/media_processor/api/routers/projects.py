@@ -35,6 +35,9 @@ from media_processor.api.schemas import (
     ScriptOut,
     ScriptUpsert,
     SecondarySubtitleSummaryOut,
+    AssetBatchDeleteOut,
+    AssetBatchDeleteRequest,
+    AssetBatchDeleteResultItem,
     BgmFadeOutPatch,
     SubjectClassPatch,
     SubtitleStylePatch,
@@ -53,6 +56,7 @@ from media_processor.models import (
     Script,
     ScriptCoverage,
 )
+from media_processor.services import asset_management as asset_mgmt
 from media_processor.services.object_tracking import aggregate_detected_classes
 from media_processor.services.queue import enqueue_project_edit
 
@@ -947,6 +951,66 @@ def _secondary_subtitle_summary_for(asset: Asset) -> SecondarySubtitleSummaryOut
     )
 
 
+# v0.26.0 — batch delete. Body lists Asset.id rows to drop; the
+# response is a per-row outcome map so the FE can show "1 succeeded,
+# 2 blocked because v3 is still using them." A blocking row inside
+# the batch doesn't fail the request — successful rows still
+# commit; the FE just lists the refused ones.
+@router.delete("/{project_id}/assets/batch", response_model=AssetBatchDeleteOut)
+async def batch_delete_project_assets(
+    project_id: int,
+    payload: AssetBatchDeleteRequest,
+    session: SessionDep,
+) -> AssetBatchDeleteOut:
+    project = await session.get(Project, project_id)
+    if project is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="project not found"
+        )
+    # Only allow deletion of assets that actually belong to this
+    # project — a defensive narrow because the IDs come straight
+    # from the request body. SQL injection isn't the concern (they
+    # come through Pydantic + ORM); cross-project deletes are.
+    valid_rows = (
+        await session.execute(
+            select(Asset.id).where(
+                Asset.project_id == project_id,
+                Asset.id.in_(payload.asset_ids),
+            )
+        )
+    ).scalars().all()
+    valid_ids = set(valid_rows)
+    results: list[AssetBatchDeleteResultItem] = []
+    for asset_id in payload.asset_ids:
+        if asset_id not in valid_ids:
+            results.append(
+                AssetBatchDeleteResultItem(
+                    asset_id=asset_id,
+                    deleted=False,
+                    reason="asset not in this project",
+                )
+            )
+
+    outcomes = await asset_mgmt.batch_delete_assets(session, sorted(valid_ids))
+    for asset_id, reason in outcomes.items():
+        results.append(
+            AssetBatchDeleteResultItem(
+                asset_id=asset_id,
+                deleted=reason is None,
+                reason=reason,
+            )
+        )
+
+    await session.commit()
+
+    deleted = sum(1 for r in results if r.deleted)
+    return AssetBatchDeleteOut(
+        deleted_count=deleted,
+        blocked_count=len(results) - deleted,
+        results=results,
+    )
+
+
 @router.get("/{project_id}/assets", response_model=ProjectAnalysisOut)
 async def list_project_assets_with_analysis(
     project_id: int,
@@ -1022,12 +1086,26 @@ async def list_project_assets_with_analysis(
     for asset in assets:
         tx = transcripts.get(asset.id)
         cov = coverage.get(asset.id)
+        # v0.26.0 — stat the on-disk file for the size column. Best-
+        # effort: a missing source file (manually pruned, never
+        # uploaded fully) gives ``None`` and the FE renders a "—"
+        # placeholder. We don't cache this on the Asset row because
+        # the file lifecycle is owned by the upload + delete paths
+        # and a stale stored size would lie about the current state.
+        file_size_bytes: int | None = None
+        if asset.file_path:
+            try:
+                file_size_bytes = Path(asset.file_path).stat().st_size
+            except OSError:
+                file_size_bytes = None
         items.append(
             AssetAnalysisItem(
                 id=asset.id,
                 file_path=asset.file_path,
                 filename=_filename_from_path(asset.file_path),
                 duration_ms=asset.duration_ms,
+                resolution=asset.resolution,
+                file_size_bytes=file_size_bytes,
                 status=asset.status,
                 analysis_steps=dict(asset.analysis_steps_json or {}) or None,
                 transcript_summary=(
