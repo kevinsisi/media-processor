@@ -1117,7 +1117,7 @@ def render(
     scratch_dir: Path,
     secondary_srt_path: Path | None = None,
     stabilize: bool = True,
-    transitions_enabled: bool = True,
+    transitions_enabled: bool = False,
     tracking_by_asset: dict[int, dict[str, Any]] | None = None,
     tracking_target_by_asset: dict[int, int | None] | None = None,
     custom_roi_by_asset: dict[int, dict[str, Any]] | None = None,

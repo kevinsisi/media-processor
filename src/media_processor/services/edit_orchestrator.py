@@ -224,14 +224,21 @@ async def _load_segment_volumes(draft_id: int) -> list[bgm_mixer.SegmentVolume]:
         )
     out: list[bgm_mixer.SegmentVolume] = []
     for r in rows:
+        # v0.24.0 — explicit None-check on ``voice_volume``. The pre-fix
+        # form was ``float(getattr(r, "voice_volume", 1.0) or 1.0)``,
+        # which silently turned ``voice_volume = 0`` into ``1.0``
+        # because ``0 or 1.0`` evaluates to ``1.0`` in Python (0 is
+        # falsy). That made every "mute this segment" override at
+        # 0 % a no-op — the user's most natural way to silence a clip
+        # was the one value the loader rejected.
+        raw_vv = getattr(r, "voice_volume", None)
+        raw_bv = getattr(r, "bgm_volume", None)
         out.append(
             bgm_mixer.SegmentVolume(
                 start_s=(r.on_timeline_start_ms or 0) / 1000.0,
                 end_s=(r.on_timeline_end_ms or 0) / 1000.0,
-                voice_volume=float(getattr(r, "voice_volume", 1.0) or 1.0),
-                bgm_volume=(
-                    float(r.bgm_volume) if getattr(r, "bgm_volume", None) is not None else None
-                ),
+                voice_volume=float(raw_vv) if raw_vv is not None else 1.0,
+                bgm_volume=float(raw_bv) if raw_bv is not None else None,
             )
         )
     return out
@@ -569,7 +576,7 @@ async def run_render(
     subtitles_from_db: bool = False,
     stabilize: bool = True,
     subtitles_enabled: bool = True,
-    transitions_enabled: bool = True,
+    transitions_enabled: bool = False,
     auto_reframe_enabled: bool = True,
     style_preset: str = "custom",
 ) -> dict[str, Any]:
@@ -860,6 +867,12 @@ async def run_render(
     if bgm_source_path:
         try:
             tmp_mixed = scratch_dir / f"draft_{handle.draft_id}_bgm.mp4"
+            # v0.24.0 — Project.bgm_fade_out_sec drives the tail fade
+            # on the BGM track. Default 3.0 s; user can crank it to 0
+            # for the historic hard-cut or up to 5 s in the FE.
+            bgm_fade_out_sec = float(
+                getattr(project, "bgm_fade_out_sec", 0.0) or 0.0
+            )
             await asyncio.to_thread(
                 bgm_mixer.mix_bgm,
                 output_path,
@@ -867,6 +880,7 @@ async def run_render(
                 srt_path if srt_text else None,
                 tmp_mixed,
                 segments=segment_volumes if has_voice_overrides else None,
+                fade_out_sec=bgm_fade_out_sec,
             )
             os.replace(tmp_mixed, output_path)
             await update_state(EditStep.BGM.value, "done")

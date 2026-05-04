@@ -96,8 +96,13 @@ def _draft_render_flags(
          current ProjectEdit toggle state)
       2. ``Draft.render_flags_json`` snapshot (written by the trigger
          endpoint when the draft was created)
-      3. The historical all-True default (matches pre-v0.21.1
-         behaviour for legacy NULL rows that have no snapshot)
+      3. The per-flag legacy default for rows that have no snapshot
+         (pre-v0.21.1 drafts, or drafts created before the trigger
+         endpoint started snapshotting). v0.24.0 flipped the default
+         for ``transitions`` to ``False`` to match the new
+         ``EditTriggerRequest`` default — a legacy draft re-rendered
+         today picks up the same "transitions off by default"
+         behaviour the FE shows for fresh projects.
 
     The boolean coercion guards against corrupt JSON blobs (e.g. a
     string ``"false"``) round-tripping as truthy.
@@ -110,13 +115,21 @@ def _draft_render_flags(
         if override is not None
         else {}
     )
+    # v0.24.0 — per-flag legacy default (mirrors EditTriggerRequest).
+    # Only used when neither override nor snapshot has a value.
+    legacy_defaults = {
+        "transitions": False,
+        "stabilize": True,
+        "subtitles": True,
+        "auto_reframe": True,
+    }
 
     def _pick(key: str) -> bool:
         if key in over:
             return bool(over[key])
         if key in snapshot:
             return bool(snapshot[key])
-        return True
+        return legacy_defaults[key]
 
     return {
         "transitions": _pick("transitions"),
@@ -217,7 +230,17 @@ def serialise_draft_detail(draft: Draft) -> DraftDetail:
                 transition=s.transition,
                 source_kind=s.source_kind,
                 plan_reason=s.plan_reason,
-                voice_volume=float(getattr(s, "voice_volume", 1.0) or 1.0),
+                # v0.24.0 — explicit None-check (matches
+                # ``edit_orchestrator._load_segment_volumes``). Pre-fix
+                # ``or 1.0`` mapped voice_volume=0 → 1.0, so the GET
+                # response told the FE the slider was at 100 % even
+                # when the DB held 0 %, which caused the "I muted
+                # this and it didn't take" report.
+                voice_volume=(
+                    float(s.voice_volume)
+                    if getattr(s, "voice_volume", None) is not None
+                    else 1.0
+                ),
                 bgm_volume=(
                     float(s.bgm_volume) if getattr(s, "bgm_volume", None) is not None else None
                 ),

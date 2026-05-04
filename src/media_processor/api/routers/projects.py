@@ -35,6 +35,7 @@ from media_processor.api.schemas import (
     ScriptOut,
     ScriptUpsert,
     SecondarySubtitleSummaryOut,
+    BgmFadeOutPatch,
     SubjectClassPatch,
     SubtitleStylePatch,
     TrackingSummaryOut,
@@ -137,6 +138,7 @@ def _project_detail(
         asset_count=asset_count,
         draft_count=draft_count,
         bgm_path=project.bgm_path,
+        bgm_fade_out_sec=float(project.bgm_fade_out_sec),
         # v0.20.3 — watermark fields. A duplicate _project_detail used
         # to live above with these fields and was silently shadowed by
         # this one (Python last-definition-wins), so GET /projects/{id}
@@ -677,6 +679,38 @@ async def patch_project_subject_class(
             status_code=status.HTTP_404_NOT_FOUND, detail="project not found"
         )
     project.subject_class = payload.subject_class
+    await session.commit()
+    await session.refresh(project)
+
+    asset_count = await session.scalar(
+        select(func.count(Asset.id)).where(Asset.project_id == project_id)
+    )
+    draft_count = await session.scalar(
+        select(func.count(Draft.id)).where(Draft.project_id == project_id)
+    )
+    return _project_detail(
+        project,
+        asset_count=int(asset_count or 0),
+        draft_count=int(draft_count or 0),
+    )
+
+
+# v0.24.0 — BGM tail-fade duration. Single-field PATCH, body is
+# ``{"fade_out_sec": float}`` clamped 0..10 server-side. The mixer
+# reads ``Project.bgm_fade_out_sec`` on every render — no separate
+# render trigger needed; next re-render picks it up.
+@router.patch("/{project_id}/bgm-fade-out", response_model=ProjectDetail)
+async def patch_project_bgm_fade_out(
+    project_id: int,
+    payload: BgmFadeOutPatch,
+    session: SessionDep,
+) -> ProjectDetail:
+    project = await session.get(Project, project_id)
+    if project is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="project not found"
+        )
+    project.bgm_fade_out_sec = float(payload.fade_out_sec)
     await session.commit()
     await session.refresh(project)
 

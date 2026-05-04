@@ -164,6 +164,23 @@ export class ApiClient {
     );
   }
 
+  // v0.24.0 — set the BGM tail-fade duration. Server clamps to
+  // [0.0, 10.0]. The mixer reads ``Project.bgm_fade_out_sec`` on
+  // every render — no separate trigger; the next re-render picks it up.
+  patchProjectBgmFadeOut(
+    projectId: number,
+    fadeOutSec: number,
+  ): Promise<ProjectDetail> {
+    return this.request<ProjectDetail>(
+      `/projects/${projectId}/bgm-fade-out`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fade_out_sec: fadeOutSec }),
+      },
+    );
+  }
+
   // v0.21 — class summary across this project's tracking_json blobs.
   // Empty list when no asset has been tracked yet — UI surfaces a
   // hint to run analysis first instead of offering a fake menu.

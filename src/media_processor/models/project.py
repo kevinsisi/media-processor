@@ -64,6 +64,20 @@ class Project(Base):
     # uploaded audio file under ``BGM_DIR``; null means "no BGM, the bgm
     # render stage is a no-op copy".
     bgm_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    # v0.24.0 — tail-fade duration for the BGM mix. ``> 0`` makes the
+    # mixer append ``afade=t=out:st=duration-N:d=N`` on the ducked BGM
+    # track so the music tapers into silence over the last N seconds.
+    # ``0`` keeps the pre-0.24.0 hard-cut behaviour. Default 3.0 s
+    # because the operator feedback that prompted this knob was "music
+    # cutting cold at the end feels jarring on the reel"; 3 s is the
+    # smallest tail that reads as intentional without eating the
+    # subject's last beat. Range bounded 0..10 server-side.
+    bgm_fade_out_sec: Mapped[float] = mapped_column(
+        Float,
+        nullable=False,
+        default=3.0,
+        server_default="3.0",
+    )
     # v0.18 — optional brand watermark / logo overlay burned into the
     # final mp4. ``watermark_path`` is the on-disk PNG under
     # ``WATERMARK_DIR``; null means the overlay stage is a no-op. The
