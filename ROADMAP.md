@@ -2,7 +2,7 @@
 
 > **單一定位**：個人 / 小團隊用的「拍完就上傳，AI 直接給可發佈影片」的工具。
 > 目標 UX：手機優先、繁體中文、高級感、最少手動編輯。
-> 目前版本：**0.23.7**（M9.8 — 像素級單點追蹤；6 + 1 連續修正：LK pipeline → modal → modal/crosshair 座標 → vidstab 衝突 → sendcmd duplicate-timestamp → bbox 中心 rounding → 旋轉素材 norm→pixel 用 cv2 維度）
+> 目前版本：**0.24.0**（操作體驗 / bug 修補 bundle — 配樂淡出、轉場預設不勾、`voice_volume=0` 被默默吃掉的 root-cause 修補）
 
 ## Phase 進度速覽
 
@@ -25,8 +25,9 @@
 | M9.5 | 時間軸編輯器 Phase 1 + UX 收斂 | ✅ done | 0.20.0 – 0.20.3 |
 | M9.6 | 轉場 flag 持久化 + 配樂自動觸發 + 主角類別 auto-trim | ✅ done | 0.21.0 – 0.21.6 |
 | M9.7 | UI/UX 全面收斂（路由修正 + 標籤具體化 + 失敗收摺 + 假進度條移除） | ✅ done | 0.22.0 |
-| **M9.8** | **像素級單點追蹤（Lucas-Kanade）+ 全螢幕 modal + 5 處座標 / 渲染 / dispatcher / 旋轉根因修正** | ✅ done | **0.23.0 – 0.23.7** |
-| M10 | 多專案批次 + 社群直接發布 + AI 自動縮圖 | 🔮 future | 0.24.x+ |
+| M9.8 | 像素級單點追蹤（Lucas-Kanade）+ 全螢幕 modal + 5 處座標 / 渲染 / dispatcher / 旋轉根因修正 | ✅ done | 0.23.0 – 0.23.7 |
+| **M9.9** | **配樂淡出 + 轉場預設不勾 + voice_volume=0 silent-drop 根因修正** | ✅ done | **0.24.0** |
+| M10 | 多專案批次 + 社群直接發布 + AI 自動縮圖 | 🔮 future | 0.25.x+ |
 
 ---
 
@@ -318,7 +319,30 @@ YOLO 物件追蹤對「我要追那個 logo」這種子-像素需求精度不夠
 
 ---
 
-## 🔮 Phase 10（M10）— 工作流規模化（0.24.x+）
+## ✅ Phase 9.9（M9.9）— 配樂淡出 + 轉場預設不勾 + voice_volume root-cause（已完成 0.24.0）
+
+操作體驗 bundle，三個小改動一起發佈：
+
+詳細 OpenSpec：`openspec/changes/archive/2026-05-04-v0.24-bgm-fade-transitions-default-volume-bug/`。
+
+### 9.9.1 配樂尾端淡出
+- `Project.bgm_fade_out_sec`（alembic 0022，FLOAT NOT NULL DEFAULT 3.0），`services.bgm_mixer.mix_bgm` 多 `fade_out_sec` kwarg：> 0 時 ffprobe 影片長度後在 BGM 鏈尾追加 `afade=t=out:st=duration-N:d=N`。Probe 失敗時 silently skip，混音照樣出。前端在「配樂」SettingsGroup 內加滑桿（0..5 秒，step 0.5），commit on mouse-up 不每幀 PATCH。
+- 0 秒 = pre-0.24.0 直接切，3 秒 = 預設新行為。
+
+### 9.9.2 轉場特效預設不勾
+- 操作者反饋：每個新專案打開都要先把轉場關掉。預設改成 `False`，要的人自己勾。Style preset 走 slow / artistic / commercial 還是會自己 re-enable。
+- 一次改 6 處：`EditTriggerRequest` schema、`enqueue_project_edit`、`render_draft`、`run_render`、`video_renderer.render`、`ProjectEdit.tsx`。`_draft_render_flags` legacy fallback 也從「all-True」改成 per-flag dict，舊 `Draft.render_flags_json IS NULL` 的 row 重新渲染時也會 pick up 新的 `transitions=False`。
+
+### 9.9.3 `voice_volume=0` silent-drop 根因修正
+- 症狀：使用者把 11 個片段全部拉到 voice 0%，按重新渲染，聲音還在。
+- 根因：`_load_segment_volumes` 用了 `float(getattr(r, "voice_volume", 1.0) or 1.0)`，但 Python 的 `0 or 1.0` 評估為 `1.0`（0 是 falsy），所以 voice_volume=0 被默默變回 1.0，mixer 跳過 override。同樣的 idiom 也出現在 GET draft 的 serialiser，所以前端 slider 顯示 100% 但 DB 存的是 0% — 兩邊互相確認對方是對的。
+- 修法：`value if value is not None else default` 取代 `value or default`。兩處都修。
+- Verified: re-render draft 42 (voice=0 全片) → audio mean 從 -26.9dB 降到 -27.9dB，max 從 -12.0dB 降到 -14.2dB（聲音真的靜音了，剩下的是 BGM）。
+- **Codebase rule**: 任何 nullable numeric column，valid range 含 0 / 0.0 / False 的，必須用 `value if value is not None else default`，不能用 `value or default`。
+
+---
+
+## 🔮 Phase 10（M10）— 工作流規模化（0.25.x+）
 
 ### 10.1 批次專案
 - 一次拉一整批（同主題、同 BGM、不同產品 / 不同型號）

@@ -26,6 +26,7 @@ Edit this file freely to add stack-, domain-, or team-specific rules for your pr
 - Prefer commit-first, push-later batching for larger work groups when repeated pushes would only retrigger CI/CD without adding review value.
 - If a requirement should govern future implementation, write it into the formal rule sources instead of leaving it only in chat context.
 - Avoid magic numbers in implementation; prefer existing enums, or introduce named constants when no enum exists.
+- For nullable numeric columns whose valid range includes `0` / `0.0` / `False`, never use the `value or default` idiom — `0` is falsy in Python and the idiom silently rewrites valid input. Always use `value if value is not None else default`. (See `memory/v024_bgm_fade_transitions_volume_bug.md` for the v0.24.0 case where `voice_volume = 0` got mapped to `1.0`.)
 - Before commit, confirm AI-generated methods, classes, and files are actually used; remove unused junk instead of committing it.
 - Build checks before commit must use the repo's concrete command(s), not vague "validation" language.
 - For any non-trivial feature request or requirement, first confirm requirements with the user and define OpenSpec before implementation.
@@ -75,8 +76,8 @@ Mirror locations (`.claude/skills/`, `.gemini/skills/`, `.opencode/skills/`, `.g
 ## Project Architecture Pointers
 
 CLAUDE.md is meta-rules; concrete project state lives elsewhere. When you need to understand what's currently in the codebase, prefer in this order:
-- `ROADMAP.md` — Phase 6–10 全程路線圖（已完成/規劃中），含每個 sub-task 驗收標準。新對話開頭先讀這個就能對齊大方向。**目前版本：0.23.7。**
-- `openspec/changes/` — current in-flight proposals + tasks. Completed milestones live under `openspec/changes/archive/YYYY-MM-DD-<name>/`. Archived through 0.23.x: M6 0.12.0 / M7 0.13.0 / M8 0.14.0 / M8.1 0.14.x / **v0.18 watermark / v0.19 subtitle-style + i18n + presets / v0.20 timeline + UX / v0.21 transitions + BGM + subject_class / v0.22 UI/UX 收斂 / v0.23 pixel-precise point tracking**.
+- `ROADMAP.md` — Phase 6–10 全程路線圖（已完成/規劃中），含每個 sub-task 驗收標準。新對話開頭先讀這個就能對齊大方向。**目前版本：0.24.0。**
+- `openspec/changes/` — current in-flight proposals + tasks. Completed milestones live under `openspec/changes/archive/YYYY-MM-DD-<name>/`. Archived through 0.24.x: M6 0.12.0 / M7 0.13.0 / M8 0.14.0 / M8.1 0.14.x / **v0.18 watermark / v0.19 subtitle-style + i18n + presets / v0.20 timeline + UX / v0.21 transitions + BGM + subject_class / v0.22 UI/UX 收斂 / v0.23 pixel-precise point tracking / v0.24 BGM fade + transitions default + voice_volume bug**.
 - The auto-memory index at `~/.claude/projects/D--GitClone--HomeProject-media-processor/memory/MEMORY.md` — non-obvious deploy / runtime quirks (Tailscale routing, GPU runtime, drafts/BGM storage, key pools, MusicGen, vidstab, YOLO tracking, alembic parallel-branch hazard, render flag persistence).
 - `skills/gemini-prompts/` — 4 個 reusable Gemini prompt skill（asset-score / scene-tag / script-coverage / llm-patcher），改 prompt 前先看這裡。
 - The code itself — render pipeline:
@@ -85,7 +86,7 @@ CLAUDE.md is meta-rules; concrete project state lives elsewhere. When you need t
   - `services/auto_reframe.py` Kalman-smoothed YOLO bbox → ffmpeg sendcmd dynamic crop (v0.16; tuned Q=120 R=80 MAX_DELTA=24 CROP_ZOOM_FACTOR=0.75 in v0.16.1) + `compute_crop_path_from_custom_roi` for CSRT user ROI (v0.17) + `compute_crop_path_from_point_track` for LK pixel-precise tracking (v0.23.0; synthesises 1×1 bbox so the existing centre-of-bbox math works unchanged). v0.23.5: `write_sendcmd_file` packs x AND y into ONE directive per timestamp (`crop@reframe x N, crop@reframe y M;`) — splitting them onto two lines at the same start_time triggers a ffmpeg 4.4 dispatcher bug that silently drops the second-onward directive at ≥30 Hz, freezing the crop at its initial value
   - `services/object_tracking.py` YOLOv8n at 5 fps; v0.17 keeps multi-class tracks + adds `track_custom_roi` (OpenCV CSRT); v0.21.0 adds `aggregate_detected_classes` (project-level class roll-up for the SubjectClassPicker dropdown)
   - `services/point_tracking.py` (v0.23.0) pyramidal Lucas-Kanade single-pixel tracker; bidirectional pass from init time (forward + backward); freezes at last good position on `lost`; opencv-python-headless required in BOTH api and worker images because the `tracking-target` endpoint runs LK synchronously. v0.23.7: takes `init_norm_x` / `init_norm_y` and resolves to pixels from cv2's POST-rotation dims (`CAP_PROP_FRAME_WIDTH/HEIGHT` with `CAP_PROP_ORIENTATION_AUTO=1`). Never multiply norms by `Asset.resolution` for tracking — that's the raw stream dims and disagrees with the thumbnail / cv2 frame on rotated assets (e.g. iPhone / DJI portrait clips stored as landscape + `rotate=90`).
-  - `services/bgm_mixer.py` voice-ducked BGM stage (M6.4) + per-segment voice/BGM gain via `SegmentVolume` + `apply_voice_volume` no-BGM fallback (v0.17)
+  - `services/bgm_mixer.py` voice-ducked BGM stage (M6.4) + per-segment voice/BGM gain via `SegmentVolume` + `apply_voice_volume` no-BGM fallback (v0.17) + `fade_out_sec` kwarg appends `afade=t=out` on the BGM track via ffprobe-resolved video duration (v0.24.0)
   - `services/musicgen.py` AI BGM generation (v0.15.x — fp32 forward + CFG step-down chain + transcript-aware prompt suggestion)
   - `services/vidstab.py` two-pass digital stabilization (v0.14.3)
   - `services/subtitles.py` builds drawtext-burned cues with `TRANSITION_OVERLAP_MS` accounting (M6.1 / M7.2)
