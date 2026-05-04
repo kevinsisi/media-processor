@@ -2,7 +2,7 @@
 
 > **單一定位**：個人 / 小團隊用的「拍完就上傳，AI 直接給可發佈影片」的工具。
 > 目標 UX：手機優先、繁體中文、高級感、最少手動編輯。
-> 目前版本：**0.22.0**（M9.7 — UI/UX 全面收斂：路由修正 + 標籤具體化 + 失敗訊息收摺）
+> 目前版本：**0.23.4**（M9.8 — 像素級單點追蹤：Lucas-Kanade + 全螢幕點選 modal + 座標換算修正 + 動態裁切後跳過 vidstab）
 
 ## Phase 進度速覽
 
@@ -24,8 +24,9 @@
 | M9.4 | 字幕樣式 + 風格預設 + 雙語字幕 | ✅ done | 0.19.0 |
 | M9.5 | 時間軸編輯器 Phase 1 + UX 收斂 | ✅ done | 0.20.0 – 0.20.3 |
 | M9.6 | 轉場 flag 持久化 + 配樂自動觸發 + 主角類別 auto-trim | ✅ done | 0.21.0 – 0.21.6 |
-| **M9.7** | **UI/UX 全面收斂（路由修正 + 標籤具體化 + 失敗收摺 + 假進度條移除）** | ✅ done | **0.22.0** |
-| M10 | 多專案批次 + 社群直接發布 + AI 自動縮圖 | 🔮 future | 0.23.x+ |
+| M9.7 | UI/UX 全面收斂（路由修正 + 標籤具體化 + 失敗收摺 + 假進度條移除） | ✅ done | 0.22.0 |
+| **M9.8** | **像素級單點追蹤（Lucas-Kanade）+ 全螢幕點選 modal + 座標換算 + vidstab 衝突修正** | ✅ done | **0.23.0 – 0.23.4** |
+| M10 | 多專案批次 + 社群直接發布 + AI 自動縮圖 | 🔮 future | 0.24.x+ |
 
 ---
 
@@ -272,7 +273,35 @@
 
 ---
 
-## 🔮 Phase 10（M10）— 工作流規模化（0.23.x+）
+## ✅ Phase 9.8（M9.8）— 像素級單點追蹤（已完成 0.23.0 – 0.23.4）
+
+YOLO 物件追蹤對「我要追那個 logo」這種子-像素需求精度不夠（5 Hz / bbox 中心常落在物件邊上）；CSRT 自訂 ROI 又太重。M9.8 引進「點一下就追那個像素」工作流。
+
+詳細 OpenSpec：`openspec/changes/archive/2026-05-04-v0.23-pixel-precise-point-tracking/`。
+
+### 9.8.1 像素級單點追蹤管線（0.23.0）
+- `services/point_tracking.track_point` — pyramidal Lucas-Kanade（`cv2.calcOpticalFlowPyrLK`），從 init 點往前 + 往後雙向追，每個 output frame 都有一筆 `{t_ms, x, y, lost}`；遇到 occlusion / 高 LK error 時凍結在 last good 並標 `lost=True`，Kalman 仍看得到連續測量。
+- `Asset.point_tracking_json` + `Asset.point_tracking_origin` 新欄位（alembic 0021）；`tracked_object_index = -4` 是新 sentinel。
+- API：`PATCH /assets/{id}/tracking-target` 增 `mode: "point"`，body `{norm_x, norm_y, frame_ms}`，後端乘以 `Asset.resolution` 轉像素再丟給 LK；validate norm_x / norm_y ∈ [0, 1]。
+- `auto_reframe.compute_crop_path_from_point_track` — 把每個 LK frame 包成 1×1 bbox，沿用既有 `compute_crop_path` 的 Kalman + max-delta 平滑邏輯；renderer dispatch 順序 `point (-4) → custom_roi (-1) → YOLO`。
+- 因為 sync 端點要呼 `cv2`，opencv-python-headless 加進 api 容器（之前只在 worker）。
+
+### 9.8.2 全螢幕 PointPickerModal（0.23.1）
+- 桌面那個小縮圖 + overlay 在手機完全不能用。改成全螢幕 modal，支援 wheel + pinch zoom + drag pan，centre-anchored transform。
+- Backdrop click / Esc / cancel 不 commit；單擊（drag 距離 < threshold）才送 norm 座標。
+
+### 9.8.3 座標換算 bug 修正（0.23.2 → 0.23.3）
+- **0.23.2 modal commit 算式**：原本用 `imgRef.getBoundingClientRect()` 推 norm，遇到 `max-width: 100%; max-height: 100%; object-fit: contain` 的 layout edge case 會偏；換成 `visibleImageRect(stage, naturalWH, zoom, pan)` 從 state 直接算，跟 wheel/pinch 的 zoom-anchor 算式對齊。同時拿掉 `transition: transform 80ms`，避免點擊落在動畫中途取到 partway-through rect。
+- **0.23.3 crosshair 顯示算式**：crosshair 原本用 `left: norm_x * 100%` 對 canvas div 定位，但 canvas 含 `object-fit:contain` 黑邊，norm 是相對影片內容的；改用 `norm_x * renderRect.renderedW + renderRect.offsetX`（跟既有的 bbox `cssBoxFor` 一樣的 px 算式）。
+
+### 9.8.4 vidstab + 動態裁切衝突（0.23.4）
+- 症狀：v0.23.3 之後 crosshair 顯示對了，但成片畫面仍偏：使用者點車標中央，渲染後車標卻在左 1/3。
+- 根因：`stabilize_segments` 跑在 `cut_segments` 之後。動態裁切 sendcmd 已經把 LK 像素鎖在輸出中央，但 vidstab 看到背景在動（因為動態裁切「製造」了背景的相對運動 — 主角不動、背景跟著鏡頭走），就算成 camera shake 套個 translate 抵銷掉，剛剛 crop 拉到中央的主角又被推回邊緣。
+- 修法：`_cut_segment` 回傳 bool 表示這段是否套了動態裁切；`cut_segments` 回傳 `(paths, reframed_flags)`；render 把 `{i for i, r in enumerate(reframed_flags) if r}` 當 `skip_indexes` 餵給 `stabilize_segments`，那些 segment 直接拿 cut 階段的輸出，不再二次 vidstab。靜態裁切的 segment 仍走完整 vidstab。
+
+---
+
+## 🔮 Phase 10（M10）— 工作流規模化（0.24.x+）
 
 ### 10.1 批次專案
 - 一次拉一整批（同主題、同 BGM、不同產品 / 不同型號）
