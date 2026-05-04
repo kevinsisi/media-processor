@@ -439,8 +439,22 @@ def write_sendcmd_file(path: CropPath, out_path: Path) -> Path:
         # ``reinit`` is overkill (changes filter params); for x/y
         # changes the crop filter accepts plain ``x`` / ``y`` runtime
         # commands.
-        lines.append(f"{t:.4f} crop@reframe x {x};")
-        lines.append(f"{t:.4f} crop@reframe y {y};")
+        #
+        # v0.23.5 — pack x AND y into ONE directive per timestamp,
+        # comma-separating the two commands. The pre-v0.23.5 format
+        # emitted two separate directives at the same start_time
+        # (``…x N;\n…y M;``) and at >=30 Hz ffmpeg's sendcmd dispatcher
+        # silently dropped most of the second-and-onward directives —
+        # parsing reported all 2N entries fine, but only the first
+        # one of each duplicate-timestamp pair actually reached the
+        # crop filter at runtime. Symptom was the crop window
+        # freezing close to its initial value, so the LK-tracked
+        # subject drifted off-centre as the camera panned. Combining
+        # x+y into a single directive halves the dispatch rate and
+        # sidesteps the quirk; the format is well-formed per the
+        # ffmpeg sendcmd grammar (``,`` separates commands within a
+        # directive, ``;`` terminates the directive).
+        lines.append(f"{t:.4f} crop@reframe x {x}, crop@reframe y {y};")
     out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return out_path
 
