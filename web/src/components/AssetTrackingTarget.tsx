@@ -5,6 +5,7 @@ import type {
   TrackingMode,
   TrackingTrackOut,
 } from "../api/types";
+import PointPickerModal from "./PointPickerModal";
 import {
   labelForTrackingMode,
   labelForTrackingSubject,
@@ -194,61 +195,15 @@ export default function AssetTrackingTarget({
   );
 
   const isCustomDrawing = activeMode === "custom" || pendingMode === "custom";
-  const isPointPicking = pendingMode === "point";
-
-  // v0.23 — convert a CSS click into 0..1 normalised source coords.
-  // Mirrors the custom-roi math: account for object-fit:contain
-  // letterboxing on the rendered <img>, then clamp + divide.
-  const cssClickToNormSource = useCallback(
-    (clientX: number, clientY: number): { norm_x: number; norm_y: number } | null => {
-      const wrap = wrapRef.current;
-      if (!wrap || !detail) return null;
-      const rect = wrap.getBoundingClientRect();
-      const xCss = clientX - rect.left;
-      const yCss = clientY - rect.top;
-      const srcW = detail.src_w || 1920;
-      const srcH = detail.src_h || 1080;
-      const wrapAspect = rect.width / rect.height;
-      const srcAspect = srcW / srcH;
-      let renderedW = rect.width;
-      let renderedH = rect.height;
-      let offsetX = 0;
-      let offsetY = 0;
-      if (srcAspect > wrapAspect) {
-        renderedH = rect.width / srcAspect;
-        offsetY = (rect.height - renderedH) / 2;
-      } else {
-        renderedW = rect.height * srcAspect;
-        offsetX = (rect.width - renderedW) / 2;
-      }
-      const sx = xCss - offsetX;
-      const sy = yCss - offsetY;
-      if (sx < 0 || sy < 0 || sx > renderedW || sy > renderedH) {
-        // Click landed in the letterbox bar.
-        return null;
-      }
-      return { norm_x: sx / renderedW, norm_y: sy / renderedH };
-    },
-    [detail],
-  );
+  // v0.23.1 — point-picking switched to a full-screen modal so the
+  // operator can pinch-zoom precisely on a small phone screen. The
+  // small inline canvas no longer accepts point clicks; the
+  // modal's own ``getBoundingClientRect`` math handles the
+  // coordinate mapping (transform-aware so it works post-zoom).
+  const isPointPickerOpen = pendingMode === "point";
 
   const onPointerDown = useCallback(
     (ev: React.PointerEvent<HTMLDivElement>) => {
-      if (isPointPicking) {
-        const norm = cssClickToNormSource(ev.clientX, ev.clientY);
-        if (norm) {
-          // The thumbnail is taken at t=0 (or the asset's first
-          // keyframe); we don't have a per-thumbnail timestamp on
-          // the FE so seed at t=0. Operators usually click on
-          // something visible at the start of the clip anyway.
-          void applyTarget("point", undefined, undefined, {
-            norm_x: norm.norm_x,
-            norm_y: norm.norm_y,
-            frame_ms: 0,
-          });
-        }
-        return;
-      }
       if (!isCustomDrawing) return;
       const wrap = wrapRef.current;
       if (!wrap) return;
@@ -258,7 +213,7 @@ export default function AssetTrackingTarget({
       setRoiDraft({ startX: x, startY: y, curX: x, curY: y });
       wrap.setPointerCapture(ev.pointerId);
     },
-    [isPointPicking, cssClickToNormSource, applyTarget, isCustomDrawing],
+    [isCustomDrawing],
   );
 
   const onPointerMove = useCallback(
@@ -436,10 +391,7 @@ export default function AssetTrackingTarget({
       </div>
 
       <div
-        className={
-          "tracking-target__canvas-wrap"
-          + (isPointPicking ? " tracking-target__canvas--point-pick" : "")
-        }
+        className="tracking-target__canvas-wrap"
         ref={wrapRef}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
@@ -506,10 +458,12 @@ export default function AssetTrackingTarget({
           在縮圖上拖曳以畫出自訂追蹤區域；放開手指即套用。
         </p>
       )}
+      {/* v0.23.1 — full-screen modal handles point picking. The
+         hint visible here while the modal is open is redundant
+         (the modal has its own header copy), so we just show a
+         brief "選擇中…" while it's mounted. */}
       {pendingMode === "point" && (
-        <p className="tracking-target__hint">
-          點一下要追蹤的像素（例如鋁圈中心），系統會用光流追蹤每一幀並維持那個點在畫面中央。
-        </p>
+        <p className="tracking-target__hint">選擇追蹤點…</p>
       )}
       {activeMode === "point" && pendingMode !== "point" && detail.has_point_track && (
         <p className="tracking-target__hint">
@@ -556,6 +510,30 @@ export default function AssetTrackingTarget({
           這是 v0.17 之前的舊追蹤資料（單主體），重新跑追蹤分析可取得多物件選擇。
         </p>
       )}
+
+      {/* v0.23.1 — full-screen point picker. Renders nothing when
+         the operator hasn't opened the point tab. ``thumbnailUrl``
+         is the same image the inline canvas uses; the modal does
+         its own zoom + pan on top. */}
+      <PointPickerModal
+        open={isPointPickerOpen}
+        thumbnailUrl={thumbnailUrl}
+        srcW={detail.src_w}
+        srcH={detail.src_h}
+        busy={busy}
+        onCommit={({ norm_x, norm_y }) => {
+          // Seed at t=0 — the source thumbnail is taken from the
+          // first keyframe so the LK init frame matches what the
+          // operator just clicked. ``applyTarget`` itself closes
+          // the modal by clearing pendingMode on success.
+          void applyTarget("point", undefined, undefined, {
+            norm_x,
+            norm_y,
+            frame_ms: 0,
+          });
+        }}
+        onCancel={() => setPendingMode(null)}
+      />
     </div>
   );
 }
