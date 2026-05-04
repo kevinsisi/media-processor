@@ -68,6 +68,14 @@ function isLegacyTracking(detail: TrackingDetailOut): boolean {
   );
 }
 
+// v0.22.2 — drop noise tracks from the picker. Mirrors the backend's
+// ``services.object_tracking.MIN_TRACK_FRAMES`` so the operator only
+// sees tracks long enough to actually be useful as a tracking
+// target. Defensive (the API filters too) — protects against
+// legacy / partially-migrated rows that might still slip a stub
+// track through.
+const MIN_TRACK_FRAMES = 5;
+
 export default function AssetTrackingTarget({
   assetId,
   thumbnailUrl,
@@ -81,6 +89,17 @@ export default function AssetTrackingTarget({
 
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const [roiDraft, setRoiDraft] = useState<RoiDraft | null>(null);
+
+  // v0.22.2 — visible-tracks list. Backend already filters but we
+  // also strip locally so a legacy / cached payload can't surface a
+  // 1-frame YOLO flicker as a selectable subject.
+  const visibleTracks = useMemo(
+    () =>
+      (detail?.tracks ?? []).filter(
+        (t) => t.frame_count >= MIN_TRACK_FRAMES,
+      ),
+    [detail],
+  );
 
   const fetchDetail = useCallback(async () => {
     try {
@@ -367,7 +386,7 @@ export default function AssetTrackingTarget({
             draggable={false}
           />
         )}
-        {detail.tracks.map((track) => {
+        {visibleTracks.map((track) => {
           const frame = pickRepresentativeFrame(track);
           const style = cssBoxFor(frame);
           if (!style) return null;
@@ -406,7 +425,7 @@ export default function AssetTrackingTarget({
       )}
       {activeMode === "object" && (
         <div className="tracking-target__list" role="group">
-          {detail.tracks.map((track) => {
+          {visibleTracks.map((track) => {
             const isActive =
               detail.tracked_object_index === track.object_index;
             return (
@@ -434,12 +453,12 @@ export default function AssetTrackingTarget({
           失敗：{error}
         </p>
       )}
-      {detail.tracks.length === 0 && (
+      {visibleTracks.length === 0 && (
         <p className="tracking-target__hint">
           這段素材沒有偵測到可追蹤主體；可改用「自訂區域」或「固定構圖」。
         </p>
       )}
-      {detail.tracks.length > 0 && isLegacyTracking(detail) && (
+      {visibleTracks.length > 0 && isLegacyTracking(detail) && (
         <p className="tracking-target__hint">
           這是 v0.17 之前的舊追蹤資料（單主體），重新跑追蹤分析可取得多物件選擇。
         </p>

@@ -41,6 +41,27 @@ TRACKING_SAMPLE_FPS: float = float(os.environ.get("TRACKING_SAMPLE_FPS", "5"))
 TRACKING_MIN_CONFIDENCE: float = float(
     os.environ.get("TRACKING_MIN_CONFIDENCE", "0.30")
 )
+# v0.22.2 — drop tracks with fewer than this many sampled detections
+# from any user-facing surface (the /tracking endpoint, the
+# detected-classes aggregator, the AssetTrackingTarget bbox overlay).
+# At 5 Hz sampling, 5 frames ≈ 1 second of subject presence; anything
+# shorter is almost always YOLO noise (a single mis-classified frame
+# during fast motion / occlusion) and clutters the picker without
+# being useful as a tracking target. Filter is applied at READ time
+# so the raw tracking_json blob keeps the full data and we can
+# lower the threshold later without re-running analysis.
+MIN_TRACK_FRAMES: int = 5
+
+
+def is_track_significant(track: dict) -> bool:
+    """v0.22.2 — return True when ``track["frames"]`` is long enough
+    to surface to the operator. The single source-of-truth predicate
+    used by the tracking router, the detected-classes aggregator,
+    and any other read-time filter."""
+    if not isinstance(track, dict):
+        return False
+    frames = track.get("frames")
+    return isinstance(frames, list) and len(frames) >= MIN_TRACK_FRAMES
 # Default model — yolov8n.pt is the smallest official YOLOv8 weight
 # (~6 MB), fits in <500 MB VRAM, and runs at 100+ fps on a 2070. Larger
 # variants (s/m/l/x) trade speed for accuracy; override via env if you
@@ -445,7 +466,12 @@ def aggregate_detected_classes(
                     continue
                 frames = t.get("frames")
                 nframes = len(frames) if isinstance(frames, list) else 0
-                if nframes <= 0:
+                # v0.22.2 — drop noise tracks (single-frame YOLO
+                # mis-classifications, brief occlusion artefacts)
+                # so the operator's class picker only shows
+                # subjects that were actually visible long enough
+                # to be useful as a tracking target.
+                if nframes < MIN_TRACK_FRAMES:
                     continue
                 slot = counts.setdefault(cls, {"total_frames": 0, "asset_count": 0})
                 slot["total_frames"] += nframes
@@ -457,7 +483,7 @@ def aggregate_detected_classes(
                 isinstance(cls, str)
                 and cls
                 and isinstance(frames, list)
-                and frames
+                and len(frames) >= MIN_TRACK_FRAMES
             ):
                 slot = counts.setdefault(cls, {"total_frames": 0, "asset_count": 0})
                 slot["total_frames"] += len(frames)
@@ -665,6 +691,7 @@ def track_custom_roi(
 
 __all__ = [
     "COCO80_CLASSES",
+    "MIN_TRACK_FRAMES",
     "SUBJECT_CLASS_PRIORITY",
     "SUBJECT_CLASS_PRIORITY_HEAD",
     "TRACKING_MIN_CONFIDENCE",
@@ -677,6 +704,7 @@ __all__ = [
     "TrackingUnavailableError",
     "aggregate_detected_classes",
     "detect",
+    "is_track_significant",
     "serialise",
     "track_custom_roi",
 ]
