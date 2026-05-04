@@ -606,12 +606,33 @@ export interface TrackingDetailOut {
   confidence: number;
   tracks: TrackingTrackOut[];
   // null = auto (dominant track). >= 0 = picked object_index.
-  // -1 = custom_roi, -2 = fixed framing, -3 = no auto-reframe.
+  // -1 = custom_roi, -2 = fixed framing, -3 = no auto-reframe,
+  // -4 = point_tracking (v0.23).
   tracked_object_index: number | null;
   has_custom_roi: boolean;
+  // v0.23 — surfaces ``Asset.point_tracking_json`` presence so the
+  // picker can render a "✓ pixel tracked" indicator without
+  // re-fetching the per-frame trace.
+  has_point_track?: boolean;
+  // v0.23 — verbatim user click that seeded the LK trace. The FE
+  // renders a crosshair at this position on the thumbnail. ``null``
+  // when no point track has been run.
+  point_tracking_origin?: {
+    x: number;
+    y: number;
+    frame_ms: number;
+    norm_x: number;
+    norm_y: number;
+  } | null;
 }
 
-export type TrackingMode = "auto" | "object" | "custom" | "fixed" | "none";
+export type TrackingMode =
+  | "auto"
+  | "object"
+  | "custom"
+  | "point"
+  | "fixed"
+  | "none";
 
 export interface TrackingTargetRequest {
   mode: TrackingMode;
@@ -623,10 +644,19 @@ export interface TrackingTargetRequest {
     h: number;
     source_t_ms?: number;
   } | null;
+  // v0.23 — pixel-precise point tracking. Coords are 0..1 normalised
+  // so the FE can pass display-space click positions without knowing
+  // the asset's native resolution.
+  point?: {
+    norm_x: number;
+    norm_y: number;
+    frame_ms: number;
+  } | null;
 }
 
 export interface TrackingTargetResponse {
   asset_id: number;
+  has_point_track?: boolean;
   tracked_object_index: number | null;
   has_custom_roi: boolean;
 }

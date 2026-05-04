@@ -28,6 +28,7 @@ interface RoiDraft {
 const TRACKING_MODES: TrackingMode[] = [
   "auto",
   "object",
+  "point",
   "custom",
   "fixed",
   "none",
@@ -40,6 +41,7 @@ function deriveActiveMode(detail: TrackingDetailOut | null): TrackingMode {
   if (idx === -1) return "custom";
   if (idx === -2) return "fixed";
   if (idx === -3) return "none";
+  if (idx === -4) return "point";
   return "object";
 }
 
@@ -123,6 +125,7 @@ export default function AssetTrackingTarget({
       mode: TrackingMode,
       objectIndex?: number,
       customRoi?: { x: number; y: number; w: number; h: number },
+      point?: { norm_x: number; norm_y: number; frame_ms: number },
     ) => {
       setBusy(true);
       setError(null);
@@ -131,6 +134,7 @@ export default function AssetTrackingTarget({
           mode,
           object_index: mode === "object" ? objectIndex : null,
           custom_roi: mode === "custom" && customRoi ? customRoi : null,
+          point: mode === "point" && point ? point : null,
         });
         setDetail((prev) =>
           prev
@@ -138,9 +142,16 @@ export default function AssetTrackingTarget({
                 ...prev,
                 tracked_object_index: resp.tracked_object_index,
                 has_custom_roi: resp.has_custom_roi,
+                has_point_track: resp.has_point_track,
               }
             : prev,
         );
+        // Refetch the full detail so ``point_tracking_origin``
+        // (returned by GET /tracking, not the PATCH response)
+        // round-trips into the crosshair render.
+        if (mode === "point") {
+          void fetchDetail();
+        }
         setActiveMode(mode);
         setPendingMode(null);
       } catch (err) {
@@ -155,7 +166,7 @@ export default function AssetTrackingTarget({
         setBusy(false);
       }
     },
-    [assetId],
+    [assetId, fetchDetail],
   );
 
   const handleModeClick = useCallback(
@@ -166,7 +177,9 @@ export default function AssetTrackingTarget({
         void applyTarget(mode);
         return;
       }
-      // For object / custom we wait for the user to actually pick.
+      // For object / custom / point we wait for the user to actually
+      // pick (click an object box, draw an ROI, or click the
+      // tracking pixel).
       setPendingMode(mode);
     },
     [busy, applyTarget],
@@ -181,9 +194,61 @@ export default function AssetTrackingTarget({
   );
 
   const isCustomDrawing = activeMode === "custom" || pendingMode === "custom";
+  const isPointPicking = pendingMode === "point";
+
+  // v0.23 — convert a CSS click into 0..1 normalised source coords.
+  // Mirrors the custom-roi math: account for object-fit:contain
+  // letterboxing on the rendered <img>, then clamp + divide.
+  const cssClickToNormSource = useCallback(
+    (clientX: number, clientY: number): { norm_x: number; norm_y: number } | null => {
+      const wrap = wrapRef.current;
+      if (!wrap || !detail) return null;
+      const rect = wrap.getBoundingClientRect();
+      const xCss = clientX - rect.left;
+      const yCss = clientY - rect.top;
+      const srcW = detail.src_w || 1920;
+      const srcH = detail.src_h || 1080;
+      const wrapAspect = rect.width / rect.height;
+      const srcAspect = srcW / srcH;
+      let renderedW = rect.width;
+      let renderedH = rect.height;
+      let offsetX = 0;
+      let offsetY = 0;
+      if (srcAspect > wrapAspect) {
+        renderedH = rect.width / srcAspect;
+        offsetY = (rect.height - renderedH) / 2;
+      } else {
+        renderedW = rect.height * srcAspect;
+        offsetX = (rect.width - renderedW) / 2;
+      }
+      const sx = xCss - offsetX;
+      const sy = yCss - offsetY;
+      if (sx < 0 || sy < 0 || sx > renderedW || sy > renderedH) {
+        // Click landed in the letterbox bar.
+        return null;
+      }
+      return { norm_x: sx / renderedW, norm_y: sy / renderedH };
+    },
+    [detail],
+  );
 
   const onPointerDown = useCallback(
     (ev: React.PointerEvent<HTMLDivElement>) => {
+      if (isPointPicking) {
+        const norm = cssClickToNormSource(ev.clientX, ev.clientY);
+        if (norm) {
+          // The thumbnail is taken at t=0 (or the asset's first
+          // keyframe); we don't have a per-thumbnail timestamp on
+          // the FE so seed at t=0. Operators usually click on
+          // something visible at the start of the clip anyway.
+          void applyTarget("point", undefined, undefined, {
+            norm_x: norm.norm_x,
+            norm_y: norm.norm_y,
+            frame_ms: 0,
+          });
+        }
+        return;
+      }
       if (!isCustomDrawing) return;
       const wrap = wrapRef.current;
       if (!wrap) return;
@@ -193,7 +258,7 @@ export default function AssetTrackingTarget({
       setRoiDraft({ startX: x, startY: y, curX: x, curY: y });
       wrap.setPointerCapture(ev.pointerId);
     },
-    [isCustomDrawing],
+    [isPointPicking, cssClickToNormSource, applyTarget, isCustomDrawing],
   );
 
   const onPointerMove = useCallback(
@@ -371,7 +436,10 @@ export default function AssetTrackingTarget({
       </div>
 
       <div
-        className="tracking-target__canvas-wrap"
+        className={
+          "tracking-target__canvas-wrap"
+          + (isPointPicking ? " tracking-target__canvas--point-pick" : "")
+        }
         ref={wrapRef}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
@@ -416,11 +484,36 @@ export default function AssetTrackingTarget({
         {draftStyle && (
           <div className="tracking-target__custom-roi" style={draftStyle} />
         )}
+        {/* v0.23 — crosshair on the originally-clicked pixel (point
+           tracking mode). Renders both as feedback after a click and
+           on subsequent loads so the operator can see where the
+           seed was. Position is the normalised origin × the
+           rendered (object-fit:contain) display rect. */}
+        {activeMode === "point" && detail.point_tracking_origin && (
+          <div
+            className="tracking-target__crosshair"
+            style={{
+              left: `${detail.point_tracking_origin.norm_x * 100}%`,
+              top: `${detail.point_tracking_origin.norm_y * 100}%`,
+            }}
+            aria-label="追蹤點位置"
+          />
+        )}
       </div>
 
       {pendingMode === "custom" && !roiDraft && (
         <p className="tracking-target__hint">
           在縮圖上拖曳以畫出自訂追蹤區域；放開手指即套用。
+        </p>
+      )}
+      {pendingMode === "point" && (
+        <p className="tracking-target__hint">
+          點一下要追蹤的像素（例如鋁圈中心），系統會用光流追蹤每一幀並維持那個點在畫面中央。
+        </p>
+      )}
+      {activeMode === "point" && pendingMode !== "point" && detail.has_point_track && (
+        <p className="tracking-target__hint">
+          ✓ 已建立精準像素追蹤；按上方「精準像素」可重點。
         </p>
       )}
       {activeMode === "object" && (

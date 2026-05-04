@@ -218,12 +218,15 @@ class Asset(Base):
     # Read by services.auto_reframe to compute per-frame crop windows
     # so the renderer can keep the subject centered in 9:16 output.
     tracking_json: Mapped[Any] = mapped_column(JSON, nullable=True)
-    # v0.17 — user override for which tracked object the renderer should
-    # follow. ``None`` = auto (largest by area, the historic default).
+    # v0.17 / v0.23 — user override for which tracked object the renderer
+    # should follow. ``None`` = auto (largest by area, the historic
+    # default).
     # ``>= 0`` = the ``object_index`` inside ``tracking_json["tracks"]``.
     # ``-1`` = use ``custom_roi_json`` (CSRT-tracked user-drawn ROI).
     # ``-2`` = fixed framing — no auto-reframe, static centered crop.
     # ``-3`` = no auto-reframe and no fallback (original aspect crop).
+    # ``-4`` = use ``point_tracking_json`` (LK-tracked single pixel
+    #         from a user click; v0.23.0).
     tracked_object_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # v0.17 — CSRT-tracked custom ROI when ``tracked_object_index == -1``.
     # Same per-frame bbox shape as one entry in ``tracking_json["tracks"]``;
@@ -231,6 +234,24 @@ class Asset(Base):
     # Shape: {"src_w": 1920, "src_h": 1080, "fps": 5.0,
     #         "frames": [{"t_ms": 0, "x": 870, "y": 420, "w": 180, "h": 240}, …]}
     custom_roi_json: Mapped[Any] = mapped_column(JSON, nullable=True)
+    # v0.23 — pyramidal Lucas-Kanade pixel-precise track when
+    # ``tracked_object_index == -4``. Shape:
+    #   {"src_w": int, "src_h": int, "fps": float, "init_t_ms": int,
+    #    "init": {"x": int, "y": int},
+    #    "frames": [{"t_ms": int, "x": float, "y": float, "lost": bool}, …]}
+    # Stored on its own column for the same reason custom_roi_json is —
+    # re-running YOLO won't clobber an operator's manually-tracked
+    # point.
+    point_tracking_json: Mapped[Any] = mapped_column(JSON, nullable=True)
+    # v0.23 — verbatim record of the user's click coordinate that
+    # seeded the LK trace. Kept separate so the operator can re-run
+    # the trace later (e.g. with different LK params) without losing
+    # which pixel they originally clicked. Shape:
+    #   {"x": int, "y": int, "frame_ms": int, "norm_x": float, "norm_y": float}
+    # ``norm_x`` / ``norm_y`` are the 0..1 click coords the API
+    # received from the FE, retained so the FE can render the
+    # crosshair on a thumbnail of any resolution.
+    point_tracking_origin: Mapped[Any] = mapped_column(JSON, nullable=True)
     # v0.18 — secondary-language subtitle marker. ``None`` = no translation
     # has been generated. ``"en"`` (current sole supported value) = the
     # asset has been run through Whisper task="translate" and the resulting

@@ -387,6 +387,7 @@ def _cut_segment(
     sendcmd_dir: Path | None = None,
     tracking_object_index: int | None = None,
     custom_roi: dict[str, Any] | None = None,
+    point_track: dict[str, Any] | None = None,
 ) -> None:
     """Cut + scale-and-crop one segment to a uniform intermediate mp4.
 
@@ -414,7 +415,18 @@ def _cut_segment(
     #   tracking only → dominant YOLO track (historic default)
     crop_path = None
     if sendcmd_dir is not None:
-        if custom_roi:
+        # v0.23 — point_track wins over custom_roi which wins over
+        # YOLO tracking. The dispatch reads the same way as the
+        # ``tracked_object_index`` sentinel order: -4 (point) → -1
+        # (custom_roi) → ≥0 / null (YOLO).
+        if point_track:
+            crop_path = auto_reframe.compute_crop_path_from_point_track(
+                point_track,
+                target_aspect=target_aspect,
+                asset_start_ms=cut.asset_start_ms,
+                asset_end_ms=cut.asset_end_ms,
+            )
+        elif custom_roi:
             crop_path = auto_reframe.compute_crop_path_from_custom_roi(
                 custom_roi,
                 target_aspect=target_aspect,
@@ -489,6 +501,7 @@ def cut_segments(
     tracking_by_asset: dict[int, dict[str, Any]] | None = None,
     tracking_target_by_asset: dict[int, int | None] | None = None,
     custom_roi_by_asset: dict[int, dict[str, Any]] | None = None,
+    point_track_by_asset: dict[int, dict[str, Any]] | None = None,
 ) -> list[Path]:
     """Cut every segment in the plan; return the intermediate paths in order.
 
@@ -508,7 +521,11 @@ def cut_segments(
     _require_ffmpeg()
     intermediate_dir.mkdir(parents=True, exist_ok=True)
     sendcmd_dir = intermediate_dir / "reframe"
-    has_any_reframe = bool(tracking_by_asset) or bool(custom_roi_by_asset)
+    has_any_reframe = (
+        bool(tracking_by_asset)
+        or bool(custom_roi_by_asset)
+        or bool(point_track_by_asset)
+    )
     if has_any_reframe:
         sendcmd_dir.mkdir(parents=True, exist_ok=True)
     out_paths: list[Path] = []
@@ -521,11 +538,13 @@ def cut_segments(
         track = (tracking_by_asset or {}).get(cut.asset_id)
         target_idx = (tracking_target_by_asset or {}).get(cut.asset_id)
         custom_roi = (custom_roi_by_asset or {}).get(cut.asset_id)
+        point_track = (point_track_by_asset or {}).get(cut.asset_id)
         # Sentinels disable auto-reframe entirely; defensively clear
         # the inputs so the chain falls back to the static aspect crop.
         if target_idx in (-2, -3):
             track = None
             custom_roi = None
+            point_track = None
         _cut_segment(
             Path(src),
             cut,
@@ -535,6 +554,7 @@ def cut_segments(
             sendcmd_dir=sendcmd_dir if has_any_reframe else None,
             tracking_object_index=target_idx if (target_idx is not None and target_idx >= 0) else None,
             custom_roi=custom_roi if target_idx == -1 else None,
+            point_track=point_track if target_idx == -4 else None,
         )
         out_paths.append(out)
         if on_progress is not None:
@@ -1067,6 +1087,7 @@ def render(
     tracking_by_asset: dict[int, dict[str, Any]] | None = None,
     tracking_target_by_asset: dict[int, int | None] | None = None,
     custom_roi_by_asset: dict[int, dict[str, Any]] | None = None,
+    point_track_by_asset: dict[int, dict[str, Any]] | None = None,
     subtitle_style: SubtitleStyle | None = None,
     on_progress: Callable[[str, int, int], None] | None = None,
 ) -> RenderResult:
@@ -1112,6 +1133,7 @@ def render(
         tracking_by_asset=tracking_by_asset,
         tracking_target_by_asset=tracking_target_by_asset,
         custom_roi_by_asset=custom_roi_by_asset,
+        point_track_by_asset=point_track_by_asset,
     )
 
     # Stage 1.5 — optional digital stabilization. Replaces each

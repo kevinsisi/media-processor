@@ -118,6 +118,56 @@
   pointer-events: none;
 }
 
+/* v0.23 — point-tracking crosshair on the originally-clicked pixel.
+   ``left`` / ``top`` come in as percentages from the JSX (normalised
+   origin × 100%); the negative-margin centring math keeps the
+   crosshair pinned exactly on the pixel regardless of icon size.
+   ``box-shadow`` outline makes the marker readable against both
+   bright and dark thumbnails without a separate stroke. */
+.tracking-target__crosshair {
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  margin-left: -12px;
+  margin-top: -12px;
+  pointer-events: none;
+  border-radius: 50%;
+  background: rgba(255, 60, 60, 0.92);
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.95),
+    0 0 0 3px rgba(0, 0, 0, 0.6);
+}
+.tracking-target__crosshair::before,
+.tracking-target__crosshair::after {
+  content: "";
+  position: absolute;
+  background: rgba(255, 255, 255, 0.95);
+}
+.tracking-target__crosshair::before {
+  /* horizontal arm */
+  top: 50%;
+  left: -10px;
+  right: -10px;
+  height: 2px;
+  margin-top: -1px;
+}
+.tracking-target__crosshair::after {
+  /* vertical arm */
+  left: 50%;
+  top: -10px;
+  bottom: -10px;
+  width: 2px;
+  margin-left: -1px;
+}
+
+/* v0.23 — make the canvas accept clicks when in point-pick mode.
+   The default cursor stays ``crosshair`` for both custom-roi
+   drawing and point picking, so the operator gets the same
+   "I'm about to mark something" affordance for both modes. */
+.tracking-target__canvas--point-pick {
+  cursor: crosshair;
+}
+
 .tracking-target__hint {
   margin: 0;
   font-size: 11px;
