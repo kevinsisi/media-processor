@@ -109,17 +109,28 @@ class PointTrackUnavailableError(PointTrackError):
 def track_point(
     media_path: Path,
     *,
-    init_x: int,
-    init_y: int,
+    init_norm_x: float,
+    init_norm_y: float,
     init_t_ms: int = 0,
     duration_ms: int | None = None,
 ) -> dict[str, Any]:
     """Track a single pixel through the video using LK optical flow.
 
-    ``init_x`` / ``init_y`` are pixel coordinates on the SOURCE frame
-    at ``init_t_ms``. The caller (the API endpoint) is responsible
-    for converting normalised 0..1 click coordinates into pixels by
-    multiplying with the asset's resolution.
+    ``init_norm_x`` / ``init_norm_y`` are 0..1 normalised click
+    coordinates on the DISPLAYED (i.e. post-rotation, what the user
+    sees on the thumbnail) frame at ``init_t_ms``. We resolve the
+    pixel coords here from ``cv2``'s frame dimensions, NOT from
+    ``Asset.resolution`` — because for assets with rotation metadata
+    (e.g. iPhone / DJI portrait clips that store landscape frames +
+    a ``rotate=90`` tag), ``Asset.resolution`` is the raw stream
+    dimensions while the thumbnail is rotated to display orientation.
+    Multiplying ``norm × Asset.resolution`` for those assets seeds LK
+    at the wrong pixel (e.g. norm 0.48 on a portrait thumbnail picked
+    up by ``norm * 3840 = 1848`` and clamped into a 2160-wide cv2
+    frame ends up at 86 % across instead of 48 %). cv2 with
+    ``CAP_PROP_ORIENTATION_AUTO=1`` (the OpenCV 4.13 default) reads
+    the post-rotation frame, so its width/height match the
+    thumbnail's coord space — single source of truth.
 
     Returns a JSON-friendly dict suitable for
     ``Asset.point_tracking_json``::
@@ -131,6 +142,11 @@ def track_point(
           "sampled_frames": int,
         }
 
+    ``init.x``/``init.y`` are the resolved pixel coordinates so the
+    caller (the API endpoint) can mirror them back into
+    ``Asset.point_tracking_origin`` for the post-commit crosshair
+    without re-doing the resolution lookup.
+
     The frames cover the WHOLE asset starting from t=0 — when the
     user clicks at e.g. t=3.5 s, we still record positions for frames
     0..3.5 s by running LK BACKWARD from the init frame, then forward
@@ -139,13 +155,18 @@ def track_point(
     happened to click.
     """
     if _is_fake():
+        # FAKE path: resolve against a default display resolution so the
+        # stub's init.x/init.y come out somewhere sensible.
+        fake_src_w, fake_src_h = 1920, 1080
+        fake_init_x = int(round(init_norm_x * fake_src_w))
+        fake_init_y = int(round(init_norm_y * fake_src_h))
         return _fake_point_track_result(
-            src_w=1920,
-            src_h=1080,
+            src_w=fake_src_w,
+            src_h=fake_src_h,
             fps=30.0,
             duration_ms=duration_ms or 5_000,
-            init_x=init_x,
-            init_y=init_y,
+            init_x=fake_init_x,
+            init_y=fake_init_y,
             init_t_ms=init_t_ms,
         )
 
@@ -165,6 +186,11 @@ def track_point(
     duration_ms = duration_ms or int(total_frames / max(1.0, fps) * 1000)
     interval_ms = 1000.0 / max(fps, 1.0)
 
+    # Resolve pixel coords from cv2's POST-rotation dimensions. This
+    # is the only place the seed→pixel mapping happens; no other layer
+    # reads Asset.resolution for tracking purposes.
+    init_x = int(round(init_norm_x * src_w))
+    init_y = int(round(init_norm_y * src_h))
     init_x = max(0, min(src_w - 1, init_x))
     init_y = max(0, min(src_h - 1, init_y))
 

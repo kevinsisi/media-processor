@@ -382,9 +382,16 @@ def compute_crop_path_from_point_track(
     raw_frames = point_track.get("frames") or []
     if not raw_frames:
         return None
-    # Synthesise (x-0.5, y-0.5, w=1, h=1) so centre = (x, y) — the
-    # crop-path math centres on bbox midpoint and the 0.5 px nudge
-    # keeps coordinates non-negative without affecting Kalman input.
+    # v0.23.6 — synthesise a degenerate w=h=0 bbox at (round(x), round(y))
+    # so ``compute_crop_path``'s centre math (``cx = int(f["x"]) +
+    # int(f["w"]) // 2``) reduces to ``cx = round(x)``. The pre-0.23.6
+    # form used (x-0.5, y-0.5, 1, 1) which on integer LK coordinates
+    # was equivalent, but ``int(x - 0.5)`` on a fractional LK output
+    # like 864.3 floors to 863 and the trailing ``+ 1 // 2 = 0`` adds
+    # no correction — giving a centre 1 px LEFT of the actual tracked
+    # pixel. Sub-pixel on a 1728-wide source isn't huge, but at
+    # crop-zoom 0.75 it's a visible drift on long subject pans where
+    # the operator can see "almost but not quite centred" framing.
     bbox_frames = []
     for f in raw_frames:
         if not isinstance(f, dict):
@@ -398,10 +405,10 @@ def compute_crop_path_from_point_track(
         bbox_frames.append(
             {
                 "t_ms": t_ms,
-                "x": int(max(0.0, x - 0.5)),
-                "y": int(max(0.0, y - 0.5)),
-                "w": 1,
-                "h": 1,
+                "x": int(round(max(0.0, x))),
+                "y": int(round(max(0.0, y))),
+                "w": 0,
+                "h": 0,
             }
         )
     if not bbox_frames:
