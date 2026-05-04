@@ -12,13 +12,24 @@
        reach on a 20-job queue).
      * Phone-narrow breakpoint goes full-bleed: a tall queue on a
        small phone screen needs every pixel of vertical space and
-       the rounded-corner card otherwise wastes 30 px of margin. */
+       the rounded-corner card otherwise wastes 30 px of margin.
+   v0.27.2 — overflow-on-mobile + bleedthrough fix:
+     * Backdrop bumped from 0.55 → 0.85 opacity. Pre-0.27.2 on a
+       crowded ProjectAnalysis page the busy asset cards behind the
+       modal showed through clearly enough that operators thought
+       the queue panel itself was rendering analysis details.
+     * ``.queue-modal__body`` was previously unstyled — no padding,
+       no overflow, no scroll. On a tall section list the content
+       escaped the rounded card. Now: ``flex: 1`` to fill the modal
+       below the sticky header, ``overflow-y: auto`` so a long
+       queued list scrolls inside the card, ``padding`` for breathing
+       room, and ``gap`` between sections. */
 
 .queue-modal__backdrop {
   position: fixed;
   inset: 0;
   z-index: 250;
-  background: rgba(0, 0, 0, 0.55);
+  background: rgba(0, 0, 0, 0.85);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -92,6 +103,34 @@
 }
 .queue-modal__close:hover {
   background: rgba(255, 255, 255, 0.08);
+}
+
+/* v0.27.2 — body holds the running + queued sections below the
+   sticky header. ``flex: 1`` so it claims all remaining vertical
+   space inside the modal; ``overflow-y: auto`` so a long queued
+   list scrolls INSIDE the card instead of pushing the close
+   button out of reach. ``padding`` lives here (not on the modal
+   shell) so the sticky header can hug the rounded edge with no
+   gap. ``min-height: 0`` is the load-bearing flex-child trick
+   that lets ``overflow-y: auto`` actually clip — without it the
+   flex item stretches to fit content and never scrolls. */
+.queue-modal__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0.85rem 1.1rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+@media (max-width: 480px) {
+  .queue-modal__body {
+    /* Tighten horizontal padding on narrow phones so the row
+       label has room for ``{project_name} 的{kind}`` without
+       wrapping. */
+    padding: 0.75rem 0.75rem 0.85rem;
+  }
 }
 
 .queue-modal__section {
