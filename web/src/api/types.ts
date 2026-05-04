@@ -815,14 +815,36 @@ export interface QueueStatusOut {
 }
 
 
-// v0.26.0 — batch asset delete. The endpoint returns per-row outcomes
-// so the FE can list which assets refused (e.g. still used by an
-// active draft) instead of hiding them behind a single "請重試"
-// blanket. ``reason`` is null when the row was deleted; otherwise a
-// terse human-readable string.
+// v0.27.1 — one active-draft reference returned alongside a delete
+// outcome. Lets the FE render "v3, v5 still using this — really
+// delete?" without making a separate fetch for draft state.
+export interface AffectedDraftOut {
+  draft_id: number;
+  version: number;
+  status: string;
+}
+
+// v0.26.0 / v0.27.1 — batch asset delete. The endpoint returns per-
+// row outcomes so the FE can list which assets refused (e.g. still
+// used by an active draft) instead of hiding them behind a single
+// "請重試" blanket. ``reason`` is null when the row was deleted;
+// otherwise a terse human-readable string.
+//
+// v0.27.1 fields:
+//   * ``affected_drafts`` — when non-empty, the row was either skipped
+//     (``deleted=false``) because the user must confirm a force-delete,
+//     or already force-deleted (``deleted=true``) and the list is
+//     echoed back so the FE can show which versions just got
+//     invalidated.
+//   * ``invalidated_versions`` — subset of the affected versions
+//     whose drafts were flipped to ``failed`` because the segment
+//     wipe left them with no segments. Always empty on
+//     ``deleted=false``.
 export interface AssetBatchDeleteResultItem {
   asset_id: number;
   deleted: boolean;
+  affected_drafts: AffectedDraftOut[];
+  invalidated_versions: number[];
   reason: string | null;
 }
 
@@ -832,6 +854,24 @@ export interface AssetBatchDeleteRequest {
 
 export interface AssetBatchDeleteOut {
   deleted_count: number;
+  // Total non-deleted rows. v0.27.1 splits this into:
+  //   * needs_force_count — rows with affected_drafts that the FE
+  //     can re-issue with ?force=true
+  //   * error_count — rows blocked for other reasons (not in this
+  //     project, not found, internal error)
   blocked_count: number;
+  needs_force_count: number;
+  error_count: number;
   results: AssetBatchDeleteResultItem[];
+}
+
+// v0.27.1 — single-asset delete now returns 200 with this body
+// instead of 204 No Content. ``deleted=false`` with non-empty
+// ``affected_drafts`` is the FE's signal to confirm the destructive
+// action and retry the same request with ``?force=true``.
+export interface AssetDeleteOut {
+  asset_id: number;
+  deleted: boolean;
+  affected_drafts: AffectedDraftOut[];
+  invalidated_versions: number[];
 }

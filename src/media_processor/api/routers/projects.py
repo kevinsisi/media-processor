@@ -35,6 +35,7 @@ from media_processor.api.schemas import (
     ScriptOut,
     ScriptUpsert,
     SecondarySubtitleSummaryOut,
+    AffectedDraftOut,
     AssetBatchDeleteOut,
     AssetBatchDeleteRequest,
     AssetBatchDeleteResultItem,
@@ -956,11 +957,20 @@ def _secondary_subtitle_summary_for(asset: Asset) -> SecondarySubtitleSummaryOut
 # 2 blocked because v3 is still using them." A blocking row inside
 # the batch doesn't fail the request — successful rows still
 # commit; the FE just lists the refused ones.
+#
+# v0.27.1 adds the ``?force=true`` query flag matching the single-
+# asset endpoint. With force=False (default), rows whose deletion
+# would invalidate an active draft come back with ``deleted=False``
+# and a populated ``affected_drafts`` list — the FE prompts the user
+# and re-issues the same body with ``?force=true``. With force=True,
+# the per-asset path wipes those drafts' segments and flips the
+# emptied drafts to ``failed`` before deleting the asset.
 @router.delete("/{project_id}/assets/batch", response_model=AssetBatchDeleteOut)
 async def batch_delete_project_assets(
     project_id: int,
     payload: AssetBatchDeleteRequest,
     session: SessionDep,
+    force: bool = False,
 ) -> AssetBatchDeleteOut:
     project = await session.get(Project, project_id)
     if project is None:
@@ -991,12 +1001,32 @@ async def batch_delete_project_assets(
                 )
             )
 
-    outcomes = await asset_mgmt.batch_delete_assets(session, sorted(valid_ids))
-    for asset_id, reason in outcomes.items():
+    outcomes = await asset_mgmt.batch_delete_assets(
+        session, sorted(valid_ids), force=force
+    )
+    for asset_id, result in outcomes.items():
+        if result.not_found:
+            reason = "not found"
+        elif result.error_message is not None:
+            reason = result.error_message
+        elif not result.deleted and result.affected_drafts:
+            versions = ", ".join(f"v{b.version}" for b in result.affected_drafts)
+            reason = f"still used by active draft(s): {versions}"
+        else:
+            reason = None
         results.append(
             AssetBatchDeleteResultItem(
                 asset_id=asset_id,
-                deleted=reason is None,
+                deleted=result.deleted,
+                affected_drafts=[
+                    AffectedDraftOut(
+                        draft_id=b.draft_id,
+                        version=b.version,
+                        status=b.status,
+                    )
+                    for b in result.affected_drafts
+                ],
+                invalidated_versions=list(result.invalidated_versions),
                 reason=reason,
             )
         )
@@ -1004,9 +1034,15 @@ async def batch_delete_project_assets(
     await session.commit()
 
     deleted = sum(1 for r in results if r.deleted)
+    needs_force = sum(
+        1 for r in results if not r.deleted and r.affected_drafts
+    )
+    blocked = len(results) - deleted
     return AssetBatchDeleteOut(
         deleted_count=deleted,
-        blocked_count=len(results) - deleted,
+        blocked_count=blocked,
+        needs_force_count=needs_force,
+        error_count=blocked - needs_force,
         results=results,
     )
 

@@ -10,6 +10,7 @@ import type {
   AnalyzeRequest,
   AnalyzeResponse,
   AssetBatchDeleteOut,
+  AssetDeleteOut,
   AssetDetail,
   AssetThumbnailsOut,
   BgmGenerationStatus,
@@ -183,29 +184,38 @@ export class ApiClient {
     );
   }
 
-  // v0.26.0 — single-asset deletion. Wipes the source file +
-  // thumbnails + tracking JSON + DB row. 409 when the asset is
-  // still used by an active draft (FE surfaces the message).
-  async deleteAsset(assetId: number): Promise<void> {
-    const url = `${this.baseUrl}/assets/${assetId}`;
-    const response = await this.fetchImpl(url, { method: "DELETE" });
-    if (!response.ok) {
-      const text = await response.text().catch(() => "");
-      throw new ApiError(response.status, url, text || response.statusText);
-    }
+  // v0.26.0 / v0.27.1 — single-asset deletion. Pre-0.27.1 returned
+  // 204 on success and 409 when an active draft still referenced
+  // the asset. v0.27.1 always returns a JSON body: ``deleted=false``
+  // with a non-empty ``affected_drafts`` list signals the caller to
+  // confirm with the user and retry with ``force=true``; ``deleted
+  // =true`` plus ``invalidated_versions`` echoes which draft
+  // versions were flipped to ``failed`` so the FE can show
+  // "v3 已被標為失敗".
+  deleteAsset(
+    assetId: number,
+    options: { force?: boolean } = {},
+  ): Promise<AssetDeleteOut> {
+    const qs = options.force ? "?force=true" : "";
+    return this.request<AssetDeleteOut>(`/assets/${assetId}${qs}`, {
+      method: "DELETE",
+    });
   }
 
-  // v0.26.0 — batch asset delete with per-row outcomes. The
-  // response distinguishes "deleted" vs "blocked because of an
-  // active draft" so the FE can surface a partial-success summary
-  // ("3 deleted, 1 blocked: v3 still uses it") instead of an
-  // all-or-nothing 409.
+  // v0.26.0 / v0.27.1 — batch asset delete with per-row outcomes.
+  // v0.27.1 threads ``force`` through to the endpoint; without it,
+  // rows whose deletion would invalidate an active draft come back
+  // with ``deleted=false`` + ``affected_drafts`` populated. The FE
+  // confirms with the user and re-issues the SAME body with
+  // ``force=true`` to actually delete.
   batchDeleteAssets(
     projectId: number,
     assetIds: number[],
+    options: { force?: boolean } = {},
   ): Promise<AssetBatchDeleteOut> {
+    const qs = options.force ? "?force=true" : "";
     return this.request<AssetBatchDeleteOut>(
-      `/projects/${projectId}/assets/batch`,
+      `/projects/${projectId}/assets/batch${qs}`,
       {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },

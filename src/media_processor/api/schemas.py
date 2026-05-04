@@ -124,9 +124,27 @@ class AssetBatchDeleteRequest(BaseModel):
     referenced by an active draft) doesn't block the rest. The
     endpoint returns a summary so the UI can list which ones
     refused.
+
+    v0.27.1: a row with ``deleted=False`` AND non-empty
+    ``affected_drafts`` is the FE's signal to confirm and retry the
+    batch with ``?force=true``. Pre-0.27.1 such rows came back with
+    a 409-style ``reason`` and the operator had to manually reject
+    each draft first.
     """
 
     asset_ids: list[int] = Field(..., min_length=1)
+
+
+class AffectedDraftOut(BaseModel):
+    """v0.27.1 — one active-draft reference to an asset.
+
+    Surfaced under ``affected_drafts`` on every delete-result shape
+    so the FE can render "v3, v5 still using this — really delete?"
+    """
+
+    draft_id: int
+    version: int
+    status: str
 
 
 class AssetBatchDeleteResultItem(BaseModel):
@@ -134,15 +152,47 @@ class AssetBatchDeleteResultItem(BaseModel):
 
     asset_id: int
     deleted: bool
+    # v0.27.1 — populated when active drafts referenced this asset.
+    # On force=False that means deletion was skipped; on force=True
+    # the same list is echoed back along with ``invalidated_versions``
+    # so the FE can show "v3 was marked failed".
+    affected_drafts: list[AffectedDraftOut] = Field(default_factory=list)
+    invalidated_versions: list[int] = Field(default_factory=list)
     reason: str | None = None  # populated when ``deleted=False``
 
 
 class AssetBatchDeleteOut(BaseModel):
-    """v0.26.0 — response for ``DELETE /projects/{id}/assets/batch``."""
+    """v0.26.0 — response for ``DELETE /projects/{id}/assets/batch``.
+
+    v0.27.1 splits ``blocked_count`` into:
+      * rows whose deletion was skipped because of active drafts
+        (``needs_force_count``) — the FE can prompt the user and
+        retry the same batch with ``?force=true``;
+      * rows that failed for other reasons (``error_count``) — these
+        are surfaced verbatim and not auto-retryable.
+    """
 
     deleted_count: int
-    blocked_count: int
+    blocked_count: int  # = needs_force_count + error_count, kept for back-compat
+    needs_force_count: int = 0
+    error_count: int = 0
     results: list[AssetBatchDeleteResultItem]
+
+
+class AssetDeleteOut(BaseModel):
+    """v0.27.1 — response for ``DELETE /assets/{id}``.
+
+    Pre-0.27.1 the endpoint returned 204 No Content on success and
+    409 with a plain string detail when an active draft blocked the
+    delete. We now always return 200 with this body so the FE can
+    distinguish "delete succeeded" from "needs the operator to
+    confirm with force=true" without parsing error strings.
+    """
+
+    asset_id: int
+    deleted: bool
+    affected_drafts: list[AffectedDraftOut] = Field(default_factory=list)
+    invalidated_versions: list[int] = Field(default_factory=list)
 
 
 class BgmFadeOutPatch(BaseModel):

@@ -15,8 +15,10 @@ from sqlalchemy.orm import selectinload
 from media_processor.api.config import settings
 from media_processor.api.deps import get_session
 from media_processor.api.schemas import (
+    AffectedDraftOut,
     AnalyzeRequest,
     AnalyzeResponse,
+    AssetDeleteOut,
     AssetDetail,
     AssetTagOut,
     AssetThumbnailsOut,
@@ -100,32 +102,52 @@ async def get_asset(
     return _serialise_asset(asset)
 
 
-# v0.26.0 — single-asset deletion. Wipes the on-disk source +
-# thumbnails + tracking JSON + DB row. Refuses with 409 when at
-# least one Draft in pending / processing / ready_for_review /
-# approved still references the asset; failed / rejected drafts
-# are cascade-deleted in the same transaction so the user doesn't
-# have to babysit them.
-@router.delete("/{asset_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_asset(asset_id: int, session: SessionDep):
-    try:
-        await asset_mgmt.delete_asset(session, asset_id)
-    except asset_mgmt.AssetNotFoundError as exc:
+# v0.26.0 / v0.27.1 — single-asset deletion. Wipes the on-disk
+# source + thumbnails + tracking JSON + DB row. v0.27.1 swaps the
+# 409 hard-block for a two-call confirm flow:
+#
+#   * ``DELETE /assets/{id}`` (force=False, default): if at least
+#     one Draft in pending / processing / ready_for_review / approved
+#     references the asset, return 200 with ``deleted=False`` and
+#     ``affected_drafts`` populated. The asset row + disk are NOT
+#     touched. The FE prompts the user with the affected versions
+#     and retries with ``?force=true``.
+#   * ``DELETE /assets/{id}?force=true``: wipe each affected draft's
+#     ``DraftSegment`` rows pointing at this asset; drafts that lose
+#     their last segment get ``status=failed`` + ``prompt_feedback
+#     = "素材已被刪除"`` so the operator sees why the version died.
+#     Then proceed with the normal disk + DB delete. Returns 200
+#     with ``deleted=true``, the same ``affected_drafts`` list, and
+#     ``invalidated_versions`` (subset of the affected versions
+#     whose drafts were just flipped to failed).
+#
+# Failed / rejected drafts that already reference the asset are
+# cascade-deleted in the same transaction either way — they have no
+# state worth preserving.
+@router.delete("/{asset_id}", response_model=AssetDeleteOut)
+async def delete_asset(
+    asset_id: int,
+    session: SessionDep,
+    force: bool = False,
+) -> AssetDeleteOut:
+    result = await asset_mgmt.delete_asset(session, asset_id, force=force)
+    if result.not_found:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="asset not found",
-        ) from exc
-    except asset_mgmt.AssetInUseError as exc:
-        versions = ", ".join(f"v{v}" for v in exc.blocking_draft_versions)
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                f"asset is still used by active draft(s) {versions}; "
-                "reject those drafts first or trigger a fresh render so the "
-                "old draft transitions out of the active set"
-            ),
-        ) from exc
+        )
     await session.commit()
+    return AssetDeleteOut(
+        asset_id=result.asset_id,
+        deleted=result.deleted,
+        affected_drafts=[
+            AffectedDraftOut(
+                draft_id=b.draft_id, version=b.version, status=b.status
+            )
+            for b in result.affected_drafts
+        ],
+        invalidated_versions=list(result.invalidated_versions),
+    )
 
 
 @router.get("/{asset_id}/thumbnails", response_model=AssetThumbnailsOut)

@@ -1059,10 +1059,21 @@ export default function ProjectAnalysis() {
     [selectedIds, polling, clearSelection],
   );
 
-  // v0.26.0 — bulk asset delete. Confirms first; the API enforces
-  // the active-draft block but we surface the per-row outcomes so
-  // the operator can see which ones refused (and why) without
-  // re-reading server logs.
+  // v0.26.0 / v0.27.1 — bulk asset delete. Two-phase flow:
+  //
+  //   1. First call with force=false. Backend deletes assets that
+  //      have no active drafts referencing them, and returns
+  //      ``deleted=false`` + ``affected_drafts`` for the rest.
+  //   2. If any rows came back as needs-force, surface a grouped
+  //      confirm listing every blocked row + the active draft
+  //      versions referencing it.
+  //   3. On confirm, re-issue the SAME id list with force=true.
+  //      Backend wipes their draft segments; drafts that lose every
+  //      segment flip to status=failed + prompt_feedback="素材已
+  //      被刪除". Asset is then deleted normally.
+  //
+  // The pre-0.27.1 path threw a 409 and made the operator manually
+  // reject each draft first — way too many clicks for a bulk-clean.
   const runBatchDelete = useCallback(async () => {
     if (selectedIds.size === 0 || validProjectId == null) return;
     if (
@@ -1076,15 +1087,57 @@ export default function ProjectAnalysis() {
     setTriggerError(null);
     const ids = Array.from(selectedIds);
     try {
-      const summary = await apiClient.batchDeleteAssets(validProjectId, ids);
-      if (summary.blocked_count > 0) {
-        const blockedLines = summary.results
-          .filter((r) => !r.deleted)
-          .map((r) => `素材 #${r.asset_id}：${r.reason ?? "未知原因"}`)
-          .join("\n");
-        setTriggerError(
-          `刪除完成 ${summary.deleted_count} 個；${summary.blocked_count} 個被拒：\n${blockedLines}`,
+      let summary = await apiClient.batchDeleteAssets(validProjectId, ids);
+      if (summary.needs_force_count > 0) {
+        const lines = summary.results
+          .filter((r) => !r.deleted && r.affected_drafts.length > 0)
+          .map((r) => {
+            const versions = r.affected_drafts
+              .map((d) => `v${d.version}`)
+              .join("、");
+            return `素材 #${r.asset_id} 被 ${versions} 使用中`;
+          });
+        const confirmed = window.confirm(
+          [
+            `${summary.needs_force_count} 個素材正被使用中：`,
+            ...lines,
+            "",
+            "刪除後上述版本將被標為「失敗（素材已被刪除）」。確定刪除？",
+          ].join("\n"),
         );
+        if (confirmed) {
+          summary = await apiClient.batchDeleteAssets(
+            validProjectId,
+            ids,
+            { force: true },
+          );
+        }
+      }
+      const errorLines = summary.results
+        .filter(
+          (r) => !r.deleted && r.affected_drafts.length === 0 && r.reason,
+        )
+        .map((r) => `素材 #${r.asset_id}：${r.reason}`);
+      const invalidatedLines = summary.results
+        .filter((r) => r.deleted && r.invalidated_versions.length > 0)
+        .map(
+          (r) =>
+            `素材 #${r.asset_id}：連帶將 ${r.invalidated_versions
+              .map((v) => `v${v}`)
+              .join("、")} 標為失敗`,
+        );
+      const messages: string[] = [];
+      if (summary.deleted_count > 0) {
+        messages.push(`刪除完成 ${summary.deleted_count} 個。`);
+      }
+      if (invalidatedLines.length > 0) {
+        messages.push(...invalidatedLines);
+      }
+      if (errorLines.length > 0) {
+        messages.push(`部分刪除失敗：`, ...errorLines);
+      }
+      if (messages.length > 0) {
+        setTriggerError(messages.join("\n"));
       }
     } catch (err) {
       setTriggerError(
@@ -1224,16 +1277,16 @@ export default function ProjectAnalysis() {
             >
               強制重跑（覆寫手改）
             </button>
-            {/* v0.26.0 — bulk delete. Server-side enforces the
-                active-draft block + cascade-cleans failed/rejected
-                drafts that reference the asset. The danger button
-                style is the affordance that this is destructive. */}
+            {/* v0.26.0 / v0.27.1 — bulk delete. v0.27.1 stops
+                hard-blocking on active drafts; instead a second
+                confirm appears listing which drafts will be
+                marked failed (素材已被刪除). */}
             <button
               type="button"
               className="cta cta--danger"
               onClick={() => void runBatchDelete()}
               disabled={selectedIds.size === 0 || batchRunning}
-              title="刪除所選素材（檔案 + 縮圖 + 追蹤資料）。已被啟用中的 draft 用到的素材會被拒絕。"
+              title="刪除所選素材（檔案 + 縮圖 + 追蹤資料）。被啟用中的 draft 引用時會出現二次確認，確定後該版本會被標為失敗。"
             >
               刪除所選（{selectedIds.size}）
             </button>

@@ -1,18 +1,33 @@
-"""v0.26.0 — single + batch asset deletion.
+"""v0.26.0 — single + batch asset deletion. v0.27.1 — force-delete.
 
-Deletes the on-disk artefacts (source mp4, generated thumbnails) AND
-the DB row. Refuses with ``AssetInUseError`` when at least one
-``Draft`` whose status is NOT in ``BLOCKING_DRAFT_STATUSES`` (i.e.
-the user hasn't yet rejected / failed it) still references the
-asset via ``DraftSegment.asset_id``. The user has to reject those
-drafts first or wait for them to fail; allowing the delete would
-break the cascade rule on ``DraftSegment.asset_id`` (FK
-``ondelete="RESTRICT"``).
+v0.26 refused to delete an asset whose ``DraftSegment.asset_id`` was
+still referenced by an active Draft (status in pending / processing /
+ready_for_review / approved). The user had to reject those drafts
+manually first, which made bulk cleanup tedious.
 
-Failed / rejected drafts are tolerated: their segment rows are
-cascade-deleted along with the draft row, freeing up the asset for
-the FK to release. The endpoint deletes those drafts first, then
-the asset.
+v0.27.1 flips this: by default the deletion still aborts when an
+active draft references the asset, but instead of raising
+``AssetInUseError`` we return a structured ``AssetDeleteResult`` with
+``deleted=False`` plus the list of ``affected_drafts`` so the FE can
+warn the user. When the caller passes ``force=True`` we DO delete:
+
+  * Wipe every ``DraftSegment`` row whose ``(draft_id, asset_id)``
+    pair points at this asset. This satisfies the
+    ``DraftSegment.asset_id ondelete=RESTRICT`` FK directly — no need
+    to delete the parent draft just to free the asset.
+  * For each affected draft, recount its remaining segments. If it
+    has zero segments left, flip its ``status`` to ``failed`` and
+    write ``prompt_feedback = "素材已被刪除"`` so the operator sees
+    why the version died next time they open ProjectEdit. We do NOT
+    delete the draft row itself in that case — the message would be
+    lost and the operator wouldn't know what happened.
+  * Failed / rejected drafts that already reference the asset are
+    cascade-deleted as before (the v0.26 path is unchanged for them
+    — they have no useful state to preserve). The ``_drop_dead_drafts``
+    query joins on ``DraftSegment.asset_id == asset_id``, which after
+    our segment wipe no longer matches the freshly-marked-failed
+    drafts; their rows survive.
+  * Disk + DB row cleanup proceeds as in v0.26.
 
 Single-asset deletion is the building block; the batch endpoint
 calls it per-asset so a partial-failure surfaces per-row in the
@@ -23,10 +38,11 @@ from __future__ import annotations
 
 import logging
 import shutil
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Sequence
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from media_processor.api.config import settings
@@ -43,8 +59,8 @@ from media_processor.services import thumbnails as thumbnails_svc
 logger = logging.getLogger(__name__)
 
 
-# Drafts in any of these statuses block asset deletion. The user is
-# either still working with them (pending / processing /
+# Drafts in any of these statuses block a non-force asset deletion.
+# The user is either still working with them (pending / processing /
 # ready_for_review / approved) or has otherwise opted to keep the
 # row active. ``failed`` and ``rejected`` are explicitly NOT in this
 # set — we cascade-delete those drafts (and their segments) inline
@@ -60,6 +76,63 @@ BLOCKING_DRAFT_STATUSES: frozenset[str] = frozenset(
 )
 
 
+# Sentinel string written to ``Draft.prompt_feedback`` when a force-
+# delete invalidates the draft (i.e. the asset wipe leaves the draft
+# with zero segments). Surfaced verbatim in the FE.
+DRAFT_INVALIDATED_REASON = "素材已被刪除"
+
+
+@dataclass(frozen=True)
+class BlockingDraft:
+    """One active-draft reference to an asset.
+
+    Returned in :class:`AssetDeleteResult.affected_drafts` so the FE
+    can render the version list in its confirm dialog.
+    """
+
+    draft_id: int
+    version: int
+    status: str
+
+
+@dataclass
+class AssetDeleteResult:
+    """Outcome of a single :func:`delete_asset` call.
+
+    ``deleted`` is the canonical success flag.
+
+    ``affected_drafts`` is non-empty in two scenarios:
+      * ``force=False`` and at least one active draft referenced the
+        asset → ``deleted=False``, asset row + disk untouched. The FE
+        prompts the user to confirm and retries with ``force=True``.
+      * ``force=True`` regardless of whether any blockers existed →
+        the same list, retained for the response so the FE knows
+        which draft versions just got invalidated.
+
+    ``invalidated_versions`` is the subset of affected-draft versions
+    whose segments were all wiped (the draft was flipped to ``failed``
+    with ``prompt_feedback = "素材已被刪除"``). Always empty when
+    ``force=False``.
+
+    ``not_found`` is set when the asset row didn't exist; ``deleted``
+    stays ``False`` and ``affected_drafts`` is empty. Surfaces a 404
+    on the single endpoint and a "not found" reason in batch.
+    """
+
+    asset_id: int
+    deleted: bool
+    affected_drafts: list[BlockingDraft] = field(default_factory=list)
+    invalidated_versions: list[int] = field(default_factory=list)
+    not_found: bool = False
+    # Populated only when an unexpected exception is caught during a
+    # batch delete. Single-asset deletion lets exceptions propagate;
+    # batch swallows them per-row so one bad row doesn't kill the rest.
+    error_message: str | None = None
+
+
+# Kept around for backwards-compat with anyone that still imports it
+# (no longer raised by the v0.27.1 paths). Tests + external callers
+# should switch to :class:`AssetDeleteResult`.
 class AssetDeleteError(RuntimeError):
     """Base for asset-deletion failures."""
 
@@ -69,11 +142,10 @@ class AssetNotFoundError(AssetDeleteError):
 
 
 class AssetInUseError(AssetDeleteError):
-    """An active draft still references this asset.
+    """Legacy v0.26 error — no longer raised by :func:`delete_asset`.
 
-    ``blocking_draft_versions`` is the list of ``Draft.version`` ints
-    the FE can render in the error message ("v3, v5 都還在用這支
-    素材；先在 ProjectEdit 裡刪掉它們").
+    Kept for import-compat. New callers should inspect the
+    :class:`AssetDeleteResult` return value instead.
     """
 
     def __init__(self, asset_id: int, blocking_draft_versions: list[int]):
@@ -85,20 +157,21 @@ class AssetInUseError(AssetDeleteError):
         )
 
 
-async def _blocking_draft_versions_for(
+async def _blocking_drafts_for(
     session: AsyncSession, asset_id: int
-) -> list[int]:
-    """Versions of drafts in a blocking status that reference this asset.
+) -> list[BlockingDraft]:
+    """Drafts in a blocking status that reference this asset.
 
-    We pull only ``Draft.version`` (and ``Draft.id`` to dedupe) rather
-    than full ``Draft`` rows. Selecting full rows + ``.distinct()``
-    fails on PostgreSQL because the Draft model has JSON columns and
-    ``json`` has no built-in equality operator — DISTINCT can't
-    deduplicate without one. Tuple-of-scalars side-steps the issue
-    and we only need the version int for the error message anyway.
+    We pull only ``Draft.id`` / ``version`` / ``status`` (scalar
+    tuple) rather than full ``Draft`` rows. Selecting full rows +
+    ``.distinct()`` fails on PostgreSQL because the Draft model has
+    JSON columns and ``json`` has no built-in equality operator —
+    DISTINCT can't deduplicate without one. Tuple-of-scalars side-
+    steps the issue and the response only needs the version int +
+    status string for the FE warning anyway.
     """
     stmt = (
-        select(Draft.id, Draft.version)
+        select(Draft.id, Draft.version, Draft.status)
         .join(DraftSegment, DraftSegment.draft_id == Draft.id)
         .where(
             DraftSegment.asset_id == asset_id,
@@ -107,14 +180,81 @@ async def _blocking_draft_versions_for(
         .distinct()
     )
     rows = (await session.execute(stmt)).all()
-    return sorted({int(r[1]) for r in rows})
+    seen: dict[int, BlockingDraft] = {}
+    for did, version, status_val in rows:
+        seen[int(did)] = BlockingDraft(
+            draft_id=int(did),
+            version=int(version),
+            status=str(status_val),
+        )
+    return sorted(seen.values(), key=lambda b: b.version)
+
+
+async def _force_invalidate_drafts(
+    session: AsyncSession,
+    asset_id: int,
+    blockers: list[BlockingDraft],
+) -> list[int]:
+    """Wipe DraftSegments of each blocking draft that reference this
+    asset, and flip drafts that lose all their segments to ``failed``
+    with ``prompt_feedback = DRAFT_INVALIDATED_REASON``.
+
+    Returns the sorted list of newly-invalidated draft versions so
+    the caller can echo it in :class:`AssetDeleteResult`.
+
+    The remaining segments (those pointing at OTHER assets) are left
+    alone — this is intentional. A half-wired draft is broken state
+    the operator chose by force-deleting; we keep the row so the
+    feedback message persists and the operator can hit re-render or
+    delete it explicitly.
+    """
+    invalidated: list[int] = []
+    for b in blockers:
+        await session.execute(
+            delete(DraftSegment).where(
+                DraftSegment.draft_id == b.draft_id,
+                DraftSegment.asset_id == asset_id,
+            )
+        )
+        # Flush so the count below sees the deletion.
+        await session.flush()
+
+        remaining = (
+            await session.execute(
+                select(func.count())
+                .select_from(DraftSegment)
+                .where(DraftSegment.draft_id == b.draft_id)
+            )
+        ).scalar_one()
+        if remaining == 0:
+            draft = await session.get(Draft, b.draft_id)
+            if draft is None:  # pragma: no cover — concurrent delete.
+                continue
+            draft.status = DraftStatus.FAILED.value
+            draft.prompt_feedback = DRAFT_INVALIDATED_REASON
+            invalidated.append(b.version)
+            logger.info(
+                "asset %d: draft v%d (id=%d) lost its last segment to force-delete; flipped to failed",
+                asset_id,
+                b.version,
+                b.draft_id,
+            )
+        else:
+            logger.info(
+                "asset %d: wiped its segments from draft v%d (id=%d); %d segments remain",
+                asset_id,
+                b.version,
+                b.draft_id,
+                int(remaining),
+            )
+    return sorted(invalidated)
 
 
 async def _drop_dead_drafts_referencing(
     session: AsyncSession, asset_id: int
 ) -> int:
-    """Cascade-delete every failed / rejected draft that uses this
-    asset, returning the count.
+    """Cascade-delete every failed / rejected draft that still uses
+    this asset, returning the count.
 
     The cascade is configured on ``Project.drafts`` (and on
     ``Draft.segments``), so ``await session.delete(draft)`` walks
@@ -126,6 +266,12 @@ async def _drop_dead_drafts_referencing(
     Two-step query: first collect distinct draft ids (cheap; no
     JSON-comparison issue), then re-fetch the full Draft rows by
     id so the ORM cascade fires on ``session.delete``.
+
+    NOTE: this query joins on ``DraftSegment.asset_id == asset_id``,
+    so drafts whose segments referencing this asset have already
+    been wiped (e.g. in :func:`_force_invalidate_drafts`) are
+    excluded — exactly what we want, because we just marked them
+    failed and don't want to delete the row.
     """
     id_rows = (
         await session.execute(
@@ -189,29 +335,60 @@ def _delete_on_disk(asset: Asset) -> None:
             )
 
 
-async def delete_asset(session: AsyncSession, asset_id: int) -> None:
+async def delete_asset(
+    session: AsyncSession,
+    asset_id: int,
+    *,
+    force: bool = False,
+) -> AssetDeleteResult:
     """Delete one asset.
 
-    Raises:
-      * ``AssetNotFoundError`` when no row exists.
-      * ``AssetInUseError`` when at least one Draft in a blocking
-        status references the asset.
+    Returns an :class:`AssetDeleteResult`. The caller commits — this
+    function flushes / deletes within ``session`` but doesn't
+    ``commit``, so a Redis / disk error elsewhere in the request can
+    roll the transaction back cleanly.
 
-    The DB transaction is the caller's — this function flushes /
-    deletes within ``session`` but doesn't ``commit``. The caller
-    commits after either the single-asset or the batch finishes so a
-    Redis / disk error rolls the row deletion back cleanly.
+    Behaviour matrix:
+
+    * Asset row missing → ``deleted=False, not_found=True``.
+    * No active drafts reference the asset → delete it (asset row +
+      disk + AssetTranscript / ScriptCoverage + cascade-delete
+      failed / rejected drafts that referenced it). Returns
+      ``deleted=True`` with empty ``affected_drafts``.
+    * Active drafts reference and ``force=False`` → ``deleted=False``
+      with ``affected_drafts`` populated. Asset is NOT touched.
+    * Active drafts reference and ``force=True`` → wipe their
+      segments referencing this asset; drafts that lose their last
+      segment flip to ``failed`` with ``prompt_feedback`` and stay;
+      then proceed with the normal delete. Returns ``deleted=True``
+      with ``affected_drafts`` + ``invalidated_versions`` populated.
     """
     asset = await session.get(Asset, asset_id)
     if asset is None:
-        raise AssetNotFoundError(f"asset {asset_id} not found")
+        return AssetDeleteResult(
+            asset_id=asset_id, deleted=False, not_found=True
+        )
 
-    blocking_versions = await _blocking_draft_versions_for(session, asset_id)
-    if blocking_versions:
-        raise AssetInUseError(asset_id, blocking_versions)
+    blockers = await _blocking_drafts_for(session, asset_id)
 
-    # Cascade-delete failed / rejected drafts so the
-    # DraftSegment.asset_id RESTRICT FK doesn't block the asset row.
+    if blockers and not force:
+        return AssetDeleteResult(
+            asset_id=asset_id,
+            deleted=False,
+            affected_drafts=blockers,
+        )
+
+    invalidated_versions: list[int] = []
+    if blockers:  # force=True path
+        invalidated_versions = await _force_invalidate_drafts(
+            session, asset_id, blockers
+        )
+
+    # Cascade-delete failed / rejected drafts that still reference
+    # this asset (i.e. whose DraftSegment.asset_id row points at it).
+    # After our force-invalidate pass above the just-failed drafts
+    # have no such segments anymore, so they're correctly excluded
+    # from this cleanup and survive with their feedback message.
     dropped = await _drop_dead_drafts_referencing(session, asset_id)
     if dropped:
         logger.info(
@@ -237,43 +414,53 @@ async def delete_asset(session: AsyncSession, asset_id: int) -> None:
 
     await session.delete(asset)
 
+    return AssetDeleteResult(
+        asset_id=asset_id,
+        deleted=True,
+        affected_drafts=blockers,
+        invalidated_versions=invalidated_versions,
+    )
+
 
 async def batch_delete_assets(
     session: AsyncSession,
     asset_ids: Sequence[int],
-) -> dict[int, str | None]:
+    *,
+    force: bool = False,
+) -> dict[int, AssetDeleteResult]:
     """Run :func:`delete_asset` over each id; collect per-row results.
 
-    Returns a ``{asset_id: error_message_or_None}`` map. ``None``
-    means the asset was deleted successfully; a string is the human-
-    readable reason it stayed.
+    Returns a ``{asset_id: AssetDeleteResult}`` map. The caller is
+    responsible for ``await session.commit()`` after inspecting the
+    result — partial failures still commit because each successful
+    delete should land regardless of the others.
 
-    The caller is responsible for ``await session.commit()`` after
-    inspecting the result — partial failures still commit because
-    each successful delete should land regardless of the others.
+    The ``force`` flag is threaded through to every per-asset call,
+    so a batch with ``force=False`` returns "blocked" rows the FE
+    can confirm + retry with ``force=True``.
     """
-    out: dict[int, str | None] = {}
+    out: dict[int, AssetDeleteResult] = {}
     for asset_id in asset_ids:
         try:
-            await delete_asset(session, asset_id)
-        except AssetNotFoundError:
-            out[asset_id] = "not found"
-        except AssetInUseError as exc:
-            versions = ", ".join(f"v{v}" for v in exc.blocking_draft_versions)
-            out[asset_id] = f"still used by active draft(s): {versions}"
+            out[asset_id] = await delete_asset(session, asset_id, force=force)
         except Exception as exc:  # noqa: BLE001 — surface to the caller.
             logger.exception("asset %d: unexpected delete failure", asset_id)
-            out[asset_id] = f"internal error: {type(exc).__name__}"
-        else:
-            out[asset_id] = None
+            out[asset_id] = AssetDeleteResult(
+                asset_id=asset_id,
+                deleted=False,
+                error_message=f"internal error: {type(exc).__name__}",
+            )
     return out
 
 
 __all__ = [
     "BLOCKING_DRAFT_STATUSES",
+    "DRAFT_INVALIDATED_REASON",
     "AssetDeleteError",
+    "AssetDeleteResult",
     "AssetInUseError",
     "AssetNotFoundError",
+    "BlockingDraft",
     "batch_delete_assets",
     "delete_asset",
 ]
