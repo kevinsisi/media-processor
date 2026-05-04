@@ -33,6 +33,7 @@ import type {
   ProjectCreate,
   ProjectDetail,
   ProjectSummary,
+  QueueStatusOut,
   ReviewCreate,
   ReviewOut,
   ScriptCoverageOut,
@@ -179,6 +180,28 @@ export class ApiClient {
         body: JSON.stringify({ fade_out_sec: fadeOutSec }),
       },
     );
+  }
+
+  // v0.25.0 — RQ queue inspector. Returns the currently-running job
+  // (at most one — single worker process) and the ordered queued
+  // list across analysis / editing / bgm queues. The FE polls every
+  // few seconds while a render is in flight.
+  getQueueStatus(): Promise<QueueStatusOut> {
+    return this.request<QueueStatusOut>("/queue/status", { method: "GET" });
+  }
+
+  // v0.25.0 — drop a queued job. 409s when the job is already
+  // running (use POST /drafts/{id}/cancel for live render kills).
+  // Uses the raw fetch path because the response is 204 No Content
+  // and the json-deserialising request helper would throw on the
+  // empty body.
+  async cancelQueuedJob(jobId: string): Promise<void> {
+    const url = `${this.baseUrl}/queue/jobs/${encodeURIComponent(jobId)}`;
+    const response = await this.fetchImpl(url, { method: "DELETE" });
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      throw new ApiError(response.status, url, text || response.statusText);
+    }
   }
 
   // v0.21 — class summary across this project's tracking_json blobs.

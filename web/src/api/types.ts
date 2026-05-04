@@ -768,3 +768,38 @@ export interface SyncFromManagerOut {
   skipped: number;
   stored_count: number;
 }
+
+// v0.25.0 — RQ queue inspector. The API returns ``running`` (at most
+// one item — single-worker setup) and the ordered queued list across
+// all three queues (analysis / editing / bgm). The position field
+// matches the worker's dispatch order so "你排第 N 位" is honest.
+export type QueueName = "analysis" | "editing" | "bgm";
+export type QueueJobState = "running" | "queued";
+
+export interface QueueJobItem {
+  job_id: string;
+  queue: QueueName;
+  // Operator-facing kind label. The full func_name is mapped server-side:
+  // analyze / translate / render / export / bgm / unknown.
+  kind: string;
+  state: QueueJobState;
+  // 0-indexed position in the queued list. ``null`` for the running item.
+  position: number | null;
+  enqueued_at: string | null;
+  started_at: string | null;
+  elapsed_s: number | null;
+  // Best-effort entity context. Resolved server-side — asset-bound
+  // jobs (analyze / translate) and draft-bound jobs (export) get
+  // their project_id backfilled from the DB so the FE can render
+  // "X 的 Y" without an extra round-trip.
+  project_id: number | null;
+  project_name: string | null;
+  asset_id: number | null;
+  draft_id: number | null;
+}
+
+export interface QueueStatusOut {
+  running: QueueJobItem | null;
+  queued: QueueJobItem[];
+}
+

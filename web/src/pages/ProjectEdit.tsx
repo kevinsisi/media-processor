@@ -6,6 +6,7 @@ import BgmSourcePicker from "../components/BgmSourcePicker";
 import type { BgmSource } from "../components/BgmSourcePicker";
 import DraggableTimeline from "../components/DraggableTimeline";
 import ExportSheet from "../components/ExportSheet";
+import QueueStatusModal from "../components/QueueStatusModal";
 import SubtitleEditor from "../components/SubtitleEditor";
 import SubjectClassPicker from "../components/SubjectClassPicker";
 import SubtitleStyleEditor from "../components/SubtitleStyleEditor";
@@ -806,6 +807,10 @@ export default function ProjectEdit() {
   const [triggerError, setTriggerError] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState<boolean>(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
+  // v0.25.0 — queue inspector modal. Opened from the "排隊中" card's
+  // "查看排隊" button so the operator can see what's blocking and
+  // (optionally) drop their own pending job.
+  const [queueModalOpen, setQueueModalOpen] = useState<boolean>(false);
   const [durationSec, setDurationSec] = useState<number>(DEFAULT_DURATION_S);
   // v0.14.3 — digital stabilization toggle. Default on; user opts out
   // for tripod / gimbal projects to halve render time.
@@ -1299,6 +1304,15 @@ export default function ProjectEdit() {
           <p className="edit-card__body">
             已建立剪輯任務，正在等候 worker 取件。畫面會在 worker 開始處理後自動更新。
           </p>
+          <div className="edit-card__actions">
+            <button
+              type="button"
+              className="cta cta--secondary"
+              onClick={() => setQueueModalOpen(true)}
+            >
+              查看排隊
+            </button>
+          </div>
           <ProgressTracker steps={null} />
         </section>
       )}
@@ -1518,6 +1532,16 @@ export default function ProjectEdit() {
       )}
 
       {selectedDraftId !== null && <DraftComments draftId={selectedDraftId} />}
+
+      {/* v0.25.0 — queue inspector. Mounted at page level so the
+          "排隊中" card's "查看排隊" button can pop it without nested
+          DOM constraints. ``highlightDraftId`` so the user's own
+          job lights up amber in the queue list. */}
+      <QueueStatusModal
+        open={queueModalOpen}
+        onClose={() => setQueueModalOpen(false)}
+        highlightDraftId={selectedDraftId}
+      />
     </main>
   );
 }

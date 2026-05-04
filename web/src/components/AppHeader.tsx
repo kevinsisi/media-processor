@@ -1,4 +1,5 @@
 import { Link, NavLink } from "react-router-dom";
+import QueueStatusBadge from "./QueueStatusBadge";
 import { APP_VERSION } from "../version";
 import "./AppHeader.css";
 
@@ -23,6 +24,10 @@ export default function AppHeader() {
           <NavLink to="/health" className="nav-link nav-link--quiet">
             系統狀態
           </NavLink>
+          {/* v0.25.0 — RQ queue inspector. Polls every 5 s and pops
+              <QueueStatusModal> on click so any page can see what
+              the worker is doing without leaving its current view. */}
+          <QueueStatusBadge />
           <span className="app-header__version" title={`build version v${APP_VERSION}`}>
             v{APP_VERSION}
           </span>

@@ -1,0 +1,72 @@
+/* v0.25.0 — header chip showing queue depth. Three states: idle
+   (quiet), queued (amber), running (green pulse). */
+
+.queue-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+  background: transparent;
+  font-variant-numeric: tabular-nums;
+  transition: background 120ms ease;
+}
+
+.queue-badge--idle {
+  border-color: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.queue-badge--queued {
+  border-color: rgba(255, 200, 100, 0.45);
+  color: rgba(255, 215, 130, 0.95);
+  background: rgba(255, 200, 100, 0.08);
+}
+
+.queue-badge--running {
+  border-color: rgba(120, 200, 130, 0.45);
+  color: rgba(180, 240, 190, 0.95);
+  background: rgba(120, 200, 130, 0.1);
+}
+
+.queue-badge:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+.queue-badge--queued:hover {
+  background: rgba(255, 200, 100, 0.16);
+}
+.queue-badge--running:hover {
+  background: rgba(120, 200, 130, 0.18);
+}
+
+.queue-badge__pulse {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: rgba(120, 200, 130, 0.95);
+  box-shadow: 0 0 0 0 rgba(120, 200, 130, 0.6);
+  animation: queue-badge-pulse 1.6s ease-out infinite;
+}
+
+@keyframes queue-badge-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(120, 200, 130, 0.7);
+  }
+  100% {
+    box-shadow: 0 0 0 6px rgba(120, 200, 130, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .queue-badge__pulse {
+    animation: none;
+  }
+}
+
+.queue-badge__label {
+  white-space: nowrap;
+}
