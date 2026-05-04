@@ -1,5 +1,18 @@
 /* v0.25.0 — RQ queue inspector modal. Centred dialog over a
-   semi-opaque backdrop, capped at a comfortable mobile-plus width. */
+   semi-opaque backdrop, capped at a comfortable mobile-plus width.
+   v0.25.1 — viewport-overflow fixes:
+     * ``dvh`` (dynamic viewport height) instead of ``vh`` so the
+       iOS Safari URL bar hide/show doesn't push the modal past the
+       visible area.
+     * ``env(safe-area-inset-*)`` padding on the backdrop so the
+       modal stays clear of the iPhone notch / home indicator.
+     * Sticky header so the close button + title stay visible while
+       the operator scrolls a long queued list (previously the
+       whole modal scrolled and the close button drifted out of
+       reach on a 20-job queue).
+     * Phone-narrow breakpoint goes full-bleed: a tall queue on a
+       small phone screen needs every pixel of vertical space and
+       the rounded-corner card otherwise wastes 30 px of margin. */
 
 .queue-modal__backdrop {
   position: fixed;
@@ -9,7 +22,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 1rem;
+  padding: max(0.75rem, env(safe-area-inset-top)) max(0.75rem, env(safe-area-inset-right))
+    max(0.75rem, env(safe-area-inset-bottom)) max(0.75rem, env(safe-area-inset-left));
 }
 
 .queue-modal {
@@ -18,19 +32,44 @@
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 10px;
   width: min(560px, 100%);
-  max-height: 85vh;
-  overflow-y: auto;
+  /* Cap at ~the visible viewport (dvh re-measures when the iOS
+     Safari URL bar collapses). The backdrop's safe-area padding
+     already trims the absolute viewport, so 100% of the remaining
+     space is the right answer here — anything smaller wastes
+     vertical real estate that a long queue actually needs. */
+  max-height: 100%;
+  overflow: hidden;
   box-shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
-  padding: 1rem 1.1rem;
   display: flex;
   flex-direction: column;
-  gap: 0.85rem;
+  /* Padding lives on the inner ``__body`` so the sticky header can
+     hug the modal edge without a gap between it and the rounded
+     border. */
+  padding: 0;
+}
+
+@media (max-width: 480px) {
+  .queue-modal__backdrop {
+    /* Burn the 0.75rem cushion on small phones — every pixel of
+       vertical space matters for a 10+ job queue. */
+    padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom) 0;
+  }
+  .queue-modal {
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+    width: 100%;
+  }
 }
 
 .queue-modal__head {
   display: flex;
   align-items: center;
   gap: 0.6rem;
+  padding: 0.85rem 1.1rem 0.6rem;
+  background: rgba(20, 22, 28, 0.98);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  flex-shrink: 0;
 }
 
 .queue-modal__title {

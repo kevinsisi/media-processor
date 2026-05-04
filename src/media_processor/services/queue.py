@@ -208,6 +208,57 @@ def enqueue_bgm_generation(job_id: int) -> str:
     return job.id
 
 
+def has_draft_render_job(draft_id: int) -> bool:
+    """Return True iff some RQ job tied to ``draft_id`` is still queued
+    or running on the editing queue.
+
+    v0.25.1 — used by ``GET /drafts/{id}`` to detect orphan rows: if
+    a Draft is still flagged ``pending`` / ``processing`` in the DB
+    but no matching RQ job exists, the work-horse died (timeout,
+    crash, manual ``rq purge``, etc.) and the FE will poll forever
+    waiting on a ghost. The reader marks the row failed on the next
+    GET so the operator gets a real "請重新提交" prompt.
+
+    Mirrors the queue + registry scan from ``cancel_draft_render`` —
+    same correctness guarantee (we look in BOTH places because a job
+    might be queued OR running). Returns False on any Redis error so
+    the caller fails open (won't mark a draft failed just because
+    Redis hiccuped).
+    """
+    try:
+        redis = _redis()
+    except Exception:  # noqa: BLE001 — Redis unreachable; fail open.
+        logger.warning("has_draft_render_job: Redis unreachable; assuming job exists")
+        return True
+
+    try:
+        queue = Queue(EDITING_QUEUE, connection=redis)
+        for job_id in queue.get_job_ids():
+            try:
+                job = Job.fetch(job_id, connection=redis)
+            except NoSuchJobError:
+                continue
+            if job.kwargs.get("draft_id") == draft_id:
+                return True
+
+        registry = StartedJobRegistry(EDITING_QUEUE, connection=redis)
+        for job_id in registry.get_job_ids():
+            try:
+                job = Job.fetch(job_id, connection=redis)
+            except NoSuchJobError:
+                continue
+            if job.kwargs.get("draft_id") == draft_id:
+                return True
+    except Exception:  # noqa: BLE001 — same fail-open as above.
+        logger.warning(
+            "has_draft_render_job(draft_id=%d) Redis scan failed; assuming job exists",
+            draft_id,
+        )
+        return True
+
+    return False
+
+
 def cancel_draft_render(draft_id: int) -> bool:
     """Find the editing job rendering ``draft_id`` and cancel/stop it.
 

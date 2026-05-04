@@ -89,6 +89,21 @@ class Draft(Base):
     # Shape: ``{"transitions": bool, "stabilize": bool, "subtitles": bool,
     # "auto_reframe": bool}`` — extra keys are ignored.
     render_flags_json: Mapped[Any] = mapped_column(JSON, nullable=True)
+    # v0.25.1 — orphan watchdog auto-retry counter. The watchdog
+    # (``api.watchdog``) sweeps every 60 s for ``status in
+    # ('pending', 'processing')`` rows whose RQ job has disappeared
+    # (worker crash / timeout / manual purge) and re-enqueues the
+    # render, incrementing this counter each attempt. Three strikes
+    # and the row is flipped to ``failed`` permanently. Reset to 0
+    # whenever the user explicitly triggers a fresh render so an
+    # unrelated future failure gets the full retry budget. Alembic
+    # 0023; legacy rows default to 0 via the server-side default.
+    render_retry_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

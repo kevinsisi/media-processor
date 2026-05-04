@@ -56,6 +56,7 @@ from media_processor.services.queue import (
     cancel_draft_render,
     enqueue_draft_export,
     enqueue_project_edit,
+    has_draft_render_job,
 )
 
 router = APIRouter(prefix="/drafts", tags=["drafts"])
@@ -259,6 +260,30 @@ async def get_draft(
     draft = (await session.execute(stmt)).scalar_one_or_none()
     if draft is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="draft not found")
+
+    # v0.25.1 — orphan detection (read-time fast path). The watchdog
+    # in ``api.watchdog`` is the canonical owner of orphan recovery
+    # — it sweeps every 60 s, re-enqueues up to 3 times, and only
+    # then gives up. Read-time we don't ATTEMPT recovery (don't want
+    # to race the watchdog), but we DO surface the terminal failure
+    # state immediately when the watchdog has exhausted its budget,
+    # so the FE doesn't have to wait another 60 s for the next
+    # watchdog tick. ``has_draft_render_job`` fails open on Redis
+    # errors so a transient blip can't invent a phantom failure.
+    if draft.status in (DraftStatus.PENDING.value, DraftStatus.PROCESSING.value):
+        if (
+            (draft.render_retry_count or 0) >= 3
+            and not has_draft_render_job(draft.id)
+        ):
+            draft.status = DraftStatus.FAILED.value
+            if not draft.prompt_feedback:
+                draft.prompt_feedback = (
+                    "watchdog: retries exhausted — render job kept disappearing "
+                    "from the queue across multiple auto-resubmits"
+                )
+            await session.commit()
+            await session.refresh(draft, attribute_names=["segments"])
+
     return serialise_draft_detail(draft)
 
 
@@ -565,6 +590,10 @@ async def reorder_draft_segments(
     draft.status = DraftStatus.PENDING.value
     draft.progress_steps_json = {}
     draft.prompt_feedback = None
+    # v0.25.1 — explicit user re-trigger resets the watchdog retry
+    # counter so an unrelated future failure gets the full
+    # three-strike auto-resubmit budget.
+    draft.render_retry_count = 0
     flags = _draft_render_flags(draft, payload.render_flags)
     # v0.21.3 — backfill the resolved flags onto the Draft so subsequent
     # re-renders (skip-plan or otherwise) stay consistent without the
@@ -950,6 +979,8 @@ async def re_render_draft(
     draft.status = DraftStatus.PENDING.value
     draft.progress_steps_json = {}
     draft.prompt_feedback = None
+    # v0.25.1 — explicit re-render resets the watchdog retry budget.
+    draft.render_retry_count = 0
     override = payload.render_flags if payload is not None else None
     flags = _draft_render_flags(draft, override)
     draft.render_flags_json = flags
@@ -997,6 +1028,8 @@ async def rebuild_subtitles(
     draft.status = DraftStatus.PENDING.value
     draft.progress_steps_json = {}
     draft.prompt_feedback = None
+    # v0.25.1 — explicit re-render resets the watchdog retry budget.
+    draft.render_retry_count = 0
     override = payload.render_flags if payload is not None else None
     flags = _draft_render_flags(draft, override)
     draft.render_flags_json = flags

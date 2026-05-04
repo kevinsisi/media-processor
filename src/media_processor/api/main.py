@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
+import logging
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -24,6 +27,9 @@ from media_processor.api.routers import (
     watermark_presets,
 )
 from media_processor.api.routers import settings as settings_router
+from media_processor.api.watchdog import watchdog_loop
+
+logger = logging.getLogger(__name__)
 
 # Cache thumbnail files for 1 day; paths are stable per (asset_id, frame_index)
 # so the browser can hold onto them aggressively.
@@ -48,9 +54,30 @@ class StaticCacheMiddleware(BaseHTTPMiddleware):
         return response
 
 
+@contextlib.asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """v0.25.1 — runs the orphan-watchdog loop alongside the API.
+
+    Spawns a background asyncio task at startup; the task sweeps
+    in-flight Drafts every ``WATCHDOG_INTERVAL_S`` seconds and
+    auto-resubmits any whose RQ job has disappeared. Cancelled
+    cleanly on shutdown; the in-flight sweep gets a moment to
+    finish (CancelledError bubbles out of ``watchdog_loop`` after
+    the current ``asyncio.sleep`` returns).
+    """
+    task = asyncio.create_task(watchdog_loop(), name="orphan-watchdog")
+    try:
+        yield
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await task
+
+
 app = FastAPI(
     title="media-processor API",
-    version="0.25.0",
+    version="0.25.1",
+    lifespan=lifespan,
 )
 
 app.include_router(health.router)
