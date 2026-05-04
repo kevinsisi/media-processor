@@ -42,7 +42,7 @@ def test_cut_segments_writes_one_file_per_segment(tmp_path: Path) -> None:
         ),
     )
     intermediate_dir = tmp_path / "out"
-    paths = video_renderer.cut_segments(
+    paths, reframed_flags = video_renderer.cut_segments(
         plan,
         asset_paths={1: src},
         intermediate_dir=intermediate_dir,
@@ -51,6 +51,9 @@ def test_cut_segments_writes_one_file_per_segment(tmp_path: Path) -> None:
     assert [p.name for p in paths] == ["seg_0000.mp4", "seg_0001.mp4"]
     for p in paths:
         assert p.is_file()
+    # No tracking inputs were supplied → every segment uses the static
+    # aspect crop, so the reframed-flag list is all False.
+    assert reframed_flags == [False, False]
 
 
 def test_cut_segments_missing_source_raises(tmp_path: Path) -> None:
