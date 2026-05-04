@@ -388,8 +388,16 @@ def _cut_segment(
     tracking_object_index: int | None = None,
     custom_roi: dict[str, Any] | None = None,
     point_track: dict[str, Any] | None = None,
-) -> None:
+) -> bool:
     """Cut + scale-and-crop one segment to a uniform intermediate mp4.
+
+    Returns ``True`` when a dynamic ``crop@reframe`` chain was applied
+    (i.e. the segment is now subject-centred via point/custom/YOLO
+    tracking), ``False`` when the static aspect crop was used. The
+    caller uses this signal to decide whether to also apply vidstab —
+    a dynamic-cropped segment is already subject-stabilised, so a
+    second vidstab pass would just translate the (now fixed) subject
+    back off-centre (v0.23.4 fix).
 
     Phase 8.1: when the cut's ``dominant_emotion`` is in
     ``ZOOMPAN_EMOTIONS`` we tack a ``zoompan`` filter onto the chain so
@@ -489,6 +497,7 @@ def _cut_segment(
         str(out_path),
     ]
     _run(cmd, timeout_s=PER_SEGMENT_TIMEOUT_S, stage=f"cut(seg={cut.order})")
+    return crop_path is not None
 
 
 def cut_segments(
@@ -502,8 +511,17 @@ def cut_segments(
     tracking_target_by_asset: dict[int, int | None] | None = None,
     custom_roi_by_asset: dict[int, dict[str, Any]] | None = None,
     point_track_by_asset: dict[int, dict[str, Any]] | None = None,
-) -> list[Path]:
-    """Cut every segment in the plan; return the intermediate paths in order.
+) -> tuple[list[Path], list[bool]]:
+    """Cut every segment in the plan; return ``(paths, reframed_flags)``.
+
+    ``reframed_flags[i]`` is ``True`` when segment i was rendered with a
+    dynamic ``sendcmd → crop@reframe`` chain (point / custom_roi / YOLO
+    tracking) and ``False`` when it fell through to the static aspect
+    crop. Callers thread this into ``stabilize_segments`` so a segment
+    that's already subject-stabilised by the dynamic crop doesn't get
+    a second vidstab pass — vidstab on top of a subject-centred frame
+    re-introduces the very translation that the dynamic crop was
+    cancelling out (v0.23.4 fix).
 
     ``tracking_by_asset`` (when supplied) maps ``asset_id`` to its
     ``Asset.tracking_json`` dict; segments backed by an asset present in
@@ -529,6 +547,7 @@ def cut_segments(
     if has_any_reframe:
         sendcmd_dir.mkdir(parents=True, exist_ok=True)
     out_paths: list[Path] = []
+    reframed_flags: list[bool] = []
     total = len(plan.segments)
     for cut in plan.segments:
         src = asset_paths.get(cut.asset_id)
@@ -545,7 +564,7 @@ def cut_segments(
             track = None
             custom_roi = None
             point_track = None
-        _cut_segment(
+        reframed = _cut_segment(
             Path(src),
             cut,
             out,
@@ -557,9 +576,10 @@ def cut_segments(
             point_track=point_track if target_idx == -4 else None,
         )
         out_paths.append(out)
+        reframed_flags.append(bool(reframed))
         if on_progress is not None:
             on_progress(cut.order + 1, total)
-    return out_paths
+    return out_paths, reframed_flags
 
 
 # ---------- stage 1.5: digital stabilization (optional) ----------
@@ -644,6 +664,7 @@ def stabilize_segments(
     intermediate_dir: Path,
     *,
     on_progress: Callable[[int, int], None] | None = None,
+    skip_indexes: set[int] | None = None,
 ) -> list[Path]:
     """Run two-pass vidstab over each per-segment intermediate.
 
@@ -651,14 +672,27 @@ def stabilize_segments(
     version to ``seg_NNNN.stab.mp4`` and returning the new path list.
     The originals stay on disk until ``cleanup_intermediates`` runs so
     a stabilize bug doesn't lose the un-stabilised render.
+
+    ``skip_indexes`` (v0.23.4) flags positions that already came out of
+    ``cut_segments`` with a dynamic ``crop@reframe`` chain applied. On
+    those segments the subject is already locked to the output centre,
+    so a second vidstab pass would compute a translation off the
+    background motion (which the dynamic crop CREATED by holding the
+    subject still while the camera panned) and undo the centring.
+    Skipped segments are returned at their pre-stabilisation path so
+    the concat list stays the same length and order.
     """
     _require_ffmpeg()
+    skip = skip_indexes or set()
     out: list[Path] = []
     total = len(intermediate_paths)
     for i, src in enumerate(intermediate_paths):
-        stab_dst = intermediate_dir / f"{src.stem}.stab.mp4"
-        _stabilize_segment(src, stab_dst, intermediate_dir)
-        out.append(stab_dst)
+        if i in skip:
+            out.append(src)
+        else:
+            stab_dst = intermediate_dir / f"{src.stem}.stab.mp4"
+            _stabilize_segment(src, stab_dst, intermediate_dir)
+            out.append(stab_dst)
         if on_progress is not None:
             on_progress(i + 1, total)
     return out
@@ -1124,7 +1158,7 @@ def render(
             on_progress("cut", done, total)
 
     # Stage 1.
-    intermediates = cut_segments(
+    intermediates, reframed_flags = cut_segments(
         plan,
         asset_paths,
         intermediate_dir,
@@ -1140,6 +1174,13 @@ def render(
     # intermediate with a stabilised version before concat. The two-pass
     # vidstab is the slow part of the pipeline so we surface it as its
     # own progress bucket.
+    #
+    # v0.23.4 — segments that already came out of cut_segments with a
+    # dynamic ``crop@reframe`` chain are subject-stabilised by design;
+    # running vidstab on top of one would compute a translation off the
+    # background motion (the dynamic crop INTRODUCES that motion by
+    # holding the subject still while the camera pans) and would push
+    # the subject right back off-centre. Skip those positions.
     if stabilize:
         def _stab_progress(done: int, total: int) -> None:
             if on_progress is not None:
@@ -1149,6 +1190,7 @@ def render(
             intermediates,
             intermediate_dir,
             on_progress=_stab_progress,
+            skip_indexes={i for i, r in enumerate(reframed_flags) if r},
         )
 
     # Stage 2 — concat into the final output path. If we're going to burn
