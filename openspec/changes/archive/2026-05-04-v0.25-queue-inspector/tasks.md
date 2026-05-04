@@ -34,3 +34,30 @@
 - [x] 4.4 `CLAUDE.md` — current-version line; new `api/routers/queue.py` pointer in the architecture-pointers section.
 - [x] 4.5 Version bumped to 0.25.0 in `pyproject.toml` + `src/media_processor/api/main.py` + `web/package.json`.
 - [x] 4.6 Branched as `claude/v0.25.0-queue-inspector`, merged --no-ff into `main`, pushed; docker compose build api web + up -d on the dispatch host; `/health` smoke-tested at 0.25.0; `/queue/status` smoke-tested with idle + stacked + post-cancel states. Branch pruned local + remote after merge.
+
+## 5. Orphan-Draft watchdog (v0.25.1 follow-up)
+
+- [x] 5.1 `services.queue.has_draft_render_job(draft_id) -> bool` factored out (mirrors the editing-queue + StartedJobRegistry scan from `cancel_draft_render`). Fails open on Redis errors so a transient blip doesn't invent a phantom orphan.
+- [x] 5.2 `Draft.render_retry_count` INTEGER NOT NULL DEFAULT 0 (alembic `0023_draft_render_retry_count`). Tracks watchdog auto-retry attempts; reset to 0 on every user-initiated re-render.
+- [x] 5.3 `api/watchdog.py` — FastAPI lifespan-managed background task. Sweeps at boot + every 60 s. For each in-flight Draft whose RQ job has disappeared: re-enqueue (up to `WATCHDOG_MAX_RETRIES = 3`) with snapshotted flags + `skip_plan = bool(cut_plan_json)` + `subtitles_from_db = skip_plan and flags["subtitles"]`; three strikes flip to `failed`.
+- [x] 5.4 `api/main.py` lifespan hook — `asyncio.create_task(watchdog_loop())` at startup; cancellation-safe shutdown.
+- [x] 5.5 Read-time fast-fail in `GET /drafts/{id}`: when `retry_count >= 3` AND `has_draft_render_job() is False`, flip to `failed` immediately so the FE surfaces the failure card on the next poll rather than waiting up to 60 s for the next watchdog tick. Read-time NEVER recovers — watchdog is the single resubmit owner.
+- [x] 5.6 `Draft.render_retry_count = 0` reset added to all three skip-plan re-render endpoints in `api/routers/drafts.py` (re-render, reorder, rebuild-subtitles).
+- [x] 5.7 FE `ProjectEdit.tsx` detects `prompt_feedback` prefix `watchdog:` and renders an orphan-aware failed card: title "任務已遺失", custom body, no progress bar, button "重新提交".
+
+## 6. Queue modal mobile-overflow fix (v0.25.1)
+
+- [x] 6.1 `QueueStatusModal.css` — backdrop padding uses `env(safe-area-inset-*)` so the modal stays clear of iPhone notch + home indicator.
+- [x] 6.2 `max-height: 100%` (the backdrop's safe-area padding already trims the absolute viewport so 100% is the right answer; `85vh` was redundant + wrong on iOS Safari).
+- [x] 6.3 Sticky header — close button + title stay visible while the queued list scrolls.
+- [x] 6.4 `QueueStatusModal.tsx` — wrapped sections in `.queue-modal__body` so the sticky header sits in its own scroll-frozen row and the body has its own scroll.
+- [x] 6.5 `@media (max-width: 480px)` full-bleed: no rounded corners, no L/R border, padding zeroed so every pixel of vertical space goes to the queue list.
+
+## 7. Memory + docs + version bump (v0.25.1)
+
+- [x] 7.1 `memory/v025_queue_inspector.md` extended with the watchdog corollaries: any future "background job + DB row" pair needs an orphan check; `render_retry_count` reset on user trigger is the load-bearing detail.
+- [x] 7.2 `memory/MEMORY.md` index entry updated; `project_media_processor_v2.md` snapshot bumped to 0.25.1.
+- [x] 7.3 `ROADMAP.md` — Phase 9.10.4 (watchdog) + 9.10.5 (modal mobile fix) subsections; current-version line; M9.10 row covers 0.25.0 – 0.25.1.
+- [x] 7.4 `CLAUDE.md` — current-version line; new `api/watchdog.py` architecture pointer.
+- [x] 7.5 Version bumped to 0.25.1 in `pyproject.toml` + `src/media_processor/api/main.py` + `web/package.json`.
+- [x] 7.6 Branched as `claude/v0.25.1-orphan-watchdog`, merged --no-ff into `main`, pushed. Docker compose build api worker web + up -d. Verified live: trigger render → `redis-cli FLUSHALL` → wait 60 s → `docker logs api` shows `watchdog: draft 41 auto-resubmitted (retry 1/3)`; DB shows `render_retry_count=1, status=pending`; `/queue/status` shows the new RQ job. Branch pruned local + remote.

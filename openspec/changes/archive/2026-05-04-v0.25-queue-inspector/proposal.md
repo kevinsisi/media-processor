@@ -81,3 +81,43 @@ While the modal is open it polls `/queue/status` every 3 s. A separate `setInter
 - **Single-worker invariant**: `running` returns at most one item because we run one worker process listening on all three queues. If we ever scale to multiple worker processes (e.g. dedicate a separate process to BGM so MusicGen doesn't head-of-line-block analysis), the schema needs `running: list[QueueJobItem]` and the FE needs to render N concurrent runs. Today's schema would still be correct semantically (`running[0]` if any), but `position` interpretation changes — it becomes "position within this queue" rather than "global dispatch order across all queues."
 - **Cost of polling**: 5 s badge poll + 3 s modal poll. RQ stores queue depth in Redis hashes; a read is O(queue depth). DB cost is bounded by the number of jobs across all queues × 1 round-trip per entity-id batch (worst case: 3 batches each with ~queue-depth entries). With single-digit queue depth in practice this is single-digit milliseconds per poll.
 - **Backwards compat**: the new endpoints don't depend on or modify any existing behaviour. FE can be deployed independently of the API and vice versa.
+
+## v0.25.1 follow-up — orphan-Draft watchdog + mobile modal fix
+
+The queue inspector exposed a state nobody'd seen before: a Draft sitting on `pending` while `/queue/status` returned empty. The RQ job had died (worker crash / timeout / `redis-cli FLUSHALL`) and the Draft row never moved off the in-flight status. The FE polled forever waiting on a ghost.
+
+### Watchdog (`api/watchdog.py`)
+
+FastAPI lifespan-managed background task. Sweeps at boot + every `WATCHDOG_INTERVAL_S = 60` s:
+
+1. SELECT every `Draft` with `status in ('pending', 'processing')`.
+2. For each, `services.queue.has_draft_render_job(draft.id)` — the same queue + StartedJobRegistry scan `cancel_draft_render` already used, factored out to a public helper.
+3. Job missing AND `render_retry_count < 3` → re-enqueue with snapshot flags + `skip_plan = bool(cut_plan_json)` + `subtitles_from_db = skip_plan and flags["subtitles"]` + `style_preset` from the row. Bump the counter to track attempts.
+4. Job missing AND `render_retry_count >= 3` → flip to `failed` with `prompt_feedback = "watchdog: retries exhausted ..."`.
+
+Schema: `Draft.render_retry_count` INTEGER NOT NULL DEFAULT 0 (alembic 0023). Reset to 0 on every explicit user re-trigger (3 places in `api/routers/drafts.py`: re-render, reorder, rebuild-subtitles) so an unrelated future failure inherits a fresh three-strike budget.
+
+### Read-time fast-fail in `GET /drafts/{id}`
+
+Mirrors the watchdog's "retries exhausted" branch on every read: when `status in ('pending', 'processing')` AND `render_retry_count >= 3` AND `has_draft_render_job() is False`, flip to `failed` immediately so the FE surfaces the failure card on the next poll instead of waiting up to 60 s. Read-time NEVER recovers — watchdog is the single resubmit owner to avoid races.
+
+### FE: orphan-aware failure card
+
+`ProjectEdit.tsx` detects `prompt_feedback` prefix `watchdog:` and renders:
+- Title "任務已遺失" (vs "剪輯失敗")
+- Body explaining worker death / timeout / purge
+- Skips the progress bar (would show all-pending and read as a frozen render)
+- Button "重新提交" (vs "AI 重新選片段") — same `handleStartEdit(true)` action
+
+### Mobile modal fix (`QueueStatusModal.css`)
+
+User screenshot showed the modal spilling off-viewport on a phone. Three fixes:
+
+1. **Backdrop padding uses `env(safe-area-inset-*)`** — modal stays clear of iPhone notch + home indicator.
+2. **`max-height: 100%`** instead of `85vh` — `vh` includes the iOS Safari URL bar area; the backdrop's safe-area padding already trims the absolute viewport so 100% of the remaining space is the right answer. (`dvh` would also work; `100%` is simpler given the backdrop wrapper.)
+3. **Sticky header** — close button + title stay visible while a long queue scrolls. `@media (max-width: 480px)` goes full-bleed (no rounded corners, no L/R border) so every pixel of vertical space goes to the queue list.
+
+### Verification (live)
+
+- Trigger render on draft 41 → `redis-cli FLUSHALL` to orphan → wait 60 s. `docker logs api` shows `watchdog: draft 41 auto-resubmitted (retry 1/3)`. DB row: `status=pending, render_retry_count=1, prompt_feedback="watchdog: auto-retry 1/3 — previous RQ job vanished"`. `GET /queue/status` shows the new job in `queued[0]` for draft 41.
+- Watchdog start-up log surfaces at boot: `watchdog: starting orphan sweep loop (interval=60s, max_retries=3)`.

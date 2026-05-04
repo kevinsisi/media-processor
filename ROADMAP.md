@@ -2,7 +2,7 @@
 
 > **單一定位**：個人 / 小團隊用的「拍完就上傳，AI 直接給可發佈影片」的工具。
 > 目標 UX：手機優先、繁體中文、高級感、最少手動編輯。
-> 目前版本：**0.25.0**（M9.10 — RQ queue inspector：worker 在忙什麼、佇列多深、能直接取消還沒開跑的任務）
+> 目前版本：**0.25.1**（M9.10.1 — orphan-Draft watchdog 自動重新提交 + queue inspector 手機版面修正）
 
 ## Phase 進度速覽
 
@@ -27,7 +27,7 @@
 | M9.7 | UI/UX 全面收斂（路由修正 + 標籤具體化 + 失敗收摺 + 假進度條移除） | ✅ done | 0.22.0 |
 | M9.8 | 像素級單點追蹤（Lucas-Kanade）+ 全螢幕 modal + 5 處座標 / 渲染 / dispatcher / 旋轉根因修正 | ✅ done | 0.23.0 – 0.23.7 |
 | M9.9 | 配樂淡出 + 轉場預設不勾 + voice_volume=0 silent-drop 根因修正 | ✅ done | 0.24.0 |
-| **M9.10** | **RQ queue inspector + 取消排隊任務（透明化 worker 狀態）** | ✅ done | **0.25.0** |
+| **M9.10** | **RQ queue inspector + 排隊任務取消 + orphan-Draft 自動重新提交 watchdog** | ✅ done | **0.25.0 – 0.25.1** |
 | M10 | 多專案批次 + 社群直接發布 + AI 自動縮圖 | 🔮 future | 0.26.x+ |
 
 ---
@@ -360,6 +360,29 @@ YOLO 物件追蹤對「我要追那個 logo」這種子-像素需求精度不夠
 
 ### 9.10.3 為什麼是 single-worker 的限制
 worker 容器是 single-process，listen `analysis editing bgm` 三個 queue，同時只有一個 job 在跑。response 的 `running` 因此最多一個 item；`queued[].position` 也因此能跟 worker 真正的 dispatch 順序對齊（不是各 queue 獨立計數）。當未來真要 scale 到多 worker，這個 invariants 會破，schema 不變但 `position` 的語意得改成「同 queue 內的位置」，FE 顯示也會跟著調。
+
+### 9.10.4 Orphan-Draft watchdog（0.25.1）
+使用者回報：專案 #6 的 Draft 卡在「排隊中」所有步驟都「等待」，但 `/queue/status` 卻回 `{running:null, queued:[]}`。RQ job 因為 worker crash / timeout / 手動 purge 不見了，Draft 卻還掛在 `pending` — FE 永遠 poll 一個鬼。
+
+`api/watchdog.py` 在 FastAPI lifespan 啟動一個 background asyncio task：
+- 啟動時掃一次 + 每 60 秒掃一次
+- 找出 `status in ('pending', 'processing')` 的 Drafts
+- 每個 draft 用 `services.queue.has_draft_render_job(draft.id)` 確認 RQ job 還在
+- Job 不見 + `render_retry_count < 3`：用 snapshot flags 重新 enqueue（`skip_plan = bool(cut_plan_json)`、`subtitles_from_db` 跟 `style_preset` 都從 row 讀）並 ++retry_count
+- 三振：把 row 改 `failed`，`prompt_feedback = "watchdog: retries exhausted ..."`，FE 跳真實的失敗卡片
+
+Schema：`Draft.render_retry_count INTEGER NOT NULL DEFAULT 0`（alembic 0023）。每次使用者顯式重新觸發（trigger / re-render / reorder / rebuild-subtitles）都重設成 0，避免不相關的未來失敗繼承前一次的 retry budget。
+
+`GET /drafts/{id}` 也加了 read-time fast-fail：`retry_count >= 3` 且 RQ job 不在 → 立刻在那次讀取 commit `failed`，不用等下一次 watchdog tick。Read-time 不會嘗試恢復（避免跟 watchdog 爭），watchdog 是 resubmit 的單一所有者。
+
+FE 在 `ProjectEdit` 偵測 `prompt_feedback` 開頭是 `watchdog:`：標題改「任務已遺失」、按鈕改「重新提交」、跳過進度條（沒任何階段跑過，bar 空一片只會誤導）。
+
+### 9.10.5 Queue inspector mobile 版面修正（0.25.1）
+之前 modal 用 `max-height: 85vh` + `padding: 1rem` 在 iPhone Safari 直拍模式下會跑出可見區（`vh` 包到 URL bar 那一塊）。改成：
+- backdrop 用 `env(safe-area-inset-*)` padding，避開 notch + home indicator
+- modal 改 `max-height: 100%`（已經被 backdrop padding 限制過，不需要再 vh）
+- header 改 sticky，捲動長 queue 不會把關閉鈕推出去
+- `@media (max-width: 480px)`：phone 上去掉 padding + border-radius，直接全螢幕，把每一個垂直像素都讓給 queue 列表
 
 ---
 
