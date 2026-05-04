@@ -441,12 +441,12 @@ export default function AssetTrackingTarget({
            on subsequent loads so the operator can see where the
            seed was. Position is the normalised origin × the
            rendered (object-fit:contain) display rect. */}
-        {activeMode === "point" && detail.point_tracking_origin && (
+        {activeMode === "point" && detail.point_tracking_origin && renderRect && (
           <div
             className="tracking-target__crosshair"
             style={{
-              left: `${detail.point_tracking_origin.norm_x * 100}%`,
-              top: `${detail.point_tracking_origin.norm_y * 100}%`,
+              left: `${detail.point_tracking_origin.norm_x * renderRect.renderedW + renderRect.offsetX}px`,
+              top: `${detail.point_tracking_origin.norm_y * renderRect.renderedH + renderRect.offsetY}px`,
             }}
             aria-label="追蹤點位置"
           />
