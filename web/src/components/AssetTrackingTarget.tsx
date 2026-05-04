@@ -144,13 +144,18 @@ export default function AssetTrackingTarget({
                 tracked_object_index: resp.tracked_object_index,
                 has_custom_roi: resp.has_custom_roi,
                 has_point_track: resp.has_point_track,
+                point_tracking_status: resp.point_tracking_status ?? null,
+                point_tracking_error: null,
               }
             : prev,
         );
-        // Refetch the full detail so ``point_tracking_origin``
-        // (returned by GET /tracking, not the PATCH response)
-        // round-trips into the crosshair render.
-        if (mode === "point") {
+        // v0.28.0 — mode=point is now async on the worker. The
+        // PATCH returns 202 + ``point_tracking_status="pending"``
+        // and the polling effect (below) drives the rest of the
+        // UX. For all OTHER modes we still want a single fetchDetail
+        // to round-trip ``point_tracking_origin`` etc. — same as
+        // pre-0.28.
+        if (mode !== "point") {
           void fetchDetail();
         }
         setActiveMode(mode);
@@ -169,6 +174,35 @@ export default function AssetTrackingTarget({
     },
     [assetId, fetchDetail],
   );
+
+  // v0.28.0 — poll while a point-tracking job is in flight. The PATCH
+  // sets ``point_tracking_status="pending"`` and enqueues a worker
+  // job; we re-fetch ``GET /tracking`` every 2 s until the status
+  // flips to ``"done"`` (worker wrote the trace) or ``"failed"``
+  // (worker raised). 2 s is the same cadence as the queue modal —
+  // fast enough to feel responsive, slow enough not to spam an
+  // already-loaded api on a long LK walk.
+  const isPointTracking = detail?.point_tracking_status === "pending";
+  useEffect(() => {
+    if (!isPointTracking) return;
+    const id = window.setInterval(() => {
+      void fetchDetail();
+    }, 2000);
+    return () => window.clearInterval(id);
+  }, [isPointTracking, fetchDetail]);
+
+  // v0.28.0 — surface a worker-side failure as an error toast the
+  // first time we see it. The polling effect above will keep
+  // re-fetching while ``status === "pending"``; once the worker
+  // flips it to ``"failed"``, this effect catches it on the next
+  // detail refresh and copies the message into ``error``. Mirrors
+  // the pre-0.28 sync error path so the FE state shape is unchanged.
+  const failedError = detail?.point_tracking_status === "failed"
+    ? detail.point_tracking_error ?? "point tracking failed"
+    : null;
+  useEffect(() => {
+    if (failedError) setError(`追蹤失敗：${failedError}`);
+  }, [failedError]);
 
   const handleModeClick = useCallback(
     (mode: TrackingMode) => {
@@ -495,6 +529,16 @@ export default function AssetTrackingTarget({
         </div>
       )}
       {busy && <p className="tracking-target__busy">套用中…</p>}
+      {/* v0.28.0 — async point-tracking status. ``busy`` only covers
+          the single PATCH round-trip; once that returns 202 the
+          operator has closed the picker but the worker is still
+          chewing through the LK loop. This banner stays up until the
+          polling effect sees the status flip to ``done`` / ``failed``. */}
+      {!busy && detail?.point_tracking_status === "pending" && (
+        <p className="tracking-target__busy">
+          精準像素追蹤分析中…（worker 正在跑 LK 光流，較長 / 高解析度的素材需要幾分鐘）
+        </p>
+      )}
       {error && (
         <p className="tracking-target__hint tracking-target__hint--err">
           失敗：{error}

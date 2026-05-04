@@ -50,6 +50,8 @@ _JOB_KIND_BY_FUNC: dict[str, str] = {
     "media_processor.workers.edit_jobs.render_draft": "render",
     "media_processor.workers.edit_jobs.export_draft": "export",
     "media_processor.workers.bgm_jobs.generate_bgm": "bgm",
+    # v0.28.0 — pixel-precise LK point tracking, async on the analysis queue.
+    "media_processor.workers.point_tracking_jobs.track_point_job": "point_track",
 }
 
 QueueName = Literal["analysis", "editing", "bgm"]
@@ -143,7 +145,7 @@ def _job_to_item(
     draft_id: int | None = None
     project_id: int | None = None
 
-    if kind in ("analyze", "translate"):
+    if kind in ("analyze", "translate", "point_track"):
         if args:
             asset_id = int(args[0])
     elif kind == "render":

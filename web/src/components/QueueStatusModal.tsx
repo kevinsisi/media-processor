@@ -30,6 +30,7 @@ const KIND_LABEL: Record<string, string> = {
   render: "剪輯",
   export: "匯出",
   bgm: "AI 配樂",
+  point_track: "精準像素追蹤",
   unknown: "其他",
 };
 

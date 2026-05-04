@@ -833,7 +833,18 @@ class TrackingDetailOut(BaseModel):
     # ``{x: int, y: int, frame_ms: int, norm_x: float, norm_y: float}``
     # so the FE can render a crosshair at the original click position
     # on any thumbnail size. ``None`` when no point track has been run.
+    # v0.28.0 — during ``status="pending"`` the ``x`` / ``y`` keys are
+    # absent (cv2 hasn't resolved them yet); the FE only renders the
+    # crosshair when ``has_point_track`` AND ``status="done"``.
     point_tracking_origin: dict[str, Any] | None = None
+    # v0.28.0 — async LK pipeline status. ``None`` (pre-0.28) /
+    # ``"pending"`` / ``"done"`` / ``"failed"``. The FE flips into
+    # polling mode on ``pending``, renders the crosshair on
+    # ``done``, and surfaces ``point_tracking_error`` on ``failed``.
+    # ``None`` is treated identically to ``done`` for renderer
+    # purposes — pre-0.28 rows that already have a trace remain valid.
+    point_tracking_status: str | None = None
+    point_tracking_error: str | None = None
 
 
 class TrackingTargetRequest(BaseModel):
@@ -863,6 +874,12 @@ class TrackingTargetResponse(BaseModel):
     tracked_object_index: int | None
     has_custom_roi: bool
     has_point_track: bool = False
+    # v0.28.0 — surfaces the async-LK pipeline state so the FE knows
+    # whether to enter polling mode immediately after the PATCH
+    # response. ``"pending"`` on a fresh ``mode=point`` PATCH;
+    # ``"done"`` after the worker finishes; ``"failed"`` if the
+    # worker raised; ``None`` for non-point modes or pre-0.28 rows.
+    point_tracking_status: str | None = None
 
 
 # v0.17 — per-DraftSegment audio gain.

@@ -628,13 +628,22 @@ export interface TrackingDetailOut {
   // v0.23 — verbatim user click that seeded the LK trace. The FE
   // renders a crosshair at this position on the thumbnail. ``null``
   // when no point track has been run.
+  // v0.28.0 — during ``status="pending"`` the ``x`` / ``y`` keys are
+  // absent (cv2 hasn't resolved them yet); the FE only renders the
+  // crosshair when ``has_point_track`` AND ``status==="done"``.
   point_tracking_origin?: {
-    x: number;
-    y: number;
+    x?: number;
+    y?: number;
     frame_ms: number;
     norm_x: number;
     norm_y: number;
   } | null;
+  // v0.28.0 — async LK pipeline status. ``null`` (pre-0.28 row) /
+  // ``"pending"`` (worker enqueued, FE polls) / ``"done"`` (trace
+  // ready, render crosshair) / ``"failed"`` (worker raised, see
+  // ``point_tracking_error``).
+  point_tracking_status?: "pending" | "done" | "failed" | null;
+  point_tracking_error?: string | null;
 }
 
 export type TrackingMode =
@@ -670,6 +679,10 @@ export interface TrackingTargetResponse {
   has_point_track?: boolean;
   tracked_object_index: number | null;
   has_custom_roi: boolean;
+  // v0.28.0 — set to ``"pending"`` immediately after a mode=point
+  // PATCH so the FE knows to flip into polling mode without waiting
+  // for the next ``GET /tracking`` round-trip.
+  point_tracking_status?: "pending" | "done" | "failed" | null;
 }
 
 export interface ThumbnailUrl {

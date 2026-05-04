@@ -34,6 +34,15 @@ EXPORT_JOB_TIMEOUT_SECONDS = 60 * 30  # 30 min — single ffmpeg pass
 GENERATE_BGM_FN = "media_processor.workers.bgm_jobs.generate_bgm"
 BGM_JOB_TIMEOUT_SECONDS = 60 * 15  # 15 min — small MusicGen + IO
 
+# v0.28.0 — pixel-precise LK point tracking, async on the analysis
+# queue. 30 min ceiling: even a 1728x3072 / 5-min portrait clip
+# completes in single-digit minutes on the AMD 3700X, so 30 min is
+# generous belt-and-suspenders against a corrupt cv2 read. The
+# runner itself passes ``time_budget_s = 1 h`` to ``track_point``
+# as a defence-in-depth ceiling; whichever fires first wins.
+TRACK_POINT_FN = "media_processor.workers.point_tracking_jobs.track_point_job"
+TRACK_POINT_JOB_TIMEOUT_SECONDS = 60 * 30  # 30 min
+
 
 def _redis() -> Redis:
     return Redis.from_url(settings.redis_url)
@@ -205,6 +214,50 @@ def enqueue_bgm_generation(job_id: int) -> str:
     queue = Queue(BGM_QUEUE, connection=_redis(), default_timeout=BGM_JOB_TIMEOUT_SECONDS)
     job = queue.enqueue(GENERATE_BGM_FN, args=(job_id,))
     logger.info("enqueued generate_bgm(job_id=%d) as rq job %s", job_id, job.id)
+    return job.id
+
+
+def enqueue_point_tracking(
+    asset_id: int,
+    *,
+    init_norm_x: float,
+    init_norm_y: float,
+    init_t_ms: int,
+) -> str:
+    """Schedule ``track_point_job(asset_id, ...)`` on the analysis queue.
+
+    Returns the RQ job id. The endpoint writes
+    ``Asset.point_tracking_status = 'pending'`` *before* calling this
+    so the FE polling sees the in-flight state immediately on the
+    next ``GET /assets/{id}/tracking``.
+
+    v0.28.0 — pre-0.28 the LK loop ran inside the API's threadpool
+    via ``asyncio.to_thread``; long / high-res clips blew past
+    nginx's 60-second proxy timeout. Now the loop runs on
+    ``worker-analysis``, which has no proxy in front of it.
+    """
+    queue = Queue(
+        ANALYSIS_QUEUE,
+        connection=_redis(),
+        default_timeout=TRACK_POINT_JOB_TIMEOUT_SECONDS,
+    )
+    job = queue.enqueue(
+        TRACK_POINT_FN,
+        args=(asset_id,),
+        kwargs={
+            "init_norm_x": init_norm_x,
+            "init_norm_y": init_norm_y,
+            "init_t_ms": init_t_ms,
+        },
+    )
+    logger.info(
+        "enqueued track_point_job(asset_id=%d, norm=(%.4f, %.4f), init_t_ms=%d) as job %s",
+        asset_id,
+        init_norm_x,
+        init_norm_y,
+        init_t_ms,
+        job.id,
+    )
     return job.id
 
 

@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -38,9 +38,12 @@ from media_processor.api.schemas import (
 from media_processor.models import Asset, AssetTranscript, ScriptCoverage
 from media_processor.services import asset_management as asset_mgmt
 from media_processor.services import object_tracking
-from media_processor.services import point_tracking as point_tracking_svc
 from media_processor.services import thumbnails as thumbnails_svc
-from media_processor.services.queue import enqueue_asset_analysis, enqueue_asset_translate
+from media_processor.services.queue import (
+    enqueue_asset_analysis,
+    enqueue_asset_translate,
+    enqueue_point_tracking,
+)
 
 # Public URL prefix the browser uses to fetch thumbnail JPEGs.
 # StaticFiles is mounted at "/media/thumbnails" in api.main, and the web
@@ -452,6 +455,8 @@ async def get_asset_tracking(
         has_custom_roi=isinstance(getattr(asset, "custom_roi_json", None), dict),
         has_point_track=isinstance(getattr(asset, "point_tracking_json", None), dict),
         point_tracking_origin=getattr(asset, "point_tracking_origin", None),
+        point_tracking_status=getattr(asset, "point_tracking_status", None),
+        point_tracking_error=getattr(asset, "point_tracking_error", None),
     )
 
 
@@ -460,6 +465,7 @@ async def patch_asset_tracking_target(
     asset_id: int,
     payload: TrackingTargetRequest,
     session: SessionDep,
+    response: Response,
 ) -> TrackingTargetResponse:
     """Set which tracked object (or custom ROI / point) the renderer
     follows.
@@ -548,14 +554,27 @@ async def patch_asset_tracking_target(
         # v0.23 — pyramidal Lucas-Kanade pixel-precise tracking from a
         # single user click. The FE sends 0..1 normalised display-space
         # coords; ``track_point`` resolves them to pixels using cv2's
-        # post-rotation frame dimensions, NOT ``Asset.resolution``.
-        # The latter is the raw stream resolution from ffprobe, which
-        # for assets with rotation metadata (e.g. iPhone / DJI portrait
-        # clips stored as landscape + ``rotate=90`` tag) is the
-        # PRE-rotation dimensions and doesn't match the thumbnail the
-        # user actually clicked on. (v0.23.7 root-cause fix; pre-0.23.7
-        # used Asset.resolution and was correct only for assets without
-        # rotation metadata.)
+        # post-rotation frame dimensions, NOT ``Asset.resolution``
+        # (v0.23.7 root-cause fix for rotated portrait clips).
+        #
+        # v0.28.0 — the LK loop now runs ASYNC on the analysis queue,
+        # not inline in the API thread. Pre-0.28 a 1728x3072 / 2-min
+        # portrait clip blew past nginx's 60 s proxy timeout and the
+        # FE got stuck on "追蹤中…". v0.27.3's 30 s cooperative
+        # budget gave a clean error but didn't actually let the
+        # tracking complete. The endpoint now:
+        #   1. Validates the click payload.
+        #   2. Sets ``tracked_object_index = -4`` and
+        #      ``point_tracking_status = 'pending'`` (clears any
+        #      stale trace + error).
+        #   3. Stores the operator's intent on
+        #      ``point_tracking_origin`` (without x/y pixels — the
+        #      worker will fill those once cv2 has resolved them).
+        #   4. Enqueues ``track_point_job`` on the analysis queue
+        #      and returns 202 + the new state. The FE polls
+        #      ``GET /assets/{id}/tracking`` until ``status`` flips
+        #      to ``"done"`` (renders crosshair) or ``"failed"``
+        #      (shows ``point_tracking_error`` toast).
         if not payload.point:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -578,46 +597,41 @@ async def patch_asset_tracking_target(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="point.norm_x / norm_y must be in [0, 1]",
             )
-        media_path = Path(asset.file_path)
-        try:
-            point_json = await asyncio.to_thread(
-                point_tracking_svc.track_point,
-                media_path,
-                init_norm_x=norm_x,
-                init_norm_y=norm_y,
-                init_t_ms=frame_ms,
-                duration_ms=asset.duration_ms,
-            )
-        except point_tracking_svc.PointTrackTimeoutError as exc:
-            # v0.27.3 — cooperative budget hit. Surface as 504 so the
-            # FE knows this is "too slow", not "broken". The error
-            # message includes the asset's resolution + duration so
-            # the operator can tell at a glance whether it's the
-            # 1728x3072 portrait that blew the budget.
-            raise HTTPException(
-                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-                detail=f"追蹤超時：{exc}",
-            ) from exc
-        except (
-            point_tracking_svc.PointTrackError,
-            point_tracking_svc.PointTrackUnavailableError,
-        ) as exc:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"point tracking failed: {exc}",
-            ) from exc
-        # ``init.x`` / ``init.y`` are the resolved pixel coords from
-        # cv2's post-rotation dims; mirror them into the origin record
-        # so the FE crosshair lines up with the thumbnail.
-        asset.point_tracking_json = point_json
+        # Stage the in-flight state on the row BEFORE enqueueing so
+        # the FE's first poll after the PATCH reply already sees
+        # ``status = "pending"``. ``point_tracking_json`` is cleared
+        # because any previous trace is now stale.
+        asset.tracked_object_index = -4
+        asset.point_tracking_json = None
+        asset.point_tracking_status = "pending"
+        asset.point_tracking_error = None
         asset.point_tracking_origin = {
-            "x": int(point_json["init"]["x"]),
-            "y": int(point_json["init"]["y"]),
             "frame_ms": frame_ms,
             "norm_x": norm_x,
             "norm_y": norm_y,
         }
-        asset.tracked_object_index = -4
+        await session.commit()
+        # Enqueue AFTER the commit so the worker is guaranteed to see
+        # the row in ``status="pending"`` (otherwise the worker could
+        # race and overwrite a row that hasn't yet been marked
+        # pending). ``enqueue_point_tracking`` is purely a Redis
+        # write; we don't need to await its DB side-effects.
+        enqueue_point_tracking(
+            asset_id,
+            init_norm_x=norm_x,
+            init_norm_y=norm_y,
+            init_t_ms=frame_ms,
+        )
+        # 202 Accepted — the canonical "I queued this; come back and
+        # poll" code. Other modes (auto / object / custom / fixed /
+        # none) fall through to the default 200 below because they
+        # finish synchronously.
+        response.status_code = status.HTTP_202_ACCEPTED
+        # The endpoint's response is built below from the refreshed
+        # asset row; it'll show ``has_point_track=False``,
+        # ``tracked_object_index=-4``, and the new
+        # ``point_tracking_status="pending"`` (added in v0.28.0).
+        # The FE flips to polling mode on seeing that status.
     elif payload.mode == "fixed":
         asset.tracked_object_index = -2
     else:  # "none"
@@ -630,6 +644,7 @@ async def patch_asset_tracking_target(
         tracked_object_index=getattr(asset, "tracked_object_index", None),
         has_custom_roi=isinstance(getattr(asset, "custom_roi_json", None), dict),
         has_point_track=isinstance(getattr(asset, "point_tracking_json", None), dict),
+        point_tracking_status=getattr(asset, "point_tracking_status", None),
     )
 
 
