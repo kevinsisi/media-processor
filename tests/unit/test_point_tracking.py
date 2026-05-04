@@ -25,13 +25,18 @@ def _force_fake(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_track_point_fake_returns_static_trace() -> None:
     """``TRACKING_FAKE=1`` emits a constant-position trace at the
-    init coordinate. The output dict shape is the live shape — same
-    keys, JSON-friendly types — so the API layer + auto_reframe
-    helper can be exercised without real LK."""
+    norm-resolved init coordinate. The output dict shape is the live
+    shape — same keys, JSON-friendly types — so the API layer +
+    auto_reframe helper can be exercised without real LK.
+
+    v0.23.7 — track_point takes ``init_norm_x``/``init_norm_y`` and
+    resolves to pixels internally; FAKE path uses 1920×1080 as the
+    stub display resolution.
+    """
     result = point_tracking.track_point(
         Path("/tmp/dummy.mp4"),
-        init_x=480,
-        init_y=270,
+        init_norm_x=0.25,  # 0.25 × 1920 = 480
+        init_norm_y=0.25,  # 0.25 × 1080 = 270
         init_t_ms=0,
         duration_ms=2_000,
     )
@@ -63,14 +68,14 @@ def test_track_point_fake_respects_duration_ms() -> None:
     sizes its progress affordances off this."""
     short = point_tracking.track_point(
         Path("/tmp/dummy.mp4"),
-        init_x=10,
-        init_y=10,
+        init_norm_x=0.005,
+        init_norm_y=0.01,
         duration_ms=500,
     )
     long = point_tracking.track_point(
         Path("/tmp/dummy.mp4"),
-        init_x=10,
-        init_y=10,
+        init_norm_x=0.005,
+        init_norm_y=0.01,
         duration_ms=10_000,
     )
     assert long["sampled_frames"] > short["sampled_frames"]
@@ -79,8 +84,8 @@ def test_track_point_fake_respects_duration_ms() -> None:
 def test_track_point_fake_frames_are_monotonic_in_time() -> None:
     result = point_tracking.track_point(
         Path("/tmp/dummy.mp4"),
-        init_x=100,
-        init_y=100,
+        init_norm_x=0.05,
+        init_norm_y=0.1,
         init_t_ms=0,
         duration_ms=3_000,
     )
@@ -118,8 +123,8 @@ def test_track_point_unavailable_when_opencv_missing(
         with pytest.raises(point_tracking.PointTrackUnavailableError):
             point_tracking.track_point(
                 Path("/tmp/dummy.mp4"),
-                init_x=0,
-                init_y=0,
+                init_norm_x=0.0,
+                init_norm_y=0.0,
                 duration_ms=1_000,
             )
     finally:

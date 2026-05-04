@@ -495,10 +495,16 @@ async def patch_asset_tracking_target(
         asset.tracked_object_index = -1
     elif payload.mode == "point":
         # v0.23 — pyramidal Lucas-Kanade pixel-precise tracking from a
-        # single user click. Coordinates arrive 0..1 normalised so the
-        # FE can pass display-space coords without knowing the asset's
-        # native resolution; we multiply through by the source size
-        # before handing to LK.
+        # single user click. The FE sends 0..1 normalised display-space
+        # coords; ``track_point`` resolves them to pixels using cv2's
+        # post-rotation frame dimensions, NOT ``Asset.resolution``.
+        # The latter is the raw stream resolution from ffprobe, which
+        # for assets with rotation metadata (e.g. iPhone / DJI portrait
+        # clips stored as landscape + ``rotate=90`` tag) is the
+        # PRE-rotation dimensions and doesn't match the thumbnail the
+        # user actually clicked on. (v0.23.7 root-cause fix; pre-0.23.7
+        # used Asset.resolution and was correct only for assets without
+        # rotation metadata.)
         if not payload.point:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -521,27 +527,13 @@ async def patch_asset_tracking_target(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="point.norm_x / norm_y must be in [0, 1]",
             )
-        # Resolve source resolution from Asset.resolution ("1920x1080")
-        # — falls back to the existing tracking_json src_w/src_h if
-        # resolution wasn't recorded (legacy uploads).
-        src_w, src_h = _asset_native_resolution(asset)
-        if src_w <= 0 or src_h <= 0:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=(
-                    "asset has no recorded resolution; analysis must run "
-                    "before pixel-precise tracking can seed coordinates"
-                ),
-            )
-        init_x = int(round(norm_x * src_w))
-        init_y = int(round(norm_y * src_h))
         media_path = Path(asset.file_path)
         try:
             point_json = await asyncio.to_thread(
                 point_tracking_svc.track_point,
                 media_path,
-                init_x=init_x,
-                init_y=init_y,
+                init_norm_x=norm_x,
+                init_norm_y=norm_y,
                 init_t_ms=frame_ms,
                 duration_ms=asset.duration_ms,
             )
@@ -553,10 +545,13 @@ async def patch_asset_tracking_target(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"point tracking failed: {exc}",
             ) from exc
+        # ``init.x`` / ``init.y`` are the resolved pixel coords from
+        # cv2's post-rotation dims; mirror them into the origin record
+        # so the FE crosshair lines up with the thumbnail.
         asset.point_tracking_json = point_json
         asset.point_tracking_origin = {
-            "x": init_x,
-            "y": init_y,
+            "x": int(point_json["init"]["x"]),
+            "y": int(point_json["init"]["y"]),
             "frame_ms": frame_ms,
             "norm_x": norm_x,
             "norm_y": norm_y,
