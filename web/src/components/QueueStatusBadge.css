@@ -33,6 +33,12 @@
   background: rgba(120, 200, 130, 0.1);
 }
 
+.queue-badge--error {
+  border-color: rgba(255, 154, 154, 0.5);
+  color: rgba(255, 190, 190, 0.95);
+  background: rgba(255, 154, 154, 0.1);
+}
+
 .queue-badge:hover {
   background: rgba(255, 255, 255, 0.06);
 }
@@ -41,6 +47,9 @@
 }
 .queue-badge--running:hover {
   background: rgba(120, 200, 130, 0.18);
+}
+.queue-badge--error:hover {
+  background: rgba(255, 154, 154, 0.16);
 }
 
 .queue-badge__pulse {

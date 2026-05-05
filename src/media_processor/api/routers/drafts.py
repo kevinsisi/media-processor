@@ -19,6 +19,7 @@ from media_processor.api.schemas import (
     DraftCommentCreate,
     DraftCommentOut,
     DraftDetail,
+    DraftExportOut,
     DraftExportRequest,
     DraftExportResponse,
     DraftPatchRequest,
@@ -40,6 +41,7 @@ from media_processor.models import (
     AssetTag,
     Draft,
     DraftComment,
+    DraftExport,
     DraftSegment,
     SubtitleCueRow,
 )
@@ -79,6 +81,10 @@ def _draft_filename(version: int, suffix: str) -> str:
 
 def _draft_url(project_id: int, version: int, suffix: str) -> str:
     return f"{DRAFT_URL_PREFIX}/{project_id}/{_draft_filename(version, suffix)}"
+
+
+def _draft_export_url(project_id: int, output_filename: str) -> str:
+    return f"{DRAFT_URL_PREFIX}/{project_id}/{output_filename}"
 
 
 def _expected_draft_path(project_id: int, version: int, suffix: str) -> Path:
@@ -251,6 +257,29 @@ def serialise_draft_detail(draft: Draft) -> DraftDetail:
     )
 
 
+def serialise_draft_export(export: DraftExport, *, project_id: int) -> DraftExportOut:
+    """Map a durable derivative export row into the browser-facing shape."""
+    download_url = (
+        _draft_export_url(project_id, export.output_filename)
+        if export.status == "done" and export.output_path
+        else None
+    )
+    return DraftExportOut(
+        export_id=export.id,
+        draft_id=export.draft_id,
+        aspect=export.aspect,
+        height=export.height,
+        status=export.status,
+        job_id=export.job_id,
+        output_filename=export.output_filename,
+        download_url=download_url,
+        error=export.error,
+        created_at=export.created_at,
+        started_at=export.started_at,
+        completed_at=export.completed_at,
+    )
+
+
 @router.get("/{draft_id}", response_model=DraftDetail)
 async def get_draft(
     draft_id: int,
@@ -270,19 +299,19 @@ async def get_draft(
     # so the FE doesn't have to wait another 60 s for the next
     # watchdog tick. ``has_draft_render_job`` fails open on Redis
     # errors so a transient blip can't invent a phantom failure.
-    if draft.status in (DraftStatus.PENDING.value, DraftStatus.PROCESSING.value):
-        if (
-            (draft.render_retry_count or 0) >= 3
-            and not has_draft_render_job(draft.id)
-        ):
-            draft.status = DraftStatus.FAILED.value
-            if not draft.prompt_feedback:
-                draft.prompt_feedback = (
-                    "watchdog: retries exhausted — render job kept disappearing "
-                    "from the queue across multiple auto-resubmits"
-                )
-            await session.commit()
-            await session.refresh(draft, attribute_names=["segments"])
+    if (
+        draft.status in (DraftStatus.PENDING.value, DraftStatus.PROCESSING.value)
+        and (draft.render_retry_count or 0) >= 3
+        and not has_draft_render_job(draft.id)
+    ):
+        draft.status = DraftStatus.FAILED.value
+        if not draft.prompt_feedback:
+            draft.prompt_feedback = (
+                "watchdog: retries exhausted — render job kept disappearing "
+                "from the queue across multiple auto-resubmits"
+            )
+        await session.commit()
+        await session.refresh(draft, attribute_names=["segments"])
 
     return serialise_draft_detail(draft)
 
@@ -1100,6 +1129,25 @@ async def patch_draft_segment_volume(
 # ---------- M7.3 — export at chosen aspect / resolution ----------
 
 
+@router.get("/{draft_id}/exports", response_model=list[DraftExportOut])
+async def list_draft_exports(
+    draft_id: int,
+    session: SessionDep,
+) -> list[DraftExportOut]:
+    """List durable derivative exports for one draft, newest first."""
+    draft = await session.get(Draft, draft_id)
+    if draft is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="draft not found")
+    rows = (
+        await session.execute(
+            select(DraftExport)
+            .where(DraftExport.draft_id == draft.id)
+            .order_by(DraftExport.created_at.desc(), DraftExport.id.desc())
+        )
+    ).scalars()
+    return [serialise_draft_export(row, project_id=draft.project_id) for row in rows]
+
+
 @router.post("/{draft_id}/export", response_model=DraftExportResponse)
 async def export_draft(
     draft_id: int,
@@ -1124,18 +1172,50 @@ async def export_draft(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"aspect must be one of {exports.VALID_ASPECTS}",
         )
-    job_id = enqueue_draft_export(
-        draft.id,
+    output_filename = exports.derive_filename(draft.version, payload.aspect, payload.height)
+    artifact = DraftExport(
+        draft_id=draft.id,
         aspect=payload.aspect,
         height=payload.height,
+        status="queued",
+        output_filename=output_filename,
     )
-    output_filename = exports.derive_filename(draft.version, payload.aspect, payload.height)
+    session.add(artifact)
+    await session.commit()
+    await session.refresh(artifact)
+
+    try:
+        job_id = enqueue_draft_export(
+            draft.id,
+            export_id=artifact.id,
+            aspect=payload.aspect,
+            height=payload.height,
+        )
+    except Exception as exc:  # noqa: BLE001 — surface enqueue failures as artifact state.
+        artifact.status = "failed"
+        artifact.error = f"enqueue failed: {exc}"
+        await session.commit()
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"export enqueue failed: {exc}",
+        ) from exc
+
+    artifact.job_id = job_id
+    await session.commit()
+    await session.refresh(artifact)
     return DraftExportResponse(
+        export_id=artifact.id,
         draft_id=draft.id,
         aspect=payload.aspect,
         height=payload.height,
         job_id=job_id,
         output_filename=output_filename,
+        status="queued",
+        download_url=None,
+        error=None,
+        created_at=artifact.created_at,
+        started_at=artifact.started_at,
+        completed_at=artifact.completed_at,
     )
 
 

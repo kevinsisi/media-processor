@@ -19,15 +19,17 @@ const POLL_INTERVAL_MS = 5000;
 
 export default function QueueStatusBadge() {
   const [status, setStatus] = useState<QueueStatusOut | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
       const next = await apiClient.getQueueStatus();
       setStatus(next);
+      setError(null);
     } catch (exc) {
-      // Silent — the badge is non-critical. ApiError ignored.
-      void (exc instanceof ApiError ? exc : null);
+      const msg = exc instanceof ApiError ? exc.message : String(exc);
+      setError(msg);
     }
   }, []);
 
@@ -54,14 +56,18 @@ export default function QueueStatusBadge() {
   const totalDepth = runningCount + queuedCount;
 
   const variant =
-    runningCount > 0
+    error !== null
+      ? "queue-badge--error"
+      : runningCount > 0
       ? "queue-badge--running"
       : queuedCount > 0
         ? "queue-badge--queued"
         : "queue-badge--idle";
 
   const label =
-    runningCount > 0
+    error !== null
+      ? "狀態未知"
+      : runningCount > 0
       ? `處理中 ${runningCount} +${queuedCount}`
       : `排隊 ${queuedCount}`;
 
@@ -71,8 +77,12 @@ export default function QueueStatusBadge() {
         type="button"
         className={`queue-badge ${variant}`}
         onClick={() => setOpen(true)}
-        aria-label={`排隊狀態：${label}（共 ${totalDepth} 個任務）`}
-        title="點擊查看排隊"
+        aria-label={
+          error !== null
+            ? `排隊狀態無法取得：${error}`
+            : `排隊狀態：${label}（共 ${totalDepth} 個任務）`
+        }
+        title={error !== null ? `排隊狀態無法取得：${error}` : "點擊查看排隊"}
       >
         {runningCount > 0 && (
           <span className="queue-badge__pulse" aria-hidden="true" />

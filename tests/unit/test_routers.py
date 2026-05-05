@@ -21,6 +21,7 @@ from sqlalchemy.pool import StaticPool
 
 from media_processor.api.deps import get_session
 from media_processor.api.main import app as production_app
+from media_processor.api.routers import drafts as drafts_router
 from media_processor.models import (
     Asset,
     AssetSegment,
@@ -33,7 +34,7 @@ from media_processor.models import (
 
 
 @pytest.fixture()
-def app() -> Iterator[FastAPI]:
+def app(monkeypatch: pytest.MonkeyPatch) -> Iterator[FastAPI]:
     import asyncio
 
     engine = create_async_engine(
@@ -50,6 +51,11 @@ def app() -> Iterator[FastAPI]:
         await _seed(session_maker)
 
     asyncio.run(init())
+
+    def fake_enqueue_draft_export(draft_id: int, **kwargs: Any) -> str:
+        return f"fake-export-{draft_id}-{kwargs['export_id']}"
+
+    monkeypatch.setattr(drafts_router, "enqueue_draft_export", fake_enqueue_draft_export)
 
     async def override_get_session() -> AsyncIterator[AsyncSession]:
         async with session_maker() as session:
@@ -176,6 +182,24 @@ def test_get_draft_404(app: FastAPI) -> None:
     client = TestClient(app)
     resp = client.get("/drafts/9999")
     assert resp.status_code == 404
+
+
+def test_export_draft_creates_listable_artifact(app: FastAPI) -> None:
+    client = TestClient(app)
+    resp = client.post("/drafts/1/export", json={"aspect": "9:16", "height": 1080})
+    assert resp.status_code == 200, resp.text
+    body: dict[str, Any] = resp.json()
+    assert body["export_id"] == 1
+    assert body["job_id"] == "fake-export-1-1"
+    assert body["status"] == "queued"
+    assert body["download_url"] is None
+
+    list_resp = client.get("/drafts/1/exports")
+    assert list_resp.status_code == 200, list_resp.text
+    exports = list_resp.json()
+    assert len(exports) == 1
+    assert exports[0]["export_id"] == body["export_id"]
+    assert exports[0]["output_filename"] == "v1-9x16-1080p.mp4"
 
 
 def test_get_asset_with_tags_sorted(app: FastAPI) -> None:

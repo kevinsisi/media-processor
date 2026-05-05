@@ -2,7 +2,7 @@
 
 Content factory pipeline for short-form video production.
 
-**Status:** v0.28.0 / M9.13 — async pixel point tracking on RQ `worker-analysis`.
+**Status:** v0.28.1 / M9.13.1 — durable export artifacts and reliable status UX.
 
 ## Spec
 
@@ -81,13 +81,27 @@ The React/Vite app is API-backed. Main routes:
 | `/projects/new` | Create project |
 | `/projects/:id/upload` | Upload videos and script |
 | `/projects/:id/assets` | Asset analysis, transcript, tracking, delete |
-| `/projects/:id/edit` | Render settings, draft preview, re-render, export |
+| `/projects/:id/edit` | Render settings, draft preview, re-render, export downloads |
 | `/projects/:projectId/edit/timeline/:draftId` | Advanced timeline editor |
 | `/settings` | LLM key settings |
 | `/health` | Developer-facing status dashboard |
 
 `/projects/:id/review` still exists as a legacy route, but the current preview
 and download workflow lives under `/projects/:id/edit`.
+
+## v0.28.1 UX Reliability Notes
+
+- Derivative exports are now durable artifacts under `draft_exports`; the edit
+  page lists queued/running/done/failed exports and shows direct downloads when
+  files are ready.
+- Draft and asset polling ignore stale overlapping responses so older status
+  payloads cannot roll the UI back.
+- Queue badge failures show an explicit unavailable state instead of `排隊 0`.
+- The edit page requires meaningful terminal analysis step data before enabling
+  render triggers.
+- P1 UX audit backlog is documented in
+  `openspec/changes/improve-export-and-status-ux/` for the next implementation
+  slice.
 
 Run locally:
 

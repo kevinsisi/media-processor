@@ -397,11 +397,35 @@ export interface DraftExportRequest {
 }
 
 export interface DraftExportResponse {
+  export_id: number;
   draft_id: number;
   aspect: string;
   height: number;
   job_id: string;
   output_filename: string;
+  status: DraftExportStatus;
+  download_url: string | null;
+  error: string | null;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export type DraftExportStatus = "queued" | "running" | "done" | "failed";
+
+export interface DraftExportArtifact {
+  export_id: number;
+  draft_id: number;
+  aspect: string;
+  height: number;
+  status: DraftExportStatus;
+  job_id: string | null;
+  output_filename: string;
+  download_url: string | null;
+  error: string | null;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
 }
 
 export interface AssetTagOut {

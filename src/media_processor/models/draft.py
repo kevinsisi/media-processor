@@ -38,6 +38,9 @@ def _in_list(values: tuple[str, ...]) -> str:
     return "(" + ",".join(f"'{v}'" for v in values) + ")"
 
 
+DRAFT_EXPORT_STATUS_VALUES = ("queued", "running", "done", "failed")
+
+
 class Draft(Base):
     __tablename__ = "drafts"
 
@@ -138,6 +141,13 @@ class Draft(Base):
         passive_deletes=True,
         order_by="SubtitleCueRow.idx",
     )
+    exports: Mapped[list[DraftExport]] = relationship(
+        "DraftExport",
+        back_populates="draft",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="DraftExport.created_at.desc()",
+    )
 
     __table_args__ = (
         UniqueConstraint("project_id", "version", name="uq_drafts_project_version"),
@@ -150,6 +160,55 @@ class Draft(Base):
             "style_preset IN " + _in_list(CLIP_STYLE_PRESET_VALUES),
             name="ck_drafts_style_preset",
         ),
+    )
+
+
+class DraftExport(Base):
+    """Derivative export artifact for a rendered Draft.
+
+    The RQ job writes the actual ``vN-<aspect>-<height>p.mp4`` file next
+    to the source draft render. This row is the durable UX state that lets
+    the edit page show queued/running/done/failed after refresh.
+    """
+
+    __tablename__ = "draft_exports"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    draft_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("drafts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    aspect: Mapped[str] = mapped_column(String(8), nullable=False)
+    height: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="queued",
+        server_default="queued",
+        index=True,
+    )
+    job_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    output_filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    output_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    draft: Mapped[Draft] = relationship("Draft", back_populates="exports")
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN " + _in_list(DRAFT_EXPORT_STATUS_VALUES),
+            name="ck_draft_exports_status",
+        ),
+        CheckConstraint("height >= 480", name="ck_draft_exports_height_min"),
     )
 
 

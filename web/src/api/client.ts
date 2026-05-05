@@ -18,6 +18,7 @@ import type {
   DraftComment,
   DraftCommentCreate,
   DraftDetail,
+  DraftExportArtifact,
   DraftExportRequest,
   DraftExportResponse,
   DraftRebuildSubtitlesRequest,
@@ -704,6 +705,10 @@ export class ApiClient {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
+  }
+
+  fetchDraftExports(draftId: number): Promise<DraftExportArtifact[]> {
+    return this.get<DraftExportArtifact[]>(`/drafts/${draftId}/exports`);
   }
 
   // ----- Settings — LLM key pool -----

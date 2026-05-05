@@ -45,6 +45,7 @@ SUBTITLE_COLOR_PATTERN = r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$"
 
 # v0.18 — clip-style preset that biases planner span / transition / BGM hint.
 ClipStylePresetLiteral = Literal["fast", "slow", "commercial", "artistic", "custom"]
+DraftExportStatusLiteral = Literal["queued", "running", "done", "failed"]
 
 
 class ProjectSummary(BaseModel):
@@ -593,11 +594,35 @@ class DraftExportRequest(BaseModel):
 class DraftExportResponse(BaseModel):
     """Returned by POST /drafts/{id}/export."""
 
+    export_id: int
     draft_id: int
     aspect: str
     height: int
     job_id: str
     output_filename: str
+    status: DraftExportStatusLiteral
+    download_url: str | None = None
+    error: str | None = None
+    created_at: datetime
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+
+
+class DraftExportOut(BaseModel):
+    """One durable derivative export artifact for a draft."""
+
+    export_id: int
+    draft_id: int
+    aspect: str
+    height: int
+    status: DraftExportStatusLiteral
+    job_id: str | None = None
+    output_filename: str
+    download_url: str | None = None
+    error: str | None = None
+    created_at: datetime
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
 
 
 class AssetTagOut(BaseModel):

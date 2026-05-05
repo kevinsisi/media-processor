@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -102,6 +103,7 @@ def export_draft(
     *,
     aspect: str,
     height: int,
+    export_id: int | None = None,
 ) -> dict[str, Any]:
     """RQ job — produce a derivative mp4 in the given aspect / height.
 
@@ -113,14 +115,47 @@ def export_draft(
     Returns ``{"draft_id", "output_path", "width", "height", "aspect"}`` on
     success; raises ``ExportError`` on bad input or ffmpeg failure.
     """
-    logger.info("export_draft: draft_id=%d aspect=%s height=%d", draft_id, aspect, height)
+    logger.info(
+        "export_draft: draft_id=%d export_id=%s aspect=%s height=%d",
+        draft_id,
+        export_id,
+        aspect,
+        height,
+    )
     # Local imports keep the api container free of heavy deps.
     from sqlalchemy import select
 
     from media_processor.api.config import settings
     from media_processor.core.db import async_session_maker
-    from media_processor.models import Draft
+    from media_processor.models import Draft, DraftExport
     from media_processor.services import exports
+
+    async def _mark_export(
+        status: str,
+        *,
+        output_path: Path | None = None,
+        error: str | None = None,
+    ) -> None:
+        if export_id is None:
+            return
+        async with async_session_maker() as session:
+            artifact = await session.get(DraftExport, export_id)
+            if artifact is None:
+                logger.warning("export_draft: export_id=%d not found", export_id)
+                return
+            artifact.status = status
+            now = datetime.now(UTC)
+            if status == "running":
+                artifact.started_at = now
+                artifact.error = None
+            elif status == "done":
+                artifact.output_path = str(output_path) if output_path is not None else None
+                artifact.completed_at = now
+                artifact.error = None
+            elif status == "failed":
+                artifact.completed_at = now
+                artifact.error = (error or "export failed")[:2000]
+            await session.commit()
 
     async def _resolve_paths() -> tuple[Path, Path]:
         async with async_session_maker() as session:
@@ -134,15 +169,25 @@ def export_draft(
             output_path = base / exports.derive_filename(draft.version, aspect, height)
             return input_path, output_path
 
-    input_path, output_path = asyncio.run(_resolve_paths())
-    result = exports.export_render(
-        input_path,
-        output_path,
-        aspect=aspect,
-        height=height,
-    )
+    try:
+        asyncio.run(_mark_export("running"))
+        input_path, output_path = asyncio.run(_resolve_paths())
+        result = exports.export_render(
+            input_path,
+            output_path,
+            aspect=aspect,
+            height=height,
+        )
+        asyncio.run(_mark_export("done", output_path=result.output_path))
+    except Exception as exc:
+        try:
+            asyncio.run(_mark_export("failed", error=str(exc)))
+        except Exception:  # noqa: BLE001 — don't hide the real export failure.
+            logger.exception("export_draft: failed to mark export_id=%s failed", export_id)
+        raise
     return {
         "draft_id": draft_id,
+        "export_id": export_id,
         "output_path": str(result.output_path),
         "width": result.width,
         "height": result.height,

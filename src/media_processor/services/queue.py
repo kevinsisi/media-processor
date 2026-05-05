@@ -9,6 +9,7 @@ dequeue.
 from __future__ import annotations
 
 import logging
+from contextlib import suppress
 from typing import Any
 
 from redis import Redis
@@ -180,24 +181,29 @@ def enqueue_project_edit(
 def enqueue_draft_export(
     draft_id: int,
     *,
+    export_id: int | None = None,
     aspect: str,
     height: int,
 ) -> str:
     """Schedule ``export_draft(draft_id, aspect, height)`` on the editing queue.
 
-    The export is a pure-ffmpeg derivative of the existing v{N}.mp4; no DB
-    state changes beyond writing a record of the export to logs. The
-    output filename convention lives in ``services.exports.derive_filename``.
+    The export is a pure-ffmpeg derivative of the existing v{N}.mp4. When
+    ``export_id`` is passed, the worker updates that durable artifact row
+    so the UI can show queued/running/done/failed after refresh.
     """
     queue = Queue(EDITING_QUEUE, connection=_redis(), default_timeout=EXPORT_JOB_TIMEOUT_SECONDS)
+    job_kwargs: dict[str, Any] = {"aspect": aspect, "height": height}
+    if export_id is not None:
+        job_kwargs["export_id"] = export_id
     job = queue.enqueue(
         EXPORT_DRAFT_FN,
         args=(draft_id,),
-        kwargs={"aspect": aspect, "height": height},
+        kwargs=job_kwargs,
     )
     logger.info(
-        "enqueued export_draft(draft_id=%d, aspect=%s, height=%d) as job %s",
+        "enqueued export_draft(draft_id=%d, export_id=%s, aspect=%s, height=%d) as job %s",
         draft_id,
+        export_id,
         aspect,
         height,
         job.id,
@@ -335,10 +341,8 @@ def cancel_draft_render(draft_id: int) -> bool:
         except NoSuchJobError:
             continue
         if job.kwargs.get("draft_id") == draft_id:
-            try:
+            with suppress(InvalidJobOperation):
                 job.cancel()
-            except InvalidJobOperation:
-                pass
             logger.info("cancelled queued render_draft job %s for draft_id=%d", job_id, draft_id)
             found = True
 
@@ -350,10 +354,8 @@ def cancel_draft_render(draft_id: int) -> bool:
         except NoSuchJobError:
             continue
         if job.kwargs.get("draft_id") == draft_id:
-            try:
+            with suppress(InvalidJobOperation, NoSuchJobError):
                 send_stop_job_command(redis, job_id)
-            except (InvalidJobOperation, NoSuchJobError):
-                pass
             logger.info("sent stop signal to running render_draft job %s for draft_id=%d", job_id, draft_id)
             found = True
 

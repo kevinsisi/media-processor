@@ -37,6 +37,15 @@ const EDIT_STEP_ORDER: (
   | "bgm"
 )[] = ["plan", "cut", "stabilize", "concat", "subtitles", "bgm"];
 
+const ANALYSIS_STEP_ORDER = [
+  "stt",
+  "scene",
+  "motion",
+  "emotion",
+  "tracking",
+  "coverage",
+] as const;
+
 // Quick-pick lengths offered alongside the free-form input. Matches the
 // IG/TikTok short-form sweet spots; backend clamps the final value to
 // the 10–300 s range regardless of what's typed.
@@ -951,16 +960,17 @@ export default function ProjectEdit() {
             });
           }
           const steps = a.analysis_steps ?? {};
-          for (const state of Object.values(steps)) {
+          for (const step of ANALYSIS_STEP_ORDER) {
+            const state = steps[step];
             total += 1;
-            if (state === "running" || state === "pending") inFlight += 1;
+            if (!state || state === "running" || state === "pending") inFlight += 1;
             else if (typeof state === "string" && state.startsWith("failed:"))
               failed += 1;
           }
         }
         setAssetThumbs(map);
         const next = {
-          allDone: inFlight === 0,
+          allDone: data.assets.length > 0 && total > 0 && inFlight === 0,
           inFlight,
           failed,
           total,

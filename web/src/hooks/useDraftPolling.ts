@@ -32,13 +32,17 @@ export function useDraftPolling(draftId: number | null): UseDraftPolling {
   const [isPolling, setIsPolling] = useState<boolean>(true);
 
   const settleStartRef = useRef<number | null>(null);
-  const cancelRef = useRef<{ cancelled: boolean }>({ cancelled: false });
+  const generationRef = useRef(0);
+  const inFlightGenerationRef = useRef<number | null>(null);
 
   const fetchOnce = useCallback(async () => {
     if (draftId === null) return;
+    const generation = generationRef.current;
+    if (inFlightGenerationRef.current !== null) return;
+    inFlightGenerationRef.current = generation;
     try {
       const result = await apiClient.fetchDraft(draftId);
-      if (cancelRef.current.cancelled) return;
+      if (generation !== generationRef.current) return;
       setData(result);
       setError(null);
 
@@ -59,16 +63,21 @@ export function useDraftPolling(draftId: number | null): UseDraftPolling {
         }
       }
     } catch (err) {
-      if (cancelRef.current.cancelled) return;
+      if (generation !== generationRef.current) return;
       setError(err instanceof Error ? err : new Error(String(err)));
     } finally {
-      if (cancelRef.current.cancelled) return;
+      if (inFlightGenerationRef.current === generation) {
+        inFlightGenerationRef.current = null;
+      }
+      if (generation !== generationRef.current) return;
       setLoading(false);
     }
   }, [draftId]);
 
   useEffect(() => {
-    cancelRef.current = { cancelled: false };
+    const generation = generationRef.current + 1;
+    generationRef.current = generation;
+    inFlightGenerationRef.current = null;
     settleStartRef.current = null;
     if (draftId === null) {
       setIsPolling(false);
@@ -80,7 +89,10 @@ export function useDraftPolling(draftId: number | null): UseDraftPolling {
     setPollIntervalMs(FAST_INTERVAL_MS);
     void fetchOnce();
     return () => {
-      cancelRef.current.cancelled = true;
+      if (generationRef.current === generation) generationRef.current += 1;
+      if (inFlightGenerationRef.current === generation) {
+        inFlightGenerationRef.current = null;
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftId]);

@@ -1,6 +1,11 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ApiError, apiClient } from "../api/client";
-import type { DraftExportResponse, ExportAspect } from "../api/types";
+import type {
+  DraftExportArtifact,
+  DraftExportResponse,
+  DraftExportStatus,
+  ExportAspect,
+} from "../api/types";
 import "./ExportSheet.css";
 
 interface ExportSheetProps {
@@ -17,6 +22,14 @@ const ASPECTS: { value: ExportAspect; label: string; sub: string }[] = [
 ];
 
 const HEIGHTS = [720, 1080, 1440] as const;
+const EXPORT_POLL_MS = 3000;
+
+const STATUS_LABEL: Record<DraftExportStatus, string> = {
+  queued: "排隊中",
+  running: "匯出中",
+  done: "可下載",
+  failed: "失敗",
+};
 
 export default function ExportSheet({ draftId, draftVersion, ready }: ExportSheetProps) {
   const [open, setOpen] = useState(false);
@@ -25,6 +38,20 @@ export default function ExportSheet({ draftId, draftVersion, ready }: ExportShee
   const [submitting, setSubmitting] = useState(false);
   const [latest, setLatest] = useState<DraftExportResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [artifacts, setArtifacts] = useState<DraftExportArtifact[]>([]);
+
+  const fetchArtifacts = useCallback(
+    () => apiClient.fetchDraftExports(draftId),
+    [draftId],
+  );
+
+  const refreshArtifacts = useCallback(async () => {
+    const list = await fetchArtifacts();
+    setArtifacts(list);
+    setLoadError(null);
+    return list;
+  }, [fetchArtifacts]);
 
   const submit = useCallback(async () => {
     setSubmitting(true);
@@ -32,6 +59,11 @@ export default function ExportSheet({ draftId, draftVersion, ready }: ExportShee
     try {
       const resp = await apiClient.exportDraft(draftId, { aspect, height });
       setLatest(resp);
+      setArtifacts((prev) => [
+        resp,
+        ...prev.filter((item) => item.export_id !== resp.export_id),
+      ]);
+      void refreshArtifacts().catch(() => {});
     } catch (err) {
       const msg =
         err instanceof ApiError
@@ -43,7 +75,40 @@ export default function ExportSheet({ draftId, draftVersion, ready }: ExportShee
     } finally {
       setSubmitting(false);
     }
-  }, [aspect, height, draftId]);
+  }, [aspect, height, draftId, refreshArtifacts]);
+
+  useEffect(() => {
+    setArtifacts([]);
+    setLatest(null);
+    setLoadError(null);
+  }, [draftId]);
+
+  useEffect(() => {
+    if (!open || !ready) return;
+    let cancelled = false;
+    let timer: number | null = null;
+
+    const tick = async () => {
+      try {
+        const list = await fetchArtifacts();
+        if (cancelled) return;
+        setArtifacts(list);
+        setLoadError(null);
+        if (list.some((item) => item.status === "queued" || item.status === "running")) {
+          timer = window.setTimeout(() => void tick(), EXPORT_POLL_MS);
+        }
+      } catch (err) {
+        if (cancelled) return;
+        setLoadError(err instanceof Error ? err.message : String(err));
+      }
+    };
+
+    void tick();
+    return () => {
+      cancelled = true;
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [fetchArtifacts, open, ready]);
 
   if (!ready) return null;
 
@@ -116,11 +181,60 @@ export default function ExportSheet({ draftId, draftVersion, ready }: ExportShee
             </p>
           )}
 
-          {latest && !error && (
-            <p className="export-sheet__queued mono" aria-live="polite">
-              已排入工作 #{latest.job_id.slice(0, 6)}…，完成後可從專案下載清單取得 {latest.output_filename}
+          {loadError && (
+            <p className="export-sheet__error mono" role="alert">
+              匯出清單讀取失敗：{loadError}
             </p>
           )}
+
+          {latest && !error && (
+            <p className="export-sheet__queued mono" aria-live="polite">
+              已排入匯出 #{latest.job_id.slice(0, 6)}…，完成後下方會出現下載鈕。
+            </p>
+          )}
+
+          <div className="export-sheet__list" aria-live="polite">
+            <h4 className="export-sheet__list-title">已建立的匯出</h4>
+            {artifacts.length === 0 ? (
+              <p className="export-sheet__empty mono">尚未建立其他比例。</p>
+            ) : (
+              <ul className="export-sheet__items">
+                {artifacts.map((item) => (
+                  <li
+                    key={item.export_id}
+                    className={`export-sheet__item export-sheet__item--${item.status}`}
+                  >
+                    <div className="export-sheet__item-main">
+                      <span className="export-sheet__item-label">
+                        {item.aspect} · {item.height}p
+                      </span>
+                      <span className="export-sheet__item-meta mono">
+                        {STATUS_LABEL[item.status]} · {item.output_filename}
+                      </span>
+                      {item.status === "failed" && item.error && (
+                        <span className="export-sheet__item-error mono">
+                          {item.error}
+                        </span>
+                      )}
+                    </div>
+                    {item.status === "done" && item.download_url ? (
+                      <a
+                        className="cta cta--primary export-sheet__download"
+                        href={item.download_url}
+                        download={item.output_filename}
+                      >
+                        下載
+                      </a>
+                    ) : (
+                      <span className="export-sheet__item-state mono">
+                        {STATUS_LABEL[item.status]}
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
 
           <div className="export-sheet__actions">
             <button
