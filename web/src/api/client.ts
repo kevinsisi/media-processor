@@ -224,10 +224,9 @@ export class ApiClient {
     );
   }
 
-  // v0.25.0 — RQ queue inspector. Returns the currently-running job
-  // (at most one — single worker process) and the ordered queued
-  // list across analysis / editing / bgm queues. The FE polls every
-  // few seconds while a render is in flight.
+  // v0.25.0 / v0.27.0 — RQ queue inspector. Returns all running jobs
+  // plus the ordered queued list across analysis / editing / bgm queues.
+  // The FE polls every few seconds while work is in flight.
   getQueueStatus(): Promise<QueueStatusOut> {
     return this.request<QueueStatusOut>("/queue/status", { method: "GET" });
   }

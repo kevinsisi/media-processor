@@ -69,6 +69,17 @@
   border-left: 3px solid var(--status-down, #b34b3a);
   color: var(--status-down, #b34b3a);
   font-size: var(--t-sm);
+  white-space: pre-line;
+}
+
+.analysis-status {
+  margin-top: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-left: 3px solid var(--status-up, #5f8f4e);
+  color: var(--text-secondary);
+  background: var(--ink-elevated);
+  font-size: var(--t-sm);
+  white-space: pre-line;
 }
 
 /* ---- Batch toolbar (asset multi-select + batch trigger) ---- */

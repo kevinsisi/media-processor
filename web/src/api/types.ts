@@ -789,10 +789,9 @@ export interface SyncFromManagerOut {
   stored_count: number;
 }
 
-// v0.25.0 — RQ queue inspector. The API returns ``running`` (at most
-// one item — single-worker setup) and the ordered queued list across
-// all three queues (analysis / editing / bgm). The position field
-// matches the worker's dispatch order so "你排第 N 位" is honest.
+// v0.25.0 / v0.27.0 — RQ queue inspector. The API returns every
+// currently running job plus the ordered queued list across analysis /
+// editing / bgm. The position field is queue-order metadata for the UI.
 export type QueueName = "analysis" | "editing" | "bgm";
 export type QueueJobState = "running" | "queued";
 
@@ -820,9 +819,8 @@ export interface QueueJobItem {
 
 export interface QueueStatusOut {
   // v0.27.0 — multi-worker: up to 5 concurrent running jobs (1
-  // analysis + 3 editing + 1 bgm). Pre-0.27 returned at most one
-  // item but always shaped as `running | null`; the new shape is
-  // a list so the FE can render every live render in parallel.
+  // analysis + 3 editing + 1 bgm). The list shape lets the FE render
+  // every live job in parallel.
   running: QueueJobItem[];
   queued: QueueJobItem[];
 }

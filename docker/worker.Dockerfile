@@ -131,5 +131,6 @@ RUN if [ "$WHISPER_FAKE" = "0" ]; then \
         python -c "from faster_whisper import WhisperModel; WhisperModel('${WHISPER_PREFETCH_MODEL}', device='cpu', compute_type='int8')" ; \
     fi
 
-# Run the RQ worker against the 'analysis' queue.
+# Default legacy mode listens on all queues. docker-compose overrides this CMD
+# per service with ``python -m media_processor.workers <queue>``.
 CMD ["python", "-m", "media_processor.workers"]

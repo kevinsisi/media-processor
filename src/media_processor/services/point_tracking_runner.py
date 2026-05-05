@@ -11,10 +11,9 @@ This runner is the worker-side orchestrator that:
 
   1. Reads the operator's intent off the job args (norm coords +
      init frame timestamp).
-  2. Calls ``services.point_tracking.track_point`` with **no time
-     budget** — RQ's ``default_timeout`` (set in
-     ``services.queue.POINT_TRACKING_JOB_TIMEOUT_SECONDS``) is the
-     only ceiling.
+  2. Calls ``services.point_tracking.track_point`` with a 1 h defensive
+     time budget. RQ's 30 min job timeout is still the practical ceiling
+     in the current deployment.
   3. On success, writes ``Asset.point_tracking_json`` +
      ``Asset.point_tracking_origin`` (with cv2-resolved x/y pixels)
      and flips ``point_tracking_status`` to ``"done"``.
@@ -78,15 +77,11 @@ async def run_point_tracking(
     # hold a transaction open for the duration of a multi-minute LK
     # walk. ``track_point`` is sync and does its own cv2 lifecycle.
     try:
-        # No ``time_budget_s`` — the worker has no nginx in front of
-        # it and RQ's default_timeout (set on enqueue) is the only
-        # ceiling. The 30-second budget v0.27.3 added is still the
-        # default value of ``MAX_LK_DURATION_S`` for backwards-compat
-        # callers; we explicitly opt out by passing ``None`` ... no,
-        # passing ``None`` falls back to the default. Pass a very
-        # large finite number instead so a corrupt cv2 read still
-        # gets an eventual bail-out (defence in depth) but a normal
-        # 5-minute clip completes.
+        # The worker has no nginx in front of it. The 30-second budget
+        # v0.27.3 added remains the default for in-process callers; the
+        # worker uses a large finite budget so corrupt cv2 reads still
+        # get an eventual bail-out. RQ's 30 min timeout should fire first
+        # in normal deployment.
         point_json = point_tracking_svc.track_point(
             media_path,
             init_norm_x=init_norm_x,

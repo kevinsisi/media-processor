@@ -883,6 +883,7 @@ export default function ProjectAnalysis() {
   const validProjectId = Number.isFinite(projectId) ? projectId : null;
   const polling = useAssetPolling(validProjectId);
   const [triggerError, setTriggerError] = useState<string | null>(null);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [batchRunning, setBatchRunning] = useState(false);
   // v0.18 — track per-asset translate-button busy state. The job runs
@@ -900,6 +901,7 @@ export default function ProjectAnalysis() {
   const handleRetryStep = useCallback(
     async (assetId: number, step: AnalysisStep) => {
       setRetryingMap((prev) => ({ ...prev, [assetId]: step }));
+      setStatusMessage(null);
       try {
         await apiClient.triggerAnalyze(assetId, { steps: [step], force: true });
         polling.refresh();
@@ -927,6 +929,7 @@ export default function ProjectAnalysis() {
 
   const handleAnalyze = useCallback(
     async (assetId: number, force: boolean) => {
+      setStatusMessage(null);
       try {
         await apiClient.triggerAnalyze(assetId, { force });
         polling.refresh();
@@ -939,6 +942,7 @@ export default function ProjectAnalysis() {
 
   const handleTranslate = useCallback(
     async (assetId: number) => {
+      setStatusMessage(null);
       setTranslatingIds((prev) => {
         const out = new Set(prev);
         out.add(assetId);
@@ -1036,6 +1040,7 @@ export default function ProjectAnalysis() {
       }
       setBatchRunning(true);
       setTriggerError(null);
+      setStatusMessage(null);
       const ids = Array.from(selectedIds);
       let failed = 0;
       // Sequential trigger — each call hits the API/queue cheaply, and
@@ -1126,18 +1131,18 @@ export default function ProjectAnalysis() {
               .map((v) => `v${v}`)
               .join("、")} 標為失敗`,
         );
-      const messages: string[] = [];
+      const statusLines: string[] = [];
       if (summary.deleted_count > 0) {
-        messages.push(`刪除完成 ${summary.deleted_count} 個。`);
+        statusLines.push(`刪除完成 ${summary.deleted_count} 個。`);
       }
       if (invalidatedLines.length > 0) {
-        messages.push(...invalidatedLines);
+        statusLines.push(...invalidatedLines);
       }
       if (errorLines.length > 0) {
-        messages.push(`部分刪除失敗：`, ...errorLines);
+        setTriggerError([`部分刪除失敗：`, ...errorLines].join("\n"));
       }
-      if (messages.length > 0) {
-        setTriggerError(messages.join("\n"));
+      if (statusLines.length > 0) {
+        setStatusMessage(statusLines.join("\n"));
       }
     } catch (err) {
       setTriggerError(
@@ -1216,7 +1221,12 @@ export default function ProjectAnalysis() {
         )}
         {triggerError && (
           <p className="analysis-error" role="alert">
-            觸發分析失敗：{triggerError}
+            操作失敗：{triggerError}
+          </p>
+        )}
+        {statusMessage && (
+          <p className="analysis-status" role="status">
+            {statusMessage}
           </p>
         )}
         {polling.error && (

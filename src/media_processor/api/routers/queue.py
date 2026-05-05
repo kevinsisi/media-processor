@@ -5,8 +5,8 @@ status string itself. The new endpoints surface what the worker is
 actually doing, how deep the line is, and let the operator drop a
 queued job that's no longer wanted.
 
-The worker container is single-process (one job at a time across all
-three queues), so the response always has at most one ``running`` job.
+The current compose deployment runs multiple workers (1 analysis + 3 editing +
+1 bgm), so the response may contain multiple ``running`` jobs.
 
 * ``GET  /queue/status``  — current running + ordered queued list.
 * ``DELETE /queue/jobs/{job_id}`` — cancel a queued job. 409s on a
@@ -34,7 +34,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from media_processor.api.config import settings
 from media_processor.api.deps import get_session
 from media_processor.models import Asset, Draft, Project
-from media_processor.workers import ANALYSIS_QUEUE, BGM_QUEUE, EDITING_QUEUE
 
 router = APIRouter(prefix="/queue", tags=["queue"])
 
@@ -153,9 +152,8 @@ def _job_to_item(
             project_id = int(args[0])
         if "draft_id" in kwargs:
             draft_id = int(kwargs["draft_id"])
-    elif kind == "export":
-        if args:
-            draft_id = int(args[0])
+    elif kind == "export" and args:
+        draft_id = int(args[0])
 
     elapsed_s: float | None = None
     if state == "running" and job.started_at is not None:

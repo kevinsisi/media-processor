@@ -2,21 +2,26 @@
 
 Content factory pipeline for short-form video production.
 
-**Status:** Phase α MVP, Step 0 + M1 infrastructure.
+**Status:** v0.28.0 / M9.13 — async pixel point tracking on RQ `worker-analysis`.
 
 ## Spec
 
-See `docs/superpowers/specs/2026-04-30-media-processor-design.md`.
+Start with `ROADMAP.md` for current state. Historical OpenSpec changes live under
+`openspec/changes/archive/`.
 
 ## Quick start
 
 ```bash
 cp .env.example .env
-make up         # Start docker-compose stack
+docker compose up -d --scale worker-editing=3
 make dev-api    # Run API in dev mode (hot reload)
 make dev-web    # Run web in dev mode
 make test       # Run all tests
 ```
+
+`--scale worker-editing=3` is required for the current multi-worker deployment.
+Plain `make up` is still available for quick local boot, but it does not encode
+the production editing-worker scale.
 
 ## Repository layout
 
@@ -43,49 +48,46 @@ make test       # Run all tests
 - Type check: `mypy src`
 - Tests: `pytest`
 
-## Step 0 verification status
+## Verification
 
-| Check | Status | Doc |
-|-------|--------|-----|
-| SMB share Mac ↔ Windows | PENDING (girlfriend) | `scripts/verify_smb.md` |
-| WSL2 + NVIDIA GPU passthrough | PENDING (Windows host) | `scripts/verify_gpu.sh` |
-| CapCut draft schema captured | PENDING (girlfriend's sample) | `docs/capcut_draft_schema_findings.md` |
-| CLIP zero-shot probe | PENDING (30 carsmeet screenshots) | `docs/clip_zero_shot_findings.md` |
-| File System Access API on her Mac | PENDING (girlfriend Chrome) | `docs/fs_access_api_findings.md` |
+Local checks:
 
-Update each row to PASS / FAIL with a date once the corresponding
-artefact is captured.
+```bash
+pytest -v
+ruff check src tests
+ruff format --check src tests
+mypy src
+cd web && npm ci && npm run build
+```
 
-## M1 acceptance
+Runtime smoke checks after Docker boot:
 
-- [x] `docker compose config` validates the stack (services declared correctly)
-- [x] `pytest -v` passes (2 health tests pass, 2 capcut tests skip pending sample)
-- [x] `ruff check src tests` and `ruff format --check src tests` are clean
-- [x] `mypy src` is clean (strict mode)
-- [x] `npm run build` produces a working web bundle
-- [ ] `docker compose up -d --build` brings all services up — depends on Step 0 GPU + SMB checks
-- [ ] `curl http://127.0.0.1:8623/health` returns `{"status":"ok"}` once Postgres + Redis are running
-- [ ] `curl http://127.0.0.1:8523/api/health` returns the same through the Nginx proxy
-- [ ] CI green on `main`
+```bash
+curl http://127.0.0.1:8623/health
+curl http://127.0.0.1:8523/api/health
+```
 
-The remaining items run on the developer's Windows host once Step 0
-verification completes.
+The health response includes `status`, `version`, and dependency status. `status`
+is `ok` only when Postgres and Redis are both reachable; otherwise it is
+`degraded`.
 
-## Web preview (mockup, no backend required)
+## Web App
 
-A non-functional UI mockup ships with this milestone so the end user
-can see what the review-inbox flow will look like before the AI
-pipeline lands. Three routes:
+The React/Vite app is API-backed. Main routes:
 
 | Route | Purpose |
 |-------|---------|
-| `/` | ProjectList — editorial TOC of mock issues across statuses |
-| `/projects/:id/review` | Review — 9:16 player + AI intel sidebar + interactive timeline + 5-action row + prompt modal |
-| `/health` | Developer-facing status dashboard (formerly the landing) |
+| `/` | Project list |
+| `/projects/new` | Create project |
+| `/projects/:id/upload` | Upload videos and script |
+| `/projects/:id/assets` | Asset analysis, transcript, tracking, delete |
+| `/projects/:id/edit` | Render settings, draft preview, re-render, export |
+| `/projects/:projectId/edit/timeline/:draftId` | Advanced timeline editor |
+| `/settings` | LLM key settings |
+| `/health` | Developer-facing status dashboard |
 
-Mock data lives at `web/src/data/mockData.ts` and mirrors the entity
-shape from spec §4 — swapping to real API later is a data-source
-change, not a UI rewrite.
+`/projects/:id/review` still exists as a legacy route, but the current preview
+and download workflow lives under `/projects/:id/edit`.
 
 Run locally:
 

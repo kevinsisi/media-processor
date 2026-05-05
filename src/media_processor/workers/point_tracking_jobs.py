@@ -10,8 +10,9 @@ explicitly chosen this mode and was unhappy with a fallback.
 v0.28.0 hands the loop off to the analysis worker. The endpoint
 enqueues, sets ``Asset.point_tracking_status = 'pending'``, and
 returns; the FE polls until ``status`` flips to ``"done"`` or
-``"failed"``. The job runs without a wall-clock budget — RQ's
-``default_timeout`` (set in ``services.queue``) is the only ceiling.
+``"failed"``. The runner uses a large defensive wall-clock budget, while
+RQ's ``default_timeout`` (set in ``services.queue``) remains the practical
+deployment ceiling.
 
 The worker writes back to ``Asset``:
 

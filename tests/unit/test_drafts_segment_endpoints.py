@@ -430,13 +430,12 @@ def test_reorder_preserves_render_flags_from_draft(
     assert call["auto_reframe"] is True
 
 
-def test_reorder_falls_back_to_true_for_legacy_drafts(
+def test_reorder_uses_current_legacy_defaults_for_legacy_drafts(
     app: tuple[FastAPI, _FakeQueue],
 ) -> None:
-    """Legacy drafts (pre-v0.21.1, ``render_flags_json IS NULL``) keep
-    the historical all-True defaults so the fix is backwards-compatible
-    — only fresh trigger drafts that snapshotted False values are
-    preserved as off."""
+    """Legacy drafts (``render_flags_json IS NULL``) use the current
+    per-flag defaults. v0.24 changed transitions to default-off so a
+    legacy re-render now matches what fresh projects show in the UI."""
     fastapi_app, fake_q = app
     # Seeded draft has render_flags_json = NULL (default).
     client = TestClient(fastapi_app)
@@ -446,7 +445,7 @@ def test_reorder_falls_back_to_true_for_legacy_drafts(
     assert resp.status_code == 200, resp.text
 
     call = fake_q.calls[0]
-    assert call["transitions"] is True
+    assert call["transitions"] is False
     assert call["stabilize"] is True
     assert call["subtitles"] is True
     assert call["auto_reframe"] is True
@@ -483,8 +482,8 @@ def test_reorder_body_override_beats_legacy_null_snapshot(
     # Override applied for the two fields the FE sent.
     assert call["transitions"] is False
     assert call["stabilize"] is False
-    # Untouched fields fall back to the True default since this draft
-    # had no snapshot.
+    # Untouched fields fall back to current per-flag defaults since this
+    # draft had no snapshot.
     assert call["subtitles"] is True
     assert call["auto_reframe"] is True
 
@@ -511,8 +510,8 @@ def test_rebuild_subtitles_no_body_keeps_legacy_compat(
     app: tuple[FastAPI, _FakeQueue],
 ) -> None:
     """Older clients post to /rebuild-subtitles with no body. The
-    endpoint must still parse + run with the all-True legacy
-    fallback, not 422 on missing body."""
+    endpoint must still parse + run with current per-flag defaults,
+    not 422 on missing body."""
     fastapi_app, fake_q = app
     # Seed a cut_plan_json on the draft so rebuild-subtitles doesn't
     # hit the "no plan" 409.
@@ -521,7 +520,7 @@ def test_rebuild_subtitles_no_body_keeps_legacy_compat(
     assert resp.status_code == 200, resp.text
     call = fake_q.calls[0]
     assert call["subtitles_from_db"] is True
-    assert call["transitions"] is True  # legacy fallback
+    assert call["transitions"] is False  # current legacy fallback
     assert call["subtitles"] is True
 
 

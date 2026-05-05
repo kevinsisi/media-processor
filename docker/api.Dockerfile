@@ -31,14 +31,10 @@ RUN pip install --no-cache-dir --upgrade pip \
         "pyyaml>=6.0.2" \
         "httpx>=0.28.0"
 
-# v0.23.1 — OpenCV is needed for two inline endpoints that the api
-# container handles synchronously (NOT delegated to the GPU worker):
-#   * mode=custom (CSRT user-drawn ROI, services/object_tracking.
-#     track_custom_roi)
-#   * mode=point (LK pixel-precise tracking, services/point_tracking.
-#     track_point)
-# Both currently use ``asyncio.to_thread`` from the FastAPI handler,
-# which means cv2 has to be importable inside the api process. The
+# v0.23.1 / v0.28.0 — OpenCV remains needed by the api container for
+# synchronous custom ROI tracking (mode=custom, services/object_tracking.
+# track_custom_roi). mode=point now runs asynchronously on worker-analysis,
+# so LK point tracking no longer executes inside the API request path. The
 # ``-headless`` variant skips Qt/GUI bindings (the api container has
 # no display) but keeps the contrib trackers (CSRT, MIL, etc.). numpy
 # pinned to the same range the worker uses to avoid wheel mismatches
