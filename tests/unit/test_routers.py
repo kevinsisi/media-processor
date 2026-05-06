@@ -21,7 +21,9 @@ from sqlalchemy.pool import StaticPool
 
 from media_processor.api.deps import get_session
 from media_processor.api.main import app as production_app
+from media_processor.api.routers import assets as assets_router
 from media_processor.api.routers import drafts as drafts_router
+from media_processor.api.routers import music as music_router
 from media_processor.models import (
     Asset,
     AssetSegment,
@@ -200,6 +202,66 @@ def test_export_draft_creates_listable_artifact(app: FastAPI) -> None:
     assert len(exports) == 1
     assert exports[0]["export_id"] == body["export_id"]
     assert exports[0]["output_filename"] == "v1-9x16-1080p.mp4"
+
+
+def test_export_enqueue_failure_marks_artifact_failed(
+    app: FastAPI,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_enqueue(*_args: Any, **_kwargs: Any) -> str:
+        raise RuntimeError("redis down")
+
+    monkeypatch.setattr(drafts_router, "enqueue_draft_export", fail_enqueue)
+    client = TestClient(app)
+    resp = client.post("/drafts/1/export", json={"aspect": "9:16", "height": 1080})
+    assert resp.status_code == 502, resp.text
+
+    list_resp = client.get("/drafts/1/exports")
+    assert list_resp.status_code == 200, list_resp.text
+    exports = list_resp.json()
+    assert exports[0]["status"] == "failed"
+    assert "enqueue failed" in exports[0]["error"]
+
+
+def test_point_tracking_enqueue_failure_reaches_terminal_state(
+    app: FastAPI,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_enqueue(*_args: Any, **_kwargs: Any) -> str:
+        raise RuntimeError("redis down")
+
+    monkeypatch.setattr(assets_router, "enqueue_point_tracking", fail_enqueue)
+    client = TestClient(app)
+    resp = client.patch(
+        "/assets/1/tracking-target",
+        json={"mode": "point", "point": {"norm_x": 0.5, "norm_y": 0.5, "frame_ms": 0}},
+    )
+    assert resp.status_code == 502, resp.text
+
+    detail = client.get("/assets/1/tracking")
+    assert detail.status_code == 200, detail.text
+    body = detail.json()
+    assert body["point_tracking_status"] == "failed"
+    assert "enqueue failed" in body["point_tracking_error"]
+
+
+def test_bgm_enqueue_failure_marks_job_failed(
+    app: FastAPI,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_enqueue(*_args: Any, **_kwargs: Any) -> str:
+        raise RuntimeError("redis down")
+
+    monkeypatch.setattr(music_router, "enqueue_bgm_generation", fail_enqueue)
+    client = TestClient(app)
+    resp = client.post("/projects/1/generate-bgm", json={"prompt": "calm luxury beat"})
+    assert resp.status_code == 502, resp.text
+
+    status_resp = client.get("/projects/1/bgm-status")
+    assert status_resp.status_code == 200, status_resp.text
+    body = status_resp.json()
+    assert body["status"] == "failed:enqueue"
+    assert body["error"] == "redis down"
 
 
 def test_get_asset_with_tags_sorted(app: FastAPI) -> None:

@@ -2,7 +2,7 @@
 
 Content factory pipeline for novice-friendly Instagram and Facebook short-video production.
 
-**Status:** v0.28.2 / M9.13.2 — novice IG/FB short-video workflow.
+**Status:** v0.28.3 / M9.13.3 — hardened background job lifecycle.
 
 ## Spec
 
@@ -87,6 +87,18 @@ The React/Vite app is API-backed. Main routes:
 | `/health` | Developer-facing status dashboard |
 
 `/projects/:id/review` is a legacy route and redirects to `/projects/:id/edit`.
+
+## v0.28.3 Job Lifecycle Reliability Notes
+
+- Enqueue failures no longer leave durable rows stuck in pending states for
+  draft renders, exports, BGM generation, point tracking, analysis, or subtitle
+  translation triggers.
+- The watchdog now reconciles missing RQ jobs for export artifacts, BGM jobs,
+  point tracking, and in-flight analysis in addition to draft renders.
+- Worker entry points guard against stale jobs overwriting terminal draft/export
+  states after cancellation, retry, or duplicate queue records.
+- Generic queued-job cancellation now syncs durable row state for render, export,
+  BGM, point tracking, and analysis jobs.
 
 ## v0.28.2 Novice Social Shorts Notes
 

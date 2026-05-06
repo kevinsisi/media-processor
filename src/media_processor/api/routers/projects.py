@@ -338,17 +338,26 @@ async def trigger_project_edit(
         if payload.target_duration_seconds is not None
         else None
     )
-    job_id = enqueue_project_edit(
-        project_id,
-        draft_id=new_draft.id,
-        force=payload.force,
-        target_duration_ms=target_duration_ms,
-        stabilize=payload.stabilize,
-        subtitles=payload.subtitles,
-        transitions=payload.transitions,
-        auto_reframe=payload.auto_reframe,
-        style_preset=payload.style_preset,
-    )
+    try:
+        job_id = enqueue_project_edit(
+            project_id,
+            draft_id=new_draft.id,
+            force=payload.force,
+            target_duration_ms=target_duration_ms,
+            stabilize=payload.stabilize,
+            subtitles=payload.subtitles,
+            transitions=payload.transitions,
+            auto_reframe=payload.auto_reframe,
+            style_preset=payload.style_preset,
+        )
+    except Exception as exc:  # noqa: BLE001 — keep durable state truthful.
+        new_draft.status = DraftStatus.FAILED.value
+        new_draft.prompt_feedback = f"enqueue failed: {exc}"
+        await session.commit()
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"edit enqueue failed: {exc}",
+        ) from exc
     return EditTriggerResponse(
         project_id=project_id,
         draft_id=new_draft.id,

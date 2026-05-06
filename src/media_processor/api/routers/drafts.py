@@ -141,6 +141,16 @@ def _draft_render_flags(
     }
 
 
+async def _mark_draft_enqueue_failed(
+    session: AsyncSession,
+    draft: Draft,
+    exc: Exception,
+) -> None:
+    draft.status = DraftStatus.FAILED.value
+    draft.prompt_feedback = ((draft.prompt_feedback or "") + f"\n[enqueue-failed] {exc}").strip()
+    await session.commit()
+
+
 def _resolve_draft_url(draft: Draft, *, suffix: str, stored_path: str | None) -> str | None:
     """Pick a public URL for the mp4 or srt sidecar.
 
@@ -628,16 +638,23 @@ async def reorder_draft_segments(
     draft.render_flags_json = flags
     await session.commit()
 
-    enqueue_project_edit(
-        draft.project_id,
-        draft_id=draft.id,
-        force=True,
-        skip_plan=True,
-        transitions=flags["transitions"],
-        stabilize=flags["stabilize"],
-        subtitles=flags["subtitles"],
-        auto_reframe=flags["auto_reframe"],
-    )
+    try:
+        enqueue_project_edit(
+            draft.project_id,
+            draft_id=draft.id,
+            force=True,
+            skip_plan=True,
+            transitions=flags["transitions"],
+            stabilize=flags["stabilize"],
+            subtitles=flags["subtitles"],
+            auto_reframe=flags["auto_reframe"],
+        )
+    except Exception as exc:  # noqa: BLE001 — do not leave pending without RQ job.
+        await _mark_draft_enqueue_failed(session, draft, exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"draft render enqueue failed: {exc}",
+        ) from exc
 
     await session.refresh(draft, attribute_names=["segments"])
     return serialise_draft_detail(draft)
@@ -1005,17 +1022,24 @@ async def re_render_draft(
     draft.render_flags_json = flags
     await session.commit()
 
-    enqueue_project_edit(
-        draft.project_id,
-        draft_id=draft.id,
-        force=True,
-        skip_plan=True,
-        subtitles_from_db=True,
-        transitions=flags["transitions"],
-        stabilize=flags["stabilize"],
-        subtitles=flags["subtitles"],
-        auto_reframe=flags["auto_reframe"],
-    )
+    try:
+        enqueue_project_edit(
+            draft.project_id,
+            draft_id=draft.id,
+            force=True,
+            skip_plan=True,
+            subtitles_from_db=True,
+            transitions=flags["transitions"],
+            stabilize=flags["stabilize"],
+            subtitles=flags["subtitles"],
+            auto_reframe=flags["auto_reframe"],
+        )
+    except Exception as exc:  # noqa: BLE001 — do not leave pending without RQ job.
+        await _mark_draft_enqueue_failed(session, draft, exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"draft render enqueue failed: {exc}",
+        ) from exc
     await session.refresh(draft, attribute_names=["segments"])
     return serialise_draft_detail(draft)
 
@@ -1054,17 +1078,24 @@ async def rebuild_subtitles(
     draft.render_flags_json = flags
     await session.commit()
 
-    enqueue_project_edit(
-        draft.project_id,
-        draft_id=draft.id,
-        force=True,
-        skip_plan=True,
-        subtitles_from_db=True,
-        transitions=flags["transitions"],
-        stabilize=flags["stabilize"],
-        subtitles=flags["subtitles"],
-        auto_reframe=flags["auto_reframe"],
-    )
+    try:
+        enqueue_project_edit(
+            draft.project_id,
+            draft_id=draft.id,
+            force=True,
+            skip_plan=True,
+            subtitles_from_db=True,
+            transitions=flags["transitions"],
+            stabilize=flags["stabilize"],
+            subtitles=flags["subtitles"],
+            auto_reframe=flags["auto_reframe"],
+        )
+    except Exception as exc:  # noqa: BLE001 — do not leave pending without RQ job.
+        await _mark_draft_enqueue_failed(session, draft, exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"draft render enqueue failed: {exc}",
+        ) from exc
     await session.refresh(draft, attribute_names=["segments"])
     return serialise_draft_detail(draft)
 

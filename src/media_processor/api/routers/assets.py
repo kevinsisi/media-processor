@@ -397,9 +397,27 @@ async def get_asset_tracking(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="asset not found")
     blob = getattr(asset, "tracking_json", None)
     if not isinstance(blob, dict):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="tracking has not run for this asset",
+        point_track = getattr(asset, "point_tracking_json", None)
+        point_status = getattr(asset, "point_tracking_status", None)
+        if point_status is None and not isinstance(point_track, dict):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="tracking has not run for this asset",
+            )
+        return TrackingDetailOut(
+            src_w=0,
+            src_h=0,
+            fps=0.0,
+            sampled_frames=0,
+            subject_class="",
+            confidence=0.0,
+            tracks=[],
+            tracked_object_index=getattr(asset, "tracked_object_index", None),
+            has_custom_roi=isinstance(getattr(asset, "custom_roi_json", None), dict),
+            has_point_track=isinstance(point_track, dict),
+            point_tracking_origin=getattr(asset, "point_tracking_origin", None),
+            point_tracking_status=point_status,
+            point_tracking_error=getattr(asset, "point_tracking_error", None),
         )
     raw_tracks = blob.get("tracks") or []
     tracks: list[TrackingTrackOut] = []
@@ -611,12 +629,21 @@ async def patch_asset_tracking_target(
         # race and overwrite a row that hasn't yet been marked
         # pending). ``enqueue_point_tracking`` is purely a Redis
         # write; we don't need to await its DB side-effects.
-        enqueue_point_tracking(
-            asset_id,
-            init_norm_x=norm_x,
-            init_norm_y=norm_y,
-            init_t_ms=frame_ms,
-        )
+        try:
+            enqueue_point_tracking(
+                asset_id,
+                init_norm_x=norm_x,
+                init_norm_y=norm_y,
+                init_t_ms=frame_ms,
+            )
+        except Exception as exc:  # noqa: BLE001 — do not leave polling stuck.
+            asset.point_tracking_status = "failed"
+            asset.point_tracking_error = f"enqueue failed: {exc}"
+            await session.commit()
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"point tracking enqueue failed: {exc}",
+            ) from exc
         # 202 Accepted — the canonical "I queued this; come back and
         # poll" code. Other modes (auto / object / custom / fixed /
         # none) fall through to the default 200 below because they
@@ -631,6 +658,10 @@ async def patch_asset_tracking_target(
         asset.tracked_object_index = -2
     else:  # "none"
         asset.tracked_object_index = -3
+
+    if payload.mode != "point" and asset.point_tracking_status == "pending":
+        asset.point_tracking_status = None
+        asset.point_tracking_error = None
 
     await session.commit()
     await session.refresh(asset)
@@ -659,11 +690,17 @@ async def trigger_asset_analysis(
     asset = await session.get(Asset, asset_id)
     if asset is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="asset not found")
-    job_id = enqueue_asset_analysis(
-        asset_id,
-        steps=list(payload.steps) if payload.steps is not None else None,
-        force=payload.force,
-    )
+    try:
+        job_id = enqueue_asset_analysis(
+            asset_id,
+            steps=list(payload.steps) if payload.steps is not None else None,
+            force=payload.force,
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"analysis enqueue failed: {exc}",
+        ) from exc
     return AnalyzeResponse(
         asset_id=asset_id,
         job_id=job_id,
@@ -697,7 +734,13 @@ async def trigger_asset_subtitle_translation(
     asset = await session.get(Asset, asset_id)
     if asset is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="asset not found")
-    job_id = enqueue_asset_translate(asset_id, lang=payload.lang)
+    try:
+        job_id = enqueue_asset_translate(asset_id, lang=payload.lang)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"translation enqueue failed: {exc}",
+        ) from exc
     return TranslateSubtitleResponse(
         asset_id=asset_id,
         job_id=job_id,

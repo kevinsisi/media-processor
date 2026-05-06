@@ -179,6 +179,10 @@ async def _adopt_draft_row(project: Project, draft_id: int) -> _DraftHandle:
             raise RuntimeError(
                 f"draft {draft_id} belongs to project {draft.project_id}, not {project.id}"
             )
+        if draft.status != DraftStatus.PENDING.value:
+            raise RuntimeError(
+                f"stale render job ignored for draft {draft_id}: status is {draft.status!r}"
+            )
         draft.status = DraftStatus.PROCESSING.value
         draft.progress_steps_json = _initial_progress()
         draft.prompt_feedback = None
@@ -196,6 +200,8 @@ async def _set_stage_state(draft_id: int, stage: str, value: str) -> None:
     async with async_session_maker() as session:
         draft = await session.get(Draft, draft_id)
         if draft is None:
+            return
+        if draft.status not in (DraftStatus.PENDING.value, DraftStatus.PROCESSING.value):
             return
         blob: dict[str, str] = dict(draft.progress_steps_json or {})
         blob[stage] = value
@@ -258,6 +264,8 @@ async def _snapshot_draft_bgm_path(draft_id: int, project_bgm_path: str | None) 
         draft = await session.get(Draft, draft_id)
         if draft is None:
             return project_bgm_path
+        if draft.status not in (DraftStatus.PENDING.value, DraftStatus.PROCESSING.value):
+            return draft.bgm_path
         if draft.bgm_path is None and project_bgm_path:
             draft.bgm_path = project_bgm_path
             await session.commit()
@@ -288,6 +296,13 @@ async def _persist_plan(handle: _DraftHandle, plan: CutPlan) -> None:
         draft = await session.get(Draft, handle.draft_id)
         if draft is None:
             raise RuntimeError(f"draft {handle.draft_id} disappeared")
+        if draft.status != DraftStatus.PROCESSING.value:
+            logger.info(
+                "draft %d no longer processing (%s); skipping stale plan persist",
+                handle.draft_id,
+                draft.status,
+            )
+            return
         draft.cut_plan_json = edit_planner.serialise_plan(plan)
         cursor_ms = 0
         # Replace any leftover segments from a prior run (force).
@@ -323,6 +338,8 @@ async def _mark_failed(draft_id: int, message: str) -> None:
         draft = await session.get(Draft, draft_id)
         if draft is None:
             return
+        if draft.status not in (DraftStatus.PENDING.value, DraftStatus.PROCESSING.value):
+            return
         draft.status = DraftStatus.FAILED.value
         draft.prompt_feedback = (
             (draft.prompt_feedback or "") + f"\n[render-failed] {message}"
@@ -339,6 +356,8 @@ async def _mark_ready(
     async with async_session_maker() as session:
         draft = await session.get(Draft, draft_id)
         if draft is None:
+            return
+        if draft.status != DraftStatus.PROCESSING.value:
             return
         draft.status = DraftStatus.READY_FOR_REVIEW.value
         draft.mp4_preview_path = str(output_path)
@@ -463,6 +482,9 @@ async def _persist_subtitle_cues(draft_id: int, srt_text: str) -> None:
     than stale rows from a prior render."""
     cues = subtitles.parse_srt(srt_text) if srt_text else []
     async with async_session_maker() as session:
+        draft = await session.get(Draft, draft_id)
+        if draft is None or draft.status != DraftStatus.PROCESSING.value:
+            return
         await session.execute(delete(SubtitleCueRow).where(SubtitleCueRow.draft_id == draft_id))
         for cue in cues:
             session.add(

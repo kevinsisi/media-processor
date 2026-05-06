@@ -190,6 +190,25 @@ def test_edit_trigger_persists_pending_draft(app: FastAPI, fake_enqueue: list[En
     assert drafts[0]["progress_steps"] == dict.fromkeys(EDIT_STEP_VALUES, "pending")
 
 
+def test_edit_trigger_enqueue_failure_marks_draft_failed(
+    app: FastAPI,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_enqueue(*_args: Any, **_kwargs: Any) -> str:
+        raise RuntimeError("redis down")
+
+    monkeypatch.setattr(projects_router, "enqueue_project_edit", fail_enqueue)
+    client = TestClient(app)
+    resp = client.post("/projects/1/edit", json={})
+    assert resp.status_code == 502, resp.text
+
+    drafts_resp = client.get("/projects/1/drafts")
+    assert drafts_resp.status_code == 200
+    drafts = drafts_resp.json()
+    assert len(drafts) == 1
+    assert drafts[0]["status"] == "failed"
+
+
 def test_edit_trigger_409_when_pending_draft_exists(
     fake_enqueue: list[EnqueueCall],
 ) -> None:

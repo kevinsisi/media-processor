@@ -267,7 +267,91 @@ def enqueue_point_tracking(
     return job.id
 
 
-def has_draft_render_job(draft_id: int) -> bool:
+def _job_matches(
+    job: Job,
+    *,
+    func_name: str,
+    args_prefix: tuple[Any, ...] = (),
+    kwargs: dict[str, Any] | None = None,
+    job_id: str | None = None,
+) -> bool:
+    if job_id is not None and job.id == job_id:
+        return True
+    if (job.func_name or "") != func_name:
+        return False
+    job_args = tuple(job.args or ())
+    if args_prefix and job_args[: len(args_prefix)] != args_prefix:
+        return False
+    job_kwargs = dict(job.kwargs or {})
+    return all(job_kwargs.get(key) == value for key, value in (kwargs or {}).items())
+
+
+def has_matching_job(
+    queue_name: str,
+    *,
+    func_name: str,
+    args_prefix: tuple[Any, ...] = (),
+    kwargs: dict[str, Any] | None = None,
+    job_id: str | None = None,
+    exclude_job_id: str | None = None,
+) -> bool:
+    """Return True if a queued or started RQ job matches the durable intent.
+
+    Redis errors fail open: callers use this from watchdog/reconciliation
+    paths, and a transient Redis hiccup must not mark durable DB rows failed.
+    """
+    try:
+        redis = _redis()
+    except Exception:  # noqa: BLE001 — Redis unreachable; fail open.
+        logger.warning("has_matching_job: Redis unreachable; assuming job exists")
+        return True
+
+    try:
+        queue = Queue(queue_name, connection=redis)
+        for queued_job_id in queue.get_job_ids():
+            if queued_job_id == exclude_job_id:
+                continue
+            try:
+                job = Job.fetch(queued_job_id, connection=redis)
+            except NoSuchJobError:
+                continue
+            if _job_matches(
+                job,
+                func_name=func_name,
+                args_prefix=args_prefix,
+                kwargs=kwargs,
+                job_id=job_id,
+            ):
+                return True
+
+        registry = StartedJobRegistry(queue_name, connection=redis)
+        for started_job_id in registry.get_job_ids():
+            if started_job_id == exclude_job_id:
+                continue
+            try:
+                job = Job.fetch(started_job_id, connection=redis)
+            except NoSuchJobError:
+                continue
+            if _job_matches(
+                job,
+                func_name=func_name,
+                args_prefix=args_prefix,
+                kwargs=kwargs,
+                job_id=job_id,
+            ):
+                return True
+    except Exception:  # noqa: BLE001 — same fail-open as above.
+        logger.warning(
+            "has_matching_job(queue=%s, func=%s) Redis scan failed; assuming job exists",
+            queue_name,
+            func_name,
+        )
+        return True
+
+    return False
+
+
+def has_draft_render_job(draft_id: int, *, exclude_job_id: str | None = None) -> bool:
     """Return True iff some RQ job tied to ``draft_id`` is still queued
     or running on the editing queue.
 
@@ -284,34 +368,108 @@ def has_draft_render_job(draft_id: int) -> bool:
     the caller fails open (won't mark a draft failed just because
     Redis hiccuped).
     """
+    return has_matching_job(
+        EDITING_QUEUE,
+        func_name=RENDER_DRAFT_FN,
+        kwargs={"draft_id": draft_id},
+        exclude_job_id=exclude_job_id,
+    )
+
+
+def has_draft_export_job(
+    export_id: int, *, job_id: str | None = None, exclude_job_id: str | None = None
+) -> bool:
+    return has_matching_job(
+        EDITING_QUEUE,
+        func_name=EXPORT_DRAFT_FN,
+        kwargs={"export_id": export_id},
+        job_id=job_id,
+        exclude_job_id=exclude_job_id,
+    )
+
+
+def has_bgm_generation_job(
+    job_id: int, *, rq_job_id: str | None = None, exclude_job_id: str | None = None
+) -> bool:
+    return has_matching_job(
+        BGM_QUEUE,
+        func_name=GENERATE_BGM_FN,
+        args_prefix=(job_id,),
+        job_id=rq_job_id,
+        exclude_job_id=exclude_job_id,
+    )
+
+
+def has_point_tracking_job(
+    asset_id: int,
+    *,
+    init_norm_x: float | None = None,
+    init_norm_y: float | None = None,
+    init_t_ms: int | None = None,
+    exclude_job_id: str | None = None,
+) -> bool:
+    kwargs: dict[str, Any] = {}
+    if init_norm_x is not None and init_norm_y is not None and init_t_ms is not None:
+        kwargs = {
+            "init_norm_x": init_norm_x,
+            "init_norm_y": init_norm_y,
+            "init_t_ms": init_t_ms,
+        }
+    return has_matching_job(
+        ANALYSIS_QUEUE,
+        func_name=TRACK_POINT_FN,
+        args_prefix=(asset_id,),
+        kwargs=kwargs,
+        exclude_job_id=exclude_job_id,
+    )
+
+
+def has_asset_analysis_job(asset_id: int, *, exclude_job_id: str | None = None) -> bool:
+    return has_matching_job(
+        ANALYSIS_QUEUE,
+        func_name=ANALYZE_ASSET_FN,
+        args_prefix=(asset_id,),
+        exclude_job_id=exclude_job_id,
+    )
+
+
+def has_asset_analysis_step_job(
+    asset_id: int, step: str, *, exclude_job_id: str | None = None
+) -> bool:
+    """Return True when an analyze_asset job still owns ``step`` for asset.
+
+    ``steps=None`` means a full analysis run, so it covers every step. A
+    partial rerun only covers the explicit step names in its kwargs.
+    """
     try:
         redis = _redis()
     except Exception:  # noqa: BLE001 — Redis unreachable; fail open.
-        logger.warning("has_draft_render_job: Redis unreachable; assuming job exists")
+        logger.warning("has_asset_analysis_step_job: Redis unreachable; assuming job exists")
         return True
 
     try:
-        queue = Queue(EDITING_QUEUE, connection=redis)
-        for job_id in queue.get_job_ids():
+        queue = Queue(ANALYSIS_QUEUE, connection=redis)
+        registry = StartedJobRegistry(ANALYSIS_QUEUE, connection=redis)
+        job_ids = list(queue.get_job_ids()) + list(registry.get_job_ids())
+        for job_id in job_ids:
+            if job_id == exclude_job_id:
+                continue
             try:
                 job = Job.fetch(job_id, connection=redis)
             except NoSuchJobError:
                 continue
-            if job.kwargs.get("draft_id") == draft_id:
-                return True
-
-        registry = StartedJobRegistry(EDITING_QUEUE, connection=redis)
-        for job_id in registry.get_job_ids():
-            try:
-                job = Job.fetch(job_id, connection=redis)
-            except NoSuchJobError:
+            if (job.func_name or "") != ANALYZE_ASSET_FN:
                 continue
-            if job.kwargs.get("draft_id") == draft_id:
+            if tuple(job.args or ())[:1] != (asset_id,):
+                continue
+            steps = job.kwargs.get("steps")
+            if steps is None or step in set(steps):
                 return True
     except Exception:  # noqa: BLE001 — same fail-open as above.
         logger.warning(
-            "has_draft_render_job(draft_id=%d) Redis scan failed; assuming job exists",
-            draft_id,
+            "has_asset_analysis_step_job(asset_id=%d, step=%s) Redis scan failed; assuming job exists",
+            asset_id,
+            step,
         )
         return True
 

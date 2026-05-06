@@ -135,16 +135,40 @@ def export_draft(
         *,
         output_path: Path | None = None,
         error: str | None = None,
-    ) -> None:
+    ) -> bool:
         if export_id is None:
-            return
+            return True
         async with async_session_maker() as session:
             artifact = await session.get(DraftExport, export_id)
             if artifact is None:
                 logger.warning("export_draft: export_id=%d not found", export_id)
-                return
-            artifact.status = status
+                return False
             now = datetime.now(UTC)
+            if (
+                artifact.draft_id != draft_id
+                or artifact.aspect != aspect
+                or artifact.height != height
+            ):
+                artifact.status = "failed"
+                artifact.completed_at = now
+                artifact.error = "export intent mismatch; job ignored"
+                await session.commit()
+                logger.warning(
+                    "export_draft: export_id=%d intent mismatch; job draft/aspect/height=%s/%s/%s",
+                    export_id,
+                    draft_id,
+                    aspect,
+                    height,
+                )
+                return False
+            if artifact.status not in ("queued", "running"):
+                logger.info(
+                    "export_draft: export_id=%d already terminal (%s); skipping",
+                    export_id,
+                    artifact.status,
+                )
+                return False
+            artifact.status = status
             if status == "running":
                 artifact.started_at = now
                 artifact.error = None
@@ -156,6 +180,7 @@ def export_draft(
                 artifact.completed_at = now
                 artifact.error = (error or "export failed")[:2000]
             await session.commit()
+            return True
 
     async def _resolve_paths() -> tuple[Path, Path]:
         async with async_session_maker() as session:
@@ -170,7 +195,8 @@ def export_draft(
             return input_path, output_path
 
     try:
-        asyncio.run(_mark_export("running"))
+        if not asyncio.run(_mark_export("running")):
+            return {"draft_id": draft_id, "export_id": export_id, "status": "skipped"}
         input_path, output_path = asyncio.run(_resolve_paths())
         result = exports.export_render(
             input_path,

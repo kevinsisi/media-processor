@@ -39,6 +39,9 @@ async def _run(job_id: int) -> dict[str, Any]:
         row = await session.get(BgmGenerationJob, job_id)
         if row is None:
             raise RuntimeError(f"bgm_generation_jobs row {job_id} not found")
+        if row.status != "pending":
+            logger.info("bgm gen job %d already %s; skipping stale RQ job", job_id, row.status)
+            return {"job_id": job_id, "status": "skipped", "row_status": row.status}
         row.status = "running"
         await session.commit()
         await session.refresh(row)
@@ -56,7 +59,7 @@ async def _run(job_id: int) -> dict[str, Any]:
         logger.exception("MusicGen unavailable for job %d", job_id)
         async with async_session_maker() as session:
             row = await session.get(BgmGenerationJob, job_id)
-            if row is not None:
+            if row is not None and row.status == "running":
                 row.status = "failed:model-unavailable"
                 row.error = str(exc)
                 row.completed_at = datetime.now(UTC)
@@ -68,7 +71,7 @@ async def _run(job_id: int) -> dict[str, Any]:
         logger.exception("MusicGen inference failed for job %d", job_id)
         async with async_session_maker() as session:
             row = await session.get(BgmGenerationJob, job_id)
-            if row is not None:
+            if row is not None and row.status == "running":
                 row.status = f"failed:{type(exc).__name__}"
                 row.error = str(exc)
                 row.completed_at = datetime.now(UTC)
@@ -81,15 +84,15 @@ async def _run(job_id: int) -> dict[str, Any]:
     # picks up the new track without an extra select-library step.
     async with async_session_maker() as session:
         row = await session.get(BgmGenerationJob, job_id)
-        if row is not None:
+        if row is not None and row.status == "running":
             row.status = "done"
             row.output_path = str(result.output_path)
             row.completed_at = datetime.now(UTC)
-        project = (
-            await session.execute(select(Project).where(Project.id == project_id))
-        ).scalar_one_or_none()
-        if project is not None:
-            project.bgm_path = str(result.output_path)
+            project = (
+                await session.execute(select(Project).where(Project.id == project_id))
+            ).scalar_one_or_none()
+            if project is not None:
+                project.bgm_path = str(result.output_path)
         await session.commit()
 
     elapsed = time.monotonic() - started_ms

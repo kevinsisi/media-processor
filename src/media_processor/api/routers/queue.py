@@ -19,7 +19,7 @@ The current compose deployment runs multiple workers (1 analysis + 3 editing +
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, ConfigDict
@@ -33,7 +33,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from media_processor.api.config import settings
 from media_processor.api.deps import get_session
-from media_processor.models import Asset, Draft, Project
+from media_processor.models import (
+    Asset,
+    AssetStatus,
+    BgmGenerationJob,
+    Draft,
+    DraftExport,
+    DraftStatus,
+    Project,
+)
+from media_processor.services.queue import (
+    has_asset_analysis_job,
+    has_asset_analysis_step_job,
+    has_bgm_generation_job,
+    has_draft_export_job,
+    has_draft_render_job,
+    has_point_tracking_job,
+)
 
 router = APIRouter(prefix="/queue", tags=["queue"])
 
@@ -227,6 +243,117 @@ async def _resolve_project_links(
                 it.project_name = names.get(it.project_id)
 
 
+async def _sync_cancelled_job(session: AsyncSession, job: Job) -> None:
+    """Best-effort durable state sync for generic queued-job cancellation."""
+    kind = _job_kind(job)
+    args = list(job.args or ())
+    kwargs = dict(job.kwargs or {})
+    now = datetime.now(UTC)
+
+    if kind == "render" and "draft_id" in kwargs:
+        draft_id = int(kwargs["draft_id"])
+        if has_draft_render_job(draft_id, exclude_job_id=job.id):
+            return
+        draft = await session.get(Draft, draft_id)
+        if draft is not None and draft.status in (
+            DraftStatus.PENDING.value,
+            DraftStatus.PROCESSING.value,
+        ):
+            draft.status = DraftStatus.FAILED.value
+            draft.prompt_feedback = "已被使用者取消"
+    elif kind == "export" and "export_id" in kwargs:
+        export_id = int(kwargs["export_id"])
+        if has_draft_export_job(export_id, exclude_job_id=job.id):
+            return
+        artifact = await session.get(DraftExport, export_id)
+        if artifact is not None and artifact.status in ("queued", "running"):
+            artifact.status = "failed"
+            artifact.error = "cancelled by user"
+            artifact.completed_at = now
+    elif kind == "bgm" and args:
+        bgm_job_id = int(args[0])
+        if has_bgm_generation_job(bgm_job_id, exclude_job_id=job.id):
+            return
+        bgm_job = await session.get(BgmGenerationJob, bgm_job_id)
+        if bgm_job is not None and bgm_job.status in ("pending", "running"):
+            bgm_job.status = "failed:cancelled"
+            bgm_job.error = "cancelled by user"
+            bgm_job.completed_at = now
+    elif kind == "point_track" and args:
+        asset_id = int(args[0])
+        point_kwargs = dict(job.kwargs or {})
+        if {"init_norm_x", "init_norm_y", "init_t_ms"}.issubset(
+            point_kwargs
+        ) and has_point_tracking_job(
+            asset_id,
+            init_norm_x=float(point_kwargs["init_norm_x"]),
+            init_norm_y=float(point_kwargs["init_norm_y"]),
+            init_t_ms=int(point_kwargs["init_t_ms"]),
+            exclude_job_id=job.id,
+        ):
+            return
+        asset = await session.get(Asset, asset_id)
+        point_matches = True
+        if {"init_norm_x", "init_norm_y", "init_t_ms"}.issubset(point_kwargs):
+            origin = asset.point_tracking_origin if asset is not None else None
+            point_matches = isinstance(origin, dict) and _point_job_matches_origin(
+                point_kwargs,
+                origin,
+            )
+        if (
+            asset is not None
+            and asset.tracked_object_index == -4
+            and asset.point_tracking_status == "pending"
+            and point_matches
+        ):
+            asset.point_tracking_status = "failed"
+            asset.point_tracking_error = "cancelled by user"
+    elif kind == "analyze" and args:
+        asset_id = int(args[0])
+        step_list = job.kwargs.get("steps")
+        if (
+            step_list is not None
+            and has_asset_analysis_job(asset_id, exclude_job_id=job.id)
+            and all(
+                has_asset_analysis_step_job(asset_id, str(step), exclude_job_id=job.id)
+                for step in step_list
+            )
+        ):
+            return
+        asset = await session.get(Asset, asset_id)
+        if asset is not None and asset.status == AssetStatus.ANALYZING.value:
+            steps = dict(asset.analysis_steps_json or {})
+            cancelled_steps = set(step_list or steps.keys())
+            for key, value in list(steps.items()):
+                if has_asset_analysis_step_job(asset.id, key, exclude_job_id=job.id):
+                    continue
+                if key in cancelled_steps and value in ("pending", "running"):
+                    steps[key] = "failed:cancelled"
+            asset.analysis_steps_json = steps
+            asset.status = (
+                AssetStatus.ANALYZING.value
+                if _has_active_analysis_step(steps)
+                else AssetStatus.ANALYSIS_FAILED.value
+            )
+
+    await session.commit()
+
+
+def _point_job_matches_origin(job_kwargs: dict[str, Any], origin: dict[str, Any]) -> bool:
+    try:
+        return (
+            abs(float(job_kwargs["init_norm_x"]) - float(origin["norm_x"])) < 1e-9
+            and abs(float(job_kwargs["init_norm_y"]) - float(origin["norm_y"])) < 1e-9
+            and int(job_kwargs["init_t_ms"]) == int(origin["frame_ms"])
+        )
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
+def _has_active_analysis_step(steps: dict[str, Any]) -> bool:
+    return any(value in ("pending", "running") for value in steps.values())
+
+
 # ---- endpoints ----
 
 
@@ -275,7 +402,7 @@ async def queue_status(session: SessionDep) -> QueueStatusOut:
 
 
 @router.delete("/jobs/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def cancel_queued_job(job_id: str) -> Response:
+async def cancel_queued_job(job_id: str, session: SessionDep) -> Response:
     """Drop a job from its queue.
 
     Only valid for jobs that haven't been picked up yet. A running
@@ -311,4 +438,5 @@ async def cancel_queued_job(job_id: str) -> Response:
             detail=f"cannot cancel job in state {job.get_status()!r}",
         ) from exc
 
+    await _sync_cancelled_job(session, job)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

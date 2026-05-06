@@ -21,6 +21,7 @@ import asyncio
 import logging
 import shutil
 import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -234,7 +235,17 @@ async def trigger_generate_bgm(
     await session.commit()
     await session.refresh(job)
 
-    rq_job_id = enqueue_bgm_generation(job.id)
+    try:
+        rq_job_id = enqueue_bgm_generation(job.id)
+    except Exception as exc:  # noqa: BLE001 — do not leave pending without RQ job.
+        job.status = "failed:enqueue"
+        job.error = str(exc)
+        job.completed_at = datetime.now(UTC)
+        await session.commit()
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"BGM enqueue failed: {exc}",
+        ) from exc
     job.rq_job_id = rq_job_id
     await session.commit()
     await session.refresh(job)

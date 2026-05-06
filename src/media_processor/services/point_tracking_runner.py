@@ -42,6 +42,30 @@ from media_processor.services import point_tracking as point_tracking_svc
 logger = logging.getLogger(__name__)
 
 
+def _is_active_point_request(
+    asset: Asset,
+    *,
+    init_norm_x: float,
+    init_norm_y: float,
+    init_t_ms: int,
+) -> bool:
+    if asset.tracked_object_index != -4:
+        return False
+    if asset.point_tracking_status != "pending":
+        return False
+    origin = asset.point_tracking_origin
+    if not isinstance(origin, dict):
+        return False
+    try:
+        return (
+            abs(float(origin["norm_x"]) - init_norm_x) < 1e-9
+            and abs(float(origin["norm_y"]) - init_norm_y) < 1e-9
+            and int(origin["frame_ms"]) == init_t_ms
+        )
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
 async def run_point_tracking(
     asset_id: int,
     *,
@@ -70,6 +94,14 @@ async def run_point_tracking(
         if asset is None:
             logger.warning("run_point_tracking: asset %d not found", asset_id)
             return {"asset_id": asset_id, "status": "missing"}
+        if not _is_active_point_request(
+            asset,
+            init_norm_x=init_norm_x,
+            init_norm_y=init_norm_y,
+            init_t_ms=init_t_ms,
+        ):
+            logger.info("run_point_tracking: asset %d intent is stale; skipping", asset_id)
+            return {"asset_id": asset_id, "status": "skipped", "reason": "stale_intent"}
         media_path = Path(asset.file_path)
         duration_ms = asset.duration_ms
 
@@ -97,7 +129,12 @@ async def run_point_tracking(
         logger.exception("run_point_tracking: asset %d failed", asset_id)
         async with async_session_maker() as session:
             row = await session.get(Asset, asset_id)
-            if row is not None:
+            if row is not None and _is_active_point_request(
+                row,
+                init_norm_x=init_norm_x,
+                init_norm_y=init_norm_y,
+                init_t_ms=init_t_ms,
+            ):
                 row.point_tracking_status = "failed"
                 row.point_tracking_error = f"{type(exc).__name__}: {exc}"
                 await session.commit()
@@ -114,7 +151,12 @@ async def run_point_tracking(
         logger.exception("run_point_tracking: asset %d unexpected failure", asset_id)
         async with async_session_maker() as session:
             row = await session.get(Asset, asset_id)
-            if row is not None:
+            if row is not None and _is_active_point_request(
+                row,
+                init_norm_x=init_norm_x,
+                init_norm_y=init_norm_y,
+                init_t_ms=init_t_ms,
+            ):
                 row.point_tracking_status = "failed"
                 row.point_tracking_error = f"unexpected {type(exc).__name__}: {exc}"
                 await session.commit()
@@ -134,6 +176,22 @@ async def run_point_tracking(
         if row is None:
             logger.warning("run_point_tracking: asset %d disappeared mid-job", asset_id)
             return {"asset_id": asset_id, "status": "missing_after"}
+        if not _is_active_point_request(
+            row,
+            init_norm_x=init_norm_x,
+            init_norm_y=init_norm_y,
+            init_t_ms=init_t_ms,
+        ):
+            logger.info(
+                "run_point_tracking: asset %d intent no longer active (%s); skipping stale RQ job",
+                asset_id,
+                row.point_tracking_status,
+            )
+            return {
+                "asset_id": asset_id,
+                "status": "skipped",
+                "row_status": row.point_tracking_status,
+            }
         row.point_tracking_json = point_json
         row.point_tracking_origin = {
             "x": int(point_json["init"]["x"]),

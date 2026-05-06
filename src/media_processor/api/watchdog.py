@@ -33,18 +33,36 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
 
 from media_processor.core.db import async_session_maker
-from media_processor.models import Draft, DraftStatus
+from media_processor.models import (
+    Asset,
+    AssetStatus,
+    BgmGenerationJob,
+    Draft,
+    DraftExport,
+    DraftStatus,
+)
 from media_processor.services.queue import (
     enqueue_project_edit,
+    has_asset_analysis_job,
+    has_asset_analysis_step_job,
+    has_bgm_generation_job,
+    has_draft_export_job,
     has_draft_render_job,
+    has_point_tracking_job,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _has_active_analysis_step(steps: dict[str, Any]) -> bool:
+    return any(value in ("pending", "running") for value in steps.values())
+
 
 # Sweep cadence. 60 s is a comfortable trade-off between "watchdog
 # notices the orphan within a minute of the worker dying" and "we
@@ -107,9 +125,6 @@ async def _sweep_once() -> None:
         )
         rows = (await session.execute(stmt)).scalars().all()
 
-        if not rows:
-            return
-
         for draft in rows:
             try:
                 exists = await asyncio.to_thread(has_draft_render_job, draft.id)
@@ -122,6 +137,11 @@ async def _sweep_once() -> None:
             if exists:
                 continue
             await _handle_orphan(session, draft)
+
+        await _sweep_exports(session)
+        await _sweep_bgm_jobs(session)
+        await _sweep_point_tracking(session)
+        await _sweep_asset_analysis(session)
         await session.commit()
 
 
@@ -160,6 +180,11 @@ async def _handle_orphan(session: Any, draft: Draft) -> None:
     skip_plan = bool(draft.cut_plan_json)
     subtitles_from_db = skip_plan and flags["subtitles"]
 
+    previous_status = draft.status
+    previous_progress = (
+        dict(draft.progress_steps_json) if isinstance(draft.progress_steps_json, dict) else None
+    )
+    previous_feedback = draft.prompt_feedback
     new_retry = (draft.render_retry_count or 0) + 1
     draft.render_retry_count = new_retry
     draft.status = DraftStatus.PENDING.value
@@ -168,10 +193,9 @@ async def _handle_orphan(session: Any, draft: Draft) -> None:
         f"watchdog: auto-retry {new_retry}/{WATCHDOG_MAX_RETRIES} — "
         "previous RQ job vanished (worker crash / timeout / purge)"
     )
-    # Persist the row update before the enqueue so the worker, when
-    # it picks the job up, doesn't race against an in-progress
-    # commit on the same row.
-    await session.flush()
+    # Commit the row update before enqueue so a fast worker never sees
+    # the old non-pending state and rejects the retry as stale.
+    await session.commit()
 
     try:
         await asyncio.to_thread(
@@ -196,6 +220,10 @@ async def _handle_orphan(session: Any, draft: Draft) -> None:
         # a transient Redis blip would consume retries without an
         # actual attempt landing.
         draft.render_retry_count = new_retry - 1
+        draft.status = previous_status
+        draft.progress_steps_json = previous_progress
+        draft.prompt_feedback = previous_feedback
+        await session.commit()
         return
 
     # Warning level so the message surfaces under uvicorn's default
@@ -208,6 +236,115 @@ async def _handle_orphan(session: Any, draft: Draft) -> None:
         new_retry,
         WATCHDOG_MAX_RETRIES,
     )
+
+
+async def _sweep_exports(session: Any) -> None:
+    rows = (
+        await session.execute(
+            select(DraftExport).where(DraftExport.status.in_(("queued", "running")))
+        )
+    ).scalars()
+    now = datetime.now(UTC)
+    for artifact in rows:
+        exists = await asyncio.to_thread(
+            has_draft_export_job,
+            artifact.id,
+            job_id=artifact.job_id,
+        )
+        if exists:
+            continue
+        artifact.status = "failed"
+        artifact.completed_at = now
+        artifact.error = "watchdog: export job vanished from queue; please retry export"
+        logger.warning("watchdog: export artifact %d marked failed (missing RQ job)", artifact.id)
+
+
+async def _sweep_bgm_jobs(session: Any) -> None:
+    rows = (
+        await session.execute(
+            select(BgmGenerationJob).where(BgmGenerationJob.status.in_(("pending", "running")))
+        )
+    ).scalars()
+    now = datetime.now(UTC)
+    for job in rows:
+        exists = await asyncio.to_thread(
+            has_bgm_generation_job,
+            job.id,
+            rq_job_id=job.rq_job_id,
+        )
+        if exists:
+            continue
+        job.status = "failed:orphaned"
+        job.error = "watchdog: BGM job vanished from queue; please retry generation"
+        job.completed_at = now
+        logger.warning("watchdog: bgm job %d marked failed (missing RQ job)", job.id)
+
+
+async def _sweep_point_tracking(session: Any) -> None:
+    rows = (
+        await session.execute(select(Asset).where(Asset.point_tracking_status == "pending"))
+    ).scalars()
+    for asset in rows:
+        origin = (
+            asset.point_tracking_origin if isinstance(asset.point_tracking_origin, dict) else {}
+        )
+        try:
+            exists = await asyncio.to_thread(
+                has_point_tracking_job,
+                asset.id,
+                init_norm_x=float(origin["norm_x"]),
+                init_norm_y=float(origin["norm_y"]),
+                init_t_ms=int(origin["frame_ms"]),
+            )
+        except (KeyError, TypeError, ValueError):
+            exists = await asyncio.to_thread(has_point_tracking_job, asset.id)
+        if exists:
+            continue
+        asset.point_tracking_status = "failed"
+        asset.point_tracking_error = (
+            "watchdog: point tracking job vanished from queue; please retry tracking"
+        )
+        logger.warning("watchdog: point tracking asset %d marked failed", asset.id)
+
+
+async def _sweep_asset_analysis(session: Any) -> None:
+    rows = (
+        await session.execute(select(Asset).where(Asset.status == AssetStatus.ANALYZING.value))
+    ).scalars()
+    for asset in rows:
+        exists = await asyncio.to_thread(has_asset_analysis_job, asset.id)
+        if exists:
+            steps = dict(asset.analysis_steps_json or {})
+            failed_any = False
+            for key, value in list(steps.items()):
+                if value not in ("pending", "running"):
+                    continue
+                step_exists = await asyncio.to_thread(has_asset_analysis_step_job, asset.id, key)
+                if step_exists:
+                    continue
+                steps[key] = "failed:watchdog-orphaned"
+                failed_any = True
+            if not failed_any:
+                continue
+            asset.analysis_steps_json = steps
+            asset.status = (
+                AssetStatus.ANALYZING.value
+                if _has_active_analysis_step(steps)
+                else AssetStatus.ANALYSIS_FAILED.value
+            )
+            logger.warning("watchdog: analysis asset %d has orphaned steps", asset.id)
+            continue
+        steps = dict(asset.analysis_steps_json or {})
+        for key, value in list(steps.items()):
+            if value in ("pending", "running"):
+                steps[key] = "failed:watchdog-orphaned"
+        asset.analysis_steps_json = steps
+        asset.status = (
+            AssetStatus.ANALYZING.value
+            if _has_active_analysis_step(steps)
+            else AssetStatus.ANALYSIS_FAILED.value
+        )
+        logger.warning("watchdog: analysis asset %d marked failed (missing RQ job)", asset.id)
 
 
 async def watchdog_loop() -> None:
