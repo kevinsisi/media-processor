@@ -1,8 +1,8 @@
 # Media Processor
 
-Content factory pipeline for short-form video production.
+Content factory pipeline for novice-friendly Instagram and Facebook short-video production.
 
-**Status:** v0.28.1 / M9.13.1 — durable export artifacts and reliable status UX.
+**Status:** v0.28.2 / M9.13.2 — novice IG/FB short-video workflow.
 
 ## Spec
 
@@ -79,15 +79,26 @@ The React/Vite app is API-backed. Main routes:
 |-------|---------|
 | `/` | Project list |
 | `/projects/new` | Create project |
-| `/projects/:id/upload` | Upload videos and script |
+| `/projects/:id/upload` | Upload videos and script with safe script save before analysis |
 | `/projects/:id/assets` | Asset analysis, transcript, tracking, delete |
-| `/projects/:id/edit` | Render settings, draft preview, re-render, export downloads |
+| `/projects/:id/edit` | Publishing workbench, draft preview, IG/FB export presets, downloads |
 | `/projects/:projectId/edit/timeline/:draftId` | Advanced timeline editor |
 | `/settings` | LLM key settings |
 | `/health` | Developer-facing status dashboard |
 
-`/projects/:id/review` still exists as a legacy route, but the current preview
-and download workflow lives under `/projects/:id/edit`.
+`/projects/:id/review` is a legacy route and redirects to `/projects/:id/edit`.
+
+## v0.28.2 Novice Social Shorts Notes
+
+- Upload now saves the latest script text before moving to analysis; if saving
+  fails, the user stays on upload with a clear error instead of losing edits.
+- The completed draft page is centered on a publishing workbench: preview,
+  download, IG/FB export, and regenerate are the first visible actions.
+- Export presets now start with Instagram/Facebook destinations: Reels, feed
+  portrait, and square post. Raw aspect/resolution controls remain under an
+  advanced section.
+- Main-path copy avoids backend/tool terminology and speaks in short-video
+  outcomes for non-technical users.
 
 ## v0.28.1 UX Reliability Notes
 

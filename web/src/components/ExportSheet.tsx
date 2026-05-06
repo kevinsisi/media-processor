@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ApiError, apiClient } from "../api/client";
 import type {
   DraftExportArtifact,
@@ -16,13 +16,49 @@ interface ExportSheetProps {
 }
 
 const ASPECTS: { value: ExportAspect; label: string; sub: string }[] = [
-  { value: "9:16", label: "9:16", sub: "Reels / TikTok / Shorts" },
-  { value: "4:5", label: "4:5", sub: "IG 動態" },
+  { value: "9:16", label: "9:16", sub: "直式短影音" },
+  { value: "4:5", label: "4:5", sub: "IG / FB 直式貼文" },
   { value: "1:1", label: "1:1", sub: "方形貼文" },
 ];
 
 const HEIGHTS = [720, 1080, 1440] as const;
 const EXPORT_POLL_MS = 3000;
+
+interface SocialExportPreset {
+  id: string;
+  platform: string;
+  title: string;
+  hint: string;
+  aspect: ExportAspect;
+  height: (typeof HEIGHTS)[number];
+}
+
+const SOCIAL_EXPORT_PRESETS: SocialExportPreset[] = [
+  {
+    id: "ig-fb-reels",
+    platform: "IG / FB",
+    title: "Reels 直式短影音",
+    hint: "最適合全螢幕滑動觀看，可同時用在 IG 和 FB。",
+    aspect: "9:16",
+    height: 1080,
+  },
+  {
+    id: "feed-portrait",
+    platform: "IG / FB",
+    title: "直式貼文版",
+    hint: "保留更多畫面，適合貼文牆瀏覽。",
+    aspect: "4:5",
+    height: 1080,
+  },
+  {
+    id: "square-post",
+    platform: "IG / FB",
+    title: "方形貼文版",
+    hint: "適合商品、活動或需要整齊版面的貼文。",
+    aspect: "1:1",
+    height: 1080,
+  },
+];
 
 const STATUS_LABEL: Record<DraftExportStatus, string> = {
   queued: "排隊中",
@@ -31,15 +67,33 @@ const STATUS_LABEL: Record<DraftExportStatus, string> = {
   failed: "失敗",
 };
 
+function exportKey(aspect: string, height: number): string {
+  return `${aspect}-${height}`;
+}
+
 export default function ExportSheet({ draftId, draftVersion, ready }: ExportSheetProps) {
   const [open, setOpen] = useState(false);
   const [aspect, setAspect] = useState<ExportAspect>("9:16");
   const [height, setHeight] = useState<(typeof HEIGHTS)[number]>(1080);
-  const [submitting, setSubmitting] = useState(false);
+  const [submittingId, setSubmittingId] = useState<string | null>(null);
   const [latest, setLatest] = useState<DraftExportResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [artifacts, setArtifacts] = useState<DraftExportArtifact[]>([]);
+  const submitting = submittingId !== null;
+
+  const activeArtifactsByKey = useMemo(() => {
+    const map = new Map<string, DraftExportArtifact>();
+    for (const item of artifacts) {
+      if (item.status !== "queued" && item.status !== "running") continue;
+      map.set(exportKey(item.aspect, item.height), item);
+    }
+    return map;
+  }, [artifacts]);
+
+  const customActiveArtifact = activeArtifactsByKey.get(
+    exportKey(aspect, height),
+  );
 
   const fetchArtifacts = useCallback(
     () => apiClient.fetchDraftExports(draftId),
@@ -53,11 +107,23 @@ export default function ExportSheet({ draftId, draftVersion, ready }: ExportShee
     return list;
   }, [fetchArtifacts]);
 
-  const submit = useCallback(async () => {
-    setSubmitting(true);
+  const submit = useCallback(async (options?: {
+    aspect?: ExportAspect;
+    height?: (typeof HEIGHTS)[number];
+    submitId?: string;
+  }) => {
+    const requestAspect = options?.aspect ?? aspect;
+    const requestHeight = options?.height ?? height;
+    const submitId = options?.submitId ?? "custom";
+    setSubmittingId(submitId);
     setError(null);
     try {
-      const resp = await apiClient.exportDraft(draftId, { aspect, height });
+      setAspect(requestAspect);
+      setHeight(requestHeight);
+      const resp = await apiClient.exportDraft(draftId, {
+        aspect: requestAspect,
+        height: requestHeight,
+      });
       setLatest(resp);
       setArtifacts((prev) => [
         resp,
@@ -73,7 +139,7 @@ export default function ExportSheet({ draftId, draftVersion, ready }: ExportShee
             : String(err);
       setError(`匯出失敗：${msg}`);
     } finally {
-      setSubmitting(false);
+      setSubmittingId(null);
     }
   }, [aspect, height, draftId, refreshArtifacts]);
 
@@ -108,7 +174,7 @@ export default function ExportSheet({ draftId, draftVersion, ready }: ExportShee
       cancelled = true;
       if (timer !== null) window.clearTimeout(timer);
     };
-  }, [fetchArtifacts, open, ready]);
+  }, [fetchArtifacts, latest?.export_id, open, ready]);
 
   if (!ready) return null;
 
@@ -119,14 +185,19 @@ export default function ExportSheet({ draftId, draftVersion, ready }: ExportShee
           type="button"
           className="cta cta--quiet export-sheet__trigger"
           onClick={() => setOpen(true)}
-          aria-label="匯出其他比例"
+          aria-label="匯出 IG / FB 版本"
         >
-          匯出其他比例
+          匯出 IG / FB 版本
         </button>
       ) : (
         <div className="export-sheet__panel" aria-modal="false">
           <div className="export-sheet__head">
-            <h3 className="export-sheet__title">匯出 v{draftVersion}</h3>
+            <div>
+              <h3 className="export-sheet__title">匯出 IG / FB 短影音</h3>
+              <p className="export-sheet__subtitle">
+                選要發佈的平台，系統會用適合的尺寸輸出 v{draftVersion}。
+              </p>
+            </div>
             <button
               type="button"
               className="export-sheet__close"
@@ -137,43 +208,97 @@ export default function ExportSheet({ draftId, draftVersion, ready }: ExportShee
             </button>
           </div>
 
-          <fieldset className="export-sheet__group">
-            <legend className="mono">比例</legend>
-            <div className="export-sheet__chips">
-              {ASPECTS.map((a) => (
+          <div className="export-preset-grid" aria-label="社群平台匯出預設">
+            {SOCIAL_EXPORT_PRESETS.map((preset) => {
+              const existingActive = activeArtifactsByKey.get(
+                exportKey(preset.aspect, preset.height),
+              );
+              return (
                 <button
-                  key={a.value}
+                  key={preset.id}
                   type="button"
-                  className={`export-chip${aspect === a.value ? " export-chip--active" : ""}`}
-                  onClick={() => setAspect(a.value)}
-                  aria-pressed={aspect === a.value}
+                  className="export-preset-card"
+                  onClick={() => void submit({
+                    aspect: preset.aspect,
+                    height: preset.height,
+                    submitId: preset.id,
+                  })}
+                  disabled={submitting || Boolean(existingActive)}
                 >
-                  <span className="export-chip__label">{a.label}</span>
-                  <span className="export-chip__sub mono">{a.sub}</span>
+                  <span className="export-preset-card__platform mono">
+                    {preset.platform}
+                  </span>
+                  <span className="export-preset-card__title">{preset.title}</span>
+                  <span className="export-preset-card__hint">{preset.hint}</span>
+                  <span className="export-preset-card__meta mono">
+                    {preset.aspect} · {preset.height}p
+                  </span>
+                  <span className="export-preset-card__action">
+                    {submittingId === preset.id
+                      ? "建立中…"
+                      : existingActive
+                        ? "建立中，下方會更新"
+                        : "建立這個版本"}
+                  </span>
                 </button>
-              ))}
-            </div>
-          </fieldset>
+              );
+            })}
+          </div>
 
-          <fieldset className="export-sheet__group">
-            <legend className="mono">解析度</legend>
-            <div className="export-sheet__chips">
-              {HEIGHTS.map((h) => (
-                <button
-                  key={h}
-                  type="button"
-                  className={`export-chip${height === h ? " export-chip--active" : ""}`}
-                  onClick={() => setHeight(h)}
-                  aria-pressed={height === h}
-                >
-                  <span className="export-chip__label mono">{h}p</span>
-                </button>
-              ))}
-            </div>
-            <p className="export-sheet__hint mono">
-              系統會依比例自動算寬度；超過原片尺寸會被自動降到上限。
-            </p>
-          </fieldset>
+          <details className="export-sheet__advanced">
+            <summary>進階：自訂比例與解析度</summary>
+            <fieldset className="export-sheet__group">
+              <legend className="mono">比例</legend>
+              <div className="export-sheet__chips">
+                {ASPECTS.map((a) => (
+                  <button
+                    key={a.value}
+                    type="button"
+                    className={`export-chip${aspect === a.value ? " export-chip--active" : ""}`}
+                    onClick={() => setAspect(a.value)}
+                    aria-pressed={aspect === a.value}
+                    disabled={submitting}
+                  >
+                    <span className="export-chip__label">{a.label}</span>
+                    <span className="export-chip__sub mono">{a.sub}</span>
+                  </button>
+                ))}
+              </div>
+            </fieldset>
+
+            <fieldset className="export-sheet__group">
+              <legend className="mono">清晰度</legend>
+              <div className="export-sheet__chips">
+                {HEIGHTS.map((h) => (
+                  <button
+                    key={h}
+                    type="button"
+                    className={`export-chip${height === h ? " export-chip--active" : ""}`}
+                    onClick={() => setHeight(h)}
+                    aria-pressed={height === h}
+                    disabled={submitting}
+                  >
+                    <span className="export-chip__label mono">{h}p</span>
+                  </button>
+                ))}
+              </div>
+              <p className="export-sheet__hint mono">
+                系統會依比例自動計算寬度；若超過原片尺寸，會自動降到可用上限。
+              </p>
+              <button
+                type="button"
+                className="cta cta--primary export-sheet__custom-submit"
+                onClick={() => void submit()}
+                disabled={submitting || Boolean(customActiveArtifact)}
+              >
+                {submittingId === "custom"
+                  ? "建立中…"
+                  : customActiveArtifact
+                    ? "建立中，下方會更新"
+                    : `建立 ${aspect} · ${height}p`}
+              </button>
+            </fieldset>
+          </details>
 
           {error && (
             <p className="export-sheet__error mono" role="alert">
@@ -244,14 +369,6 @@ export default function ExportSheet({ draftId, draftVersion, ready }: ExportShee
               disabled={submitting}
             >
               取消
-            </button>
-            <button
-              type="button"
-              className="cta cta--primary"
-              onClick={() => void submit()}
-              disabled={submitting}
-            >
-              {submitting ? "排隊中…" : `匯出 ${aspect} · ${height}p`}
             </button>
           </div>
         </div>

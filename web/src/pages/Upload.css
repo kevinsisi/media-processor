@@ -271,6 +271,13 @@
   border-color: var(--gold);
 }
 
+.script-save-note {
+  margin: var(--space-2) 0 0;
+  color: var(--text-secondary);
+  font-size: var(--t-xs);
+  line-height: 1.6;
+}
+
 /* Summary */
 
 .upload-summary {
@@ -383,6 +390,12 @@
 .summary-next:hover {
   background: var(--gold-bright, var(--gold));
   transform: translateY(-1px);
+}
+
+.summary-next:disabled {
+  opacity: 0.62;
+  cursor: wait;
+  transform: none;
 }
 
 /* v0.22 — warning variant for the next-step CTA: clickable, but

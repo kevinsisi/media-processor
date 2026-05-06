@@ -171,10 +171,10 @@ export function iconForEmotionTag(name: string): string {
 // v0.14.3 added stabilize between cut and concat (two-pass vidstab);
 // when the user opts out it shows "略過" via the skipped: state path.
 export const EDIT_STEP_LABELS: Record<string, string> = {
-  plan: "規劃",
-  cut: "切片",
-  stabilize: "防抖",
-  concat: "拼接",
+  plan: "選片",
+  cut: "整理",
+  stabilize: "防手震",
+  concat: "合成",
   subtitles: "字幕",
   bgm: "配樂",
 };

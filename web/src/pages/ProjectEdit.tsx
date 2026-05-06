@@ -208,7 +208,7 @@ function DraftComments({ draftId }: DraftCommentsProps) {
         <textarea
           className="draft-comments__body"
           value={body}
-          placeholder="告訴 AI 下次怎麼改進這個版本（例：「不要轉場特效」「蚊子館重複太多」「片頭再有力一點」）。下次重新剪輯時，這裡的留言會餵給 Gemini 作為改進指引。"
+          placeholder="告訴系統下次怎麼改進這個版本（例：「不要轉場特效」「蚊子館重複太多」「片頭再有力一點」）。下次重新生成時，這裡的留言會作為改進指引。"
           rows={3}
           maxLength={4000}
           onChange={(e) => setBody(e.currentTarget.value)}
@@ -342,29 +342,29 @@ const STYLE_PRESET_CARDS: readonly StylePresetCard[] = [
     value: "fast",
     label: "快節奏",
     icon: "⚡",
-    transitionHint: "wipe / slide / circle",
-    bgmHint: "高能量電子 / 搖滾 130–150 BPM",
+    transitionHint: "畫面切換俐落，節奏密集",
+    bgmHint: "高能量、適合促銷或活動",
   },
   {
     value: "slow",
     label: "慢節奏",
     icon: "🌊",
-    transitionHint: "dissolve / fade",
-    bgmHint: "柔和氛圍音 60–80 BPM",
+    transitionHint: "畫面柔和銜接，留白較多",
+    bgmHint: "溫暖、適合生活感內容",
   },
   {
     value: "commercial",
     label: "商業感",
     icon: "🏷️",
-    transitionHint: "slide / wipe / fade-black",
-    bgmHint: "Corporate 配樂 90–110 BPM",
+    transitionHint: "重點清楚，節奏穩定",
+    bgmHint: "乾淨、有品牌感",
   },
   {
     value: "artistic",
     label: "文青風",
     icon: "🎨",
-    transitionHint: "fade / fade-white",
-    bgmHint: "Acoustic / indie 木吉他 80–100 BPM",
+    transitionHint: "氛圍感較強，轉換較慢",
+    bgmHint: "輕柔、適合故事感內容",
   },
   {
     value: "custom",
@@ -390,7 +390,7 @@ function StylePresetPicker({
     <fieldset className="style-preset-picker" disabled={disabled}>
       <legend className="style-preset-picker__legend">剪輯風格預設</legend>
       <p className="style-preset-picker__hint mono">
-        一鍵切換片段長度、轉場類型與配樂風格建議。
+        選一種成品感覺，系統會自動調整節奏與配樂方向。
       </p>
       <div
         className="style-preset-picker__grid"
@@ -417,7 +417,7 @@ function StylePresetPicker({
               </span>
               <span className="style-preset-card__label">{card.label}</span>
               <span className="style-preset-card__hint mono">
-                轉場：{card.transitionHint}
+                節奏：{card.transitionHint}
                 <br />
                 配樂：{card.bgmHint}
               </span>
@@ -484,29 +484,29 @@ function RenderOptions({
   return (
     <div className="render-options">
       <EditOptionToggle
-        label="數位防抖（兩階段 vidstab）"
-        hint="手機 / 手持鏡頭建議開啟；腳架或穩定器拍攝可關閉以縮短渲染時間。"
+        label="畫面防手震"
+        hint="手機手持拍攝建議開啟；畫面本來很穩時可關閉，加快輸出。"
         value={stabilize}
         onChange={setStabilize}
         disabled={disabled}
       />
       <EditOptionToggle
-        label="字幕燒入"
-        hint="關閉後不產生字幕也不燒進影片。"
+        label="加上字幕"
+        hint="開啟後會把繁體中文字幕放進影片，適合社群靜音觀看。"
         value={subtitlesOn}
         onChange={setSubtitlesOn}
         disabled={disabled}
       />
       <EditOptionToggle
         label="使用轉場效果"
-        hint="打勾 = 片段之間加轉場（wipe / slide / circlecrop）；不勾 = 直接硬切。"
+        hint="開啟後片段之間會更柔順；關閉則節奏更直接。"
         value={transitionsOn}
         onChange={setTransitionsOn}
         disabled={disabled}
       />
       <EditOptionToggle
-        label="自動構圖（YOLO 物件追蹤）"
-        hint="開啟後 9:16 / 4:5 裁切會自動跟隨主體（人 / 車 / 動物）。素材沒跑過追蹤分析則自動退回置中裁切。"
+        label="自動跟住主角"
+        hint="輸出直式或方形影片時，系統會盡量讓人物、車或商品留在畫面中間。"
         value={autoReframe}
         onChange={setAutoReframe}
         disabled={disabled}
@@ -551,23 +551,23 @@ function formatBgmSummary(opts: {
 }): string {
   switch (opts.source) {
     case "none":
-      return "🔇 不使用配樂";
+      return "不使用配樂";
     case "preset":
       return opts.bgmFilename
-        ? `🎼 風格預設配樂：${opts.bgmFilename}`
-        : "🎼 依風格預設自動生成（待產生）";
+        ? `風格預設配樂：${opts.bgmFilename}`
+        : "依風格預設自動生成（待產生）";
     case "library":
       return opts.bgmFilename
-        ? `🎵 音樂庫：${opts.bgmFilename}`
-        : "🎵 從音樂庫選擇（待挑選）";
+        ? `音樂庫：${opts.bgmFilename}`
+        : "從音樂庫選擇（待挑選）";
     case "ai":
       return opts.bgmFilename
-        ? `🎼 AI 自訂配樂：${opts.bgmFilename}`
-        : "🎼 AI 自訂生成（待產生）";
+        ? `自訂配樂：${opts.bgmFilename}`
+        : "自訂生成（待產生）";
     case "upload":
       return opts.bgmFilename
-        ? `📁 已上傳：${opts.bgmFilename}`
-        : "📁 自行上傳（待選檔）";
+        ? `已上傳：${opts.bgmFilename}`
+        : "自行上傳（待選檔）";
   }
 }
 
@@ -747,13 +747,12 @@ interface ProgressTrackerProps {
 // Per-stage notes shown when a stage is *running* so the user knows the
 // expected duration and stops thinking the worker is stuck.
 const RUNNING_STAGE_HINTS: Record<string, string> = {
-  plan: "Gemini 為每段素材打分中（約 30–60 秒）。",
-  cut: "FFmpeg 把每段素材切片並轉成 9:16（約 30–60 秒）。",
-  stabilize:
-    "兩階段 vidstab 數位防抖中，每段都跑 detect + transform 兩次，整體約需 2–3 分鐘。這是預期的；沒有卡住。",
-  concat: "用 xfade 把每段拼接成完整影片（約 30 秒）。",
-  subtitles: "把字幕燒進影片（約 20 秒）。",
-  bgm: "與背景音樂混音；沒有 BGM 時直接通過。",
+  plan: "正在挑出最適合社群觀看的精彩片段，通常需要 30–60 秒。",
+  cut: "正在整理素材並做成短影音尺寸，通常需要 30–60 秒。",
+  stabilize: "正在讓手持畫面更穩，影片較長時可能需要 2–3 分鐘。",
+  concat: "正在把片段接成一支完整影片，通常約 30 秒。",
+  subtitles: "正在加上繁體中文字幕，方便社群靜音觀看。",
+  bgm: "正在整理背景音樂與原聲音量。",
 };
 
 function ProgressTracker({ steps }: ProgressTrackerProps) {
@@ -1157,11 +1156,41 @@ export default function ProjectEdit() {
   const showQueued = !draft && !seedLoading && (triggering || awaitingFirstFetch);
   const showInitial =
     !seedLoading && !triggering && !awaitingFirstFetch && drafts.length === 0;
+  const analysisBlocked = analysisStatus !== null && !analysisStatus.allDone;
+  const publishingChecklist = useMemo(() => {
+    if (!draft) return [];
+    return [
+      {
+        label: "主成品",
+        value: draft.mp4_url ? "可預覽與下載" : "檔案整理中",
+      },
+      {
+        label: "社群尺寸",
+        value: draft.cut_plan?.target_aspect_ratio
+          ?? project?.target_aspect_ratio
+          ?? "依專案設定",
+      },
+      {
+        label: "字幕",
+        value: draft.subtitle_url
+          ? "已加上，字幕檔也可下載"
+          : "沒有字幕檔，請預覽確認",
+      },
+      {
+        label: "聲音",
+        value: "請預覽確認原聲與配樂",
+      },
+      {
+        label: "品牌標示",
+        value: "請預覽確認浮水印",
+      },
+    ];
+  }, [draft, project]);
 
   return (
     <main className="page project-edit">
       <header className="edit-hero">
-        <div className="edit-hero__kicker">自動剪輯</div>
+        <div className="edit-hero__kicker">短影音成品</div>
         <h1 className="edit-hero__title">
           專案 #{validProjectId}
           {draft && <span className="edit-hero__version mono"> · v{draft.version}</span>}
@@ -1173,7 +1202,7 @@ export default function ProjectEdit() {
               ? "載入中…"
               : triggering || awaitingFirstFetch
                 ? "排隊中…"
-                : "尚未產生剪輯"}
+                : "尚未產生短影音"}
           {polling.isPolling && draft && (
             <span className="polling-indicator" aria-live="polite">
               {" · 更新中"}
@@ -1185,7 +1214,7 @@ export default function ProjectEdit() {
             to={`/projects/${validProjectId}/assets`}
             className="cta cta--quiet"
           >
-            ← 回到分析
+            ← 回到素材分析
           </Link>
           <Link to="/" className="cta cta--quiet">
             專案清單
@@ -1228,7 +1257,7 @@ export default function ProjectEdit() {
           <div className="analysis-banner__body">
             <strong>部分分析尚未完成（剩 {analysisStatus.inFlight} 個步驟）</strong>
             <span className="analysis-banner__hint">
-              現在剪輯可能不完整 — 等待全部分析完成後再開始能拿到最完整的素材判斷。
+              現在產生成品可能不完整 — 等素材檢查完成後再開始，成品會更穩。
               {analysisStatus.failed > 0 ? (
                 <>
                   {" "}有 {analysisStatus.failed} 個步驟失敗；到「分析」頁可手動重試。
@@ -1258,10 +1287,10 @@ export default function ProjectEdit() {
 
       {showInitial && (
         <section className="edit-card">
-          <h2 className="edit-card__title">準備好就開始</h2>
+          <h2 className="edit-card__title">準備好就產生短影音</h2>
           <p className="edit-card__body">
-            AI 會根據腳本與素材的逐字稿、場景、運鏡，挑選最適合的片段並依節奏拼接成
-            一支 9:16 / 4:5 / 1:1 的成品影片，並燒入繁體中文字幕。
+            系統會依照腳本與影片內容，挑出適合社群觀看的片段，做成可發佈的
+            IG / FB 短影音，並加上繁體中文字幕。
           </p>
           <EditSettingsBlock
             durationSec={durationSec}
@@ -1290,19 +1319,19 @@ export default function ProjectEdit() {
               onClick={() => void handleStartEdit(false)}
               disabled={
                 triggering
-                || (analysisStatus !== null && !analysisStatus.allDone)
+                || analysisBlocked
               }
               title={
-                analysisStatus !== null && !analysisStatus.allDone
-                  ? "等待分析全部完成後即可剪輯"
+                analysisBlocked
+                  ? "等待素材檢查完成後即可產生成品"
                   : undefined
               }
             >
               {triggering
                 ? "排隊中…"
-                : analysisStatus !== null && !analysisStatus.allDone
-                  ? `分析中（剩 ${analysisStatus.inFlight} 步驟），完成後可剪輯`
-                  : `開始剪輯（${durationSec} 秒）`}
+                : analysisBlocked
+                  ? `素材檢查中（剩 ${analysisStatus?.inFlight ?? 0} 項），完成後可開始`
+                  : `產生 ${durationSec} 秒短影音`}
             </button>
           </div>
         </section>
@@ -1312,7 +1341,7 @@ export default function ProjectEdit() {
         <section className="edit-card" aria-live="polite">
           <h2 className="edit-card__title">排隊中…</h2>
           <p className="edit-card__body">
-            已建立剪輯任務，正在等候 worker 取件。畫面會在 worker 開始處理後自動更新。
+            已建立短影音任務，正在排隊等候開始。開始後畫面會自動更新。
           </p>
           <div className="edit-card__actions">
             <button
@@ -1329,14 +1358,14 @@ export default function ProjectEdit() {
 
       {showProcessing && draft && (
         <section className="edit-card">
-          <h2 className="edit-card__title">剪輯中…</h2>
+          <h2 className="edit-card__title">正在產生成品…</h2>
           <ProgressTracker steps={draft.progress_steps} />
           {draft.cut_plan?.notes && (
             <p className="edit-card__hint mono">「{draft.cut_plan.notes}」</p>
           )}
           {draft.cut_plan?.used_fallback && (
             <p className="edit-hint">
-              已切換為備用規劃（{draft.cut_plan.fallback_reason || "未知原因"}）。
+              已用保守方式產生成品（{draft.cut_plan.fallback_reason || "原因未明"}）。
             </p>
           )}
           <div className="edit-card__actions">
@@ -1375,62 +1404,130 @@ export default function ProjectEdit() {
               </div>
             )}
           </section>
-          <section className="edit-card">
-            <div className="edit-card__row">
-              <h2 className="edit-card__title">片段順序</h2>
-              <div className="edit-card__actions">
-                {draft.mp4_url && (
-                  <a
-                    className="cta cta--primary"
-                    href={draft.mp4_url}
-                    download={`project-${validProjectId}-v${draft.version}.mp4`}
-                  >
-                    下載成品
-                  </a>
-                )}
-                {draft.subtitle_url && (
-                  <a className="cta cta--quiet" href={draft.subtitle_url} download>
-                    下載字幕
-                  </a>
-                )}
-                {/* v0.22.1 — paired re-render buttons. Left preserves
-                   the operator's segment order (only re-runs the
-                   FFmpeg stages with the current settings); right
-                   asks the AI to start over with a fresh plan.
-                   Wording deliberately spells out the OBJECT the
-                   action affects ("片段" vs "渲染") so a glance
-                   tells the operator which one is destructive. */}
-                <button
-                  type="button"
-                  className="cta cta--primary"
-                  onClick={() => void handleReRender()}
-                  disabled={triggering}
-                  title="保留目前片段順序，只用最新的配樂 / 字幕 / 浮水印 / 轉場設定重跑渲染"
-                >
-                  {triggering ? "排隊中…" : "重新渲染"}
-                </button>
-                <button
-                  type="button"
-                  className="cta"
-                  onClick={() => void handleStartEdit(true)}
-                  disabled={
-                    triggering
-                    || (analysisStatus !== null && !analysisStatus.allDone)
-                  }
-                  title={
-                    analysisStatus !== null && !analysisStatus.allDone
-                      ? "等待分析全部完成後即可重新挑選片段"
-                      : "重新讓 AI 從零挑選片段；目前的順序會被覆蓋"
-                  }
-                >
-                  {triggering
-                    ? "排隊中…"
-                    : analysisStatus !== null && !analysisStatus.allDone
-                      ? `分析中（剩 ${analysisStatus.inFlight} 步驟）`
-                      : `AI 重新選片段（${durationSec} 秒）`}
-                </button>
-              </div>
+
+          <section className="publish-workbench" aria-label="成品發佈工作台">
+            <div className="publish-workbench__intro">
+              <p className="publish-workbench__eyebrow mono">發布工作台</p>
+              <h2 className="publish-workbench__title">可以直接拿去發 IG / FB</h2>
+              <p className="publish-workbench__body">
+                先預覽主成品；沒問題就下載，或一鍵建立 Reels、貼文牆、方形貼文版本。
+              </p>
             </div>
+
+            <dl className="publish-checklist">
+              {publishingChecklist.map((item) => (
+                <div key={item.label} className="publish-checklist__item">
+                  <dt>{item.label}</dt>
+                  <dd>{item.value}</dd>
+                </div>
+              ))}
+            </dl>
+
+            <div className="publish-workbench__actions">
+              <button
+                type="button"
+                className="cta cta--primary"
+                onClick={() => videoRef.current?.scrollIntoView({
+                  behavior: "smooth",
+                  block: "center",
+                })}
+                disabled={!draft.mp4_url}
+              >
+                預覽成品
+              </button>
+              {draft.mp4_url && (
+                <a
+                  className="cta cta--primary"
+                  href={draft.mp4_url}
+                  download={`project-${validProjectId}-v${draft.version}.mp4`}
+                >
+                  下載主成品
+                </a>
+              )}
+              {draft.subtitle_url && (
+                <a className="cta cta--quiet" href={draft.subtitle_url} download>
+                  下載字幕檔
+                </a>
+              )}
+              <ExportSheet
+                draftId={draft.id}
+                draftVersion={draft.version}
+                ready
+              />
+              <button
+                type="button"
+                className="cta cta--quiet"
+                onClick={() => void handleStartEdit(true)}
+                disabled={triggering || analysisBlocked}
+                title={
+                  analysisBlocked
+                    ? "等待素材檢查完成後即可重新生成"
+                    : "重新挑選片段，建立另一個版本"
+                }
+              >
+                {triggering
+                  ? "排隊中…"
+                  : analysisBlocked
+                    ? `素材檢查中（剩 ${analysisStatus?.inFlight ?? 0} 項）`
+                    : "重新生成一版"}
+              </button>
+            </div>
+          </section>
+
+          <details className="edit-advanced-panel">
+            <summary className="edit-advanced-panel__summary">
+              <span className="edit-advanced-panel__title">進階微調</span>
+              <span className="edit-advanced-panel__hint">
+                需要改片段、字幕、配樂或浮水印時再打開。
+              </span>
+            </summary>
+
+            <section className="edit-card edit-card--secondary">
+              <div className="edit-card__row">
+                <div>
+                  <h2 className="edit-card__title">片段與設定微調</h2>
+                  <p className="edit-card__body">
+                    這裡保留給需要手動調整的人；一般發佈可直接使用上方工作台。
+                  </p>
+                </div>
+                <div className="edit-card__actions">
+                  {draft.mp4_url && (
+                    <a
+                      className="cta cta--quiet"
+                      href={draft.mp4_url}
+                      download={`project-${validProjectId}-v${draft.version}.mp4`}
+                    >
+                      下載主成品
+                    </a>
+                  )}
+                  <button
+                    type="button"
+                    className="cta cta--secondary"
+                    onClick={() => void handleReRender()}
+                    disabled={triggering}
+                    title="保留目前片段順序，只用最新的配樂、字幕、浮水印與轉場設定重新輸出"
+                  >
+                    {triggering ? "排隊中…" : "套用設定再輸出"}
+                  </button>
+                  <button
+                    type="button"
+                    className="cta"
+                    onClick={() => void handleStartEdit(true)}
+                    disabled={triggering || analysisBlocked}
+                    title={
+                      analysisBlocked
+                        ? "等待素材檢查完成後即可重新挑選片段"
+                        : "重新挑選片段；目前的順序會被覆蓋"
+                    }
+                  >
+                    {triggering
+                      ? "排隊中…"
+                      : analysisBlocked
+                        ? `素材檢查中（剩 ${analysisStatus?.inFlight ?? 0} 項）`
+                        : `重新選片段（${durationSec} 秒）`}
+                  </button>
+                </div>
+              </div>
             <EditSettingsBlock
               durationSec={durationSec}
               setDurationSec={setDurationSec}
@@ -1456,10 +1553,10 @@ export default function ProjectEdit() {
                 to={`/projects/${validProjectId}/edit/timeline/${draft.id}`}
                 className="cta cta--secondary edit-card__advanced-link"
               >
-                進階編輯 ✨
+                進階編輯
               </Link>
               <span className="edit-card__advanced-hint">
-                打開時間軸視圖，可裁切、分割、刪除片段
+                打開時間軸視圖，可調整順序、分割或刪除片段
               </span>
             </div>
             <DraggableTimeline
@@ -1489,27 +1586,24 @@ export default function ProjectEdit() {
             )}
             {draft.cut_plan?.used_fallback && (
               <p className="edit-hint">
-                已切換為備用規劃（{draft.cut_plan.fallback_reason || "未知原因"}）。
+                已用保守方式產生成品（{draft.cut_plan.fallback_reason || "原因未明"}）。
               </p>
             )}
-            <ExportSheet
+            </section>
+
+            <SubtitleEditor
               draftId={draft.id}
-              draftVersion={draft.version}
-              ready
+              locked={triggering || awaitingFirstFetch || showProcessing}
+              onRebuildStart={() => void refreshDrafts().catch(() => {})}
+              onRebuildError={(msg) => setTriggerError(msg)}
+              renderFlags={{
+                transitions: transitionsOn,
+                stabilize,
+                subtitles: subtitlesOn,
+                autoReframe,
+              }}
             />
-          </section>
-          <SubtitleEditor
-            draftId={draft.id}
-            locked={triggering || awaitingFirstFetch || showProcessing}
-            onRebuildStart={() => void refreshDrafts().catch(() => {})}
-            onRebuildError={(msg) => setTriggerError(msg)}
-            renderFlags={{
-              transitions: transitionsOn,
-              stabilize,
-              subtitles: subtitlesOn,
-              autoReframe,
-            }}
-          />
+          </details>
         </>
       )}
 
@@ -1525,12 +1619,12 @@ export default function ProjectEdit() {
         return (
           <section className="edit-card edit-card--failed">
             <h2 className="edit-card__title">
-              {isOrphan ? "任務已遺失" : "剪輯失敗"}
+              {isOrphan ? "任務沒有完成" : "短影音產生失敗"}
             </h2>
             <p className="edit-card__body">
               {isOrphan
-                ? "Worker 中斷、逾時或任務被清掉，渲染從未開始或沒能完成。請點下方按鈕重新提交。"
-                : "渲染流程沒能跑完。下方的進度條會標出失敗在哪一階段；常見原因：素材不夠多、Gemini 無法服務、或某段素材的編碼有問題。"}
+                ? "這次產生成品的工作中斷或逾時，沒有成功完成。請點下方按鈕重新送出。"
+                : "這次成品沒有成功產出。下方會標出停在哪一步；常見原因是素材不夠、AI 暫時忙碌，或某段影片格式不穩。"}
             </p>
             {!isOrphan && <ProgressTracker steps={draft.progress_steps} />}
             {draft.prompt_feedback && (
@@ -1551,8 +1645,8 @@ export default function ProjectEdit() {
                 {triggering
                   ? "排隊中…"
                   : isOrphan
-                    ? "重新提交"
-                    : "AI 重新選片段"}
+                    ? "重新送出"
+                    : "重新生成一版"}
               </button>
             </div>
           </section>

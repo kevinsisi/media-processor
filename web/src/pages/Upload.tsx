@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { apiClient } from "../api/client";
 import type { ProjectDetail } from "../api/types";
 import {
@@ -54,6 +54,7 @@ function formatSavedAt(iso: string): string {
 
 export default function Upload() {
   const params = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const projectId = params.id ? Number(params.id) : NaN;
 
   const [project, setProject] = useState<ProjectDetail | null>(null);
@@ -75,8 +76,57 @@ export default function Upload() {
   const [scriptInitialLoaded, setScriptInitialLoaded] = useState(false);
   const [scriptSavedAt, setScriptSavedAt] = useState<string | null>(null);
   const [scriptDirty, setScriptDirty] = useState(false);
+  const [scriptSaving, setScriptSaving] = useState(false);
   const [scriptError, setScriptError] = useState<string | null>(null);
   const scriptDebounceRef = useRef<number | null>(null);
+  const scriptSaveSeqRef = useRef(0);
+  const latestScriptRef = useRef({
+    body: "",
+    sourceFilename: null as string | null,
+  });
+  latestScriptRef.current = {
+    body: scriptBody,
+    sourceFilename: scriptSourceFilename,
+  };
+
+  const saveScriptNow = useCallback(async (): Promise<boolean> => {
+    if (!scriptInitialLoaded) return true;
+    if (scriptDebounceRef.current !== null) {
+      window.clearTimeout(scriptDebounceRef.current);
+      scriptDebounceRef.current = null;
+    }
+    if (!scriptDirty && !scriptSaving) return true;
+
+    const payload = latestScriptRef.current;
+    const saveSeq = scriptSaveSeqRef.current + 1;
+    scriptSaveSeqRef.current = saveSeq;
+    setScriptSaving(true);
+    try {
+      const saved = await apiClient.putScript(projectId, {
+        body: payload.body,
+        source_filename: payload.sourceFilename,
+      });
+      const current = latestScriptRef.current;
+      if (saveSeq === scriptSaveSeqRef.current) {
+        setScriptSavedAt(saved.updated_at);
+        setScriptError(null);
+        setScriptSaving(false);
+        if (
+          current.body === payload.body &&
+          current.sourceFilename === payload.sourceFilename
+        ) {
+          setScriptDirty(false);
+        }
+      }
+      return true;
+    } catch (err) {
+      if (saveSeq === scriptSaveSeqRef.current) {
+        setScriptError(err instanceof Error ? err.message : "儲存失敗，請再試一次");
+        setScriptSaving(false);
+      }
+      return false;
+    }
+  }, [projectId, scriptDirty, scriptInitialLoaded, scriptSaving]);
 
   // Load project + script on mount
   useEffect(() => {
@@ -111,21 +161,12 @@ export default function Upload() {
   useEffect(() => {
     if (!scriptInitialLoaded) return;
     if (!scriptDirty) return;
+    if (scriptSaving) return;
     if (scriptDebounceRef.current !== null) {
       window.clearTimeout(scriptDebounceRef.current);
     }
     scriptDebounceRef.current = window.setTimeout(async () => {
-      try {
-        const saved = await apiClient.putScript(projectId, {
-          body: scriptBody,
-          source_filename: scriptSourceFilename,
-        });
-        setScriptSavedAt(saved.updated_at);
-        setScriptDirty(false);
-        setScriptError(null);
-      } catch (err) {
-        setScriptError(err instanceof Error ? err.message : "儲存失敗");
-      }
+      void saveScriptNow();
     }, SCRIPT_DEBOUNCE_MS);
     return () => {
       if (scriptDebounceRef.current !== null) {
@@ -136,8 +177,9 @@ export default function Upload() {
     scriptBody,
     scriptSourceFilename,
     scriptDirty,
+    scriptSaving,
     scriptInitialLoaded,
-    projectId,
+    saveScriptNow,
   ]);
 
   function pickVideoFiles(files: FileList | null): void {
@@ -307,6 +349,20 @@ export default function Upload() {
   // what we know we've completed locally this session.
   const assetCount = project?.asset_count ?? completedAssetIds.length;
   const hasScript = scriptBody.trim().length > 0;
+  const scriptStatusText = scriptSaving
+    ? "腳本保存中，下一步會等保存完成。"
+    : scriptDirty
+      ? "有新修改，點下一步會先自動保存。"
+      : scriptSavedAt
+        ? `腳本已保存 · ${formatSavedAt(scriptSavedAt)}`
+        : "可以先不填腳本；若有輸入，系統會自動保存。";
+
+  const handleNextStep = async (): Promise<void> => {
+    if (assetCount === 0 || scriptSaving || !scriptInitialLoaded) return;
+    const saved = await saveScriptNow();
+    if (!saved) return;
+    navigate(`/projects/${projectId}/assets`);
+  };
 
   if (Number.isNaN(projectId)) {
     return (
@@ -351,7 +407,7 @@ export default function Upload() {
             點擊下方按鈕選取影片，可一次選多個檔案
           </p>
           <p className="upload-drop__hint upload-drop__hint--meta">
-            上傳完成後會自動進行 AI 分析（語音轉錄、場景、運鏡、情緒、腳本對應）。可在「進入素材分析」查看每支影片的進度，分析完成後即可剪輯。
+            上傳完成後會自動檢查內容、畫面重點與腳本對應。可在「素材分析」查看每支影片的進度，完成後即可產生短影音。
           </p>
           <input
             ref={fileInputRef}
@@ -433,8 +489,10 @@ export default function Upload() {
         <header className="upload-section__head">
           <h2 className="upload-section__title">腳本</h2>
           <span className="upload-section__count">
-            {scriptDirty
-              ? "編輯中…"
+            {scriptSaving
+              ? "保存中…"
+              : scriptDirty
+                ? "尚未保存"
               : scriptSavedAt
                 ? `已儲存 · ${formatSavedAt(scriptSavedAt)}`
                 : "尚未儲存"}
@@ -474,6 +532,10 @@ export default function Upload() {
           placeholder="貼上或輸入這支影片的腳本…"
           rows={10}
         />
+
+        <p className="script-save-note" aria-live="polite">
+          {scriptStatusText}
+        </p>
 
         {scriptError && (
           <p className="upload-error" role="alert">
@@ -523,20 +585,28 @@ export default function Upload() {
               下一步：查看分析 →
             </span>
           ) : pendingUploadCount > 0 ? (
-            <Link
-              to={`/projects/${projectId}/assets`}
+            <button
+              type="button"
               className="summary-next summary-next--warning"
+              onClick={() => void handleNextStep()}
+              disabled={scriptSaving || !scriptInitialLoaded}
               title={`還有 ${pendingUploadCount} 個影片未上傳完，前往分析頁可能看不到全部素材。`}
             >
-              下一步：查看分析（{pendingUploadCount} 個還在上傳）→
-            </Link>
+              {scriptSaving
+                ? "正在保存腳本…"
+                : `下一步：查看分析（${pendingUploadCount} 個還在上傳）→`}
+            </button>
           ) : (
-            <Link
-              to={`/projects/${projectId}/assets`}
+            <button
+              type="button"
               className="cta cta--primary summary-next"
+              onClick={() => void handleNextStep()}
+              disabled={scriptSaving || !scriptInitialLoaded}
             >
-              下一步：查看分析（{assetCount} 個素材）→
-            </Link>
+              {scriptSaving
+                ? "正在保存腳本…"
+                : `下一步：查看分析（${assetCount} 個素材）→`}
+            </button>
           )}
         </div>
       </section>

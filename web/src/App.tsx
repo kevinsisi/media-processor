@@ -1,14 +1,18 @@
-import { Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useParams } from "react-router-dom";
 import AppHeader from "./components/AppHeader";
 import Health from "./pages/Health";
 import NewProject from "./pages/NewProject";
 import ProjectAnalysis from "./pages/ProjectAnalysis";
 import ProjectEdit from "./pages/ProjectEdit";
 import ProjectList from "./pages/ProjectList";
-import Review from "./pages/Review";
 import Settings from "./pages/Settings";
 import TimelineEditor from "./pages/TimelineEditor";
 import Upload from "./pages/Upload";
+
+function LegacyReviewRedirect() {
+  const { id } = useParams<{ id: string }>();
+  return <Navigate to={`/projects/${id}/edit`} replace />;
+}
 
 export default function App() {
   return (
@@ -24,7 +28,7 @@ export default function App() {
           path="/projects/:projectId/edit/timeline/:draftId"
           element={<TimelineEditor />}
         />
-        <Route path="/projects/:id/review" element={<Review />} />
+        <Route path="/projects/:id/review" element={<LegacyReviewRedirect />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/health" element={<Health />} />
       </Routes>
