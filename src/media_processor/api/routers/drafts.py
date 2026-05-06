@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 from fastapi import APIRouter, Body, Depends, HTTPException, status
 from sqlalchemy import select
@@ -22,6 +22,7 @@ from media_processor.api.schemas import (
     DraftExportOut,
     DraftExportRequest,
     DraftExportResponse,
+    DraftExportStatusLiteral,
     DraftPatchRequest,
     DraftPatchResponse,
     DraftRebuildSubtitlesRequest,
@@ -114,14 +115,8 @@ def _draft_render_flags(
     The boolean coercion guards against corrupt JSON blobs (e.g. a
     string ``"false"``) round-tripping as truthy.
     """
-    snapshot = (
-        draft.render_flags_json if isinstance(draft.render_flags_json, dict) else {}
-    )
-    over = (
-        override.model_dump(exclude_none=True)
-        if override is not None
-        else {}
-    )
+    snapshot = draft.render_flags_json if isinstance(draft.render_flags_json, dict) else {}
+    over = override.model_dump(exclude_none=True) if override is not None else {}
     # v0.24.0 — per-flag legacy default (mirrors EditTriggerRequest).
     # Only used when neither override nor snapshot has a value.
     legacy_defaults = {
@@ -244,12 +239,10 @@ def serialise_draft_detail(draft: Draft) -> DraftDetail:
                 # when the DB held 0 %, which caused the "I muted
                 # this and it didn't take" report.
                 voice_volume=(
-                    float(s.voice_volume)
-                    if getattr(s, "voice_volume", None) is not None
-                    else 1.0
+                    float(s.voice_volume) if getattr(s, "voice_volume", None) is not None else 1.0
                 ),
                 bgm_volume=(
-                    float(s.bgm_volume) if getattr(s, "bgm_volume", None) is not None else None
+                    float(bgm_volume) if (bgm_volume := s.bgm_volume) is not None else None
                 ),
             )
             for s in sorted(draft.segments, key=lambda x: x.order)
@@ -269,7 +262,7 @@ def serialise_draft_export(export: DraftExport, *, project_id: int) -> DraftExpo
         draft_id=export.draft_id,
         aspect=export.aspect,
         height=export.height,
-        status=export.status,
+        status=cast(DraftExportStatusLiteral, export.status),
         job_id=export.job_id,
         output_filename=export.output_filename,
         download_url=download_url,
@@ -545,7 +538,11 @@ async def _reflow_segments_and_cut_plan(draft: Draft) -> None:
         seg.on_timeline_start_ms = cursor_ms
         seg.on_timeline_end_ms = cursor_ms + duration
         cursor_ms += duration
-        if seg.asset_id is not None and seg.asset_start_ms is not None and seg.asset_end_ms is not None:
+        if (
+            seg.asset_id is not None
+            and seg.asset_start_ms is not None
+            and seg.asset_end_ms is not None
+        ):
             new_plan_segments.append(
                 {
                     "order": int(seg.order),
@@ -827,7 +824,9 @@ async def patch_draft_segment(
     # Validate against the asset's recorded duration so we can't trim
     # past the source. Only loaded when an asset-time field was actually
     # touched.
-    if ("asset_start_ms" in fields_set or "asset_end_ms" in fields_set) and seg.asset_id is not None:
+    if (
+        "asset_start_ms" in fields_set or "asset_end_ms" in fields_set
+    ) and seg.asset_id is not None:
         asset = await session.get(Asset, seg.asset_id)
         if asset is None:
             raise HTTPException(
@@ -842,9 +841,7 @@ async def patch_draft_segment(
         if new_end is not None and asset.duration_ms is not None and new_end > asset.duration_ms:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    f"asset_end_ms ({new_end}) must be ≤ asset duration ({asset.duration_ms})"
-                ),
+                detail=(f"asset_end_ms ({new_end}) must be ≤ asset duration ({asset.duration_ms})"),
             )
 
     if (
@@ -854,10 +851,7 @@ async def patch_draft_segment(
     ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                f"transition '{payload.transition}' is not in the renderer's "
-                "whitelist"
-            ),
+            detail=(f"transition '{payload.transition}' is not in the renderer's whitelist"),
         )
 
     # All checks passed — apply.
@@ -871,9 +865,7 @@ async def patch_draft_segment(
         seg.voice_volume = float(payload.voice_volume)
     if "bgm_volume" in fields_set:
         # bgm_volume can be set to None explicitly (= clear override).
-        seg.bgm_volume = (
-            float(payload.bgm_volume) if payload.bgm_volume is not None else None
-        )
+        seg.bgm_volume = float(payload.bgm_volume) if payload.bgm_volume is not None else None
 
     await _reflow_segments_and_cut_plan(draft)
     await session.commit()
@@ -997,9 +989,7 @@ async def re_render_draft(
     stmt = select(Draft).where(Draft.id == draft_id).options(selectinload(Draft.segments))
     draft = (await session.execute(stmt)).scalar_one_or_none()
     if draft is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="draft not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="draft not found")
     if not draft.cut_plan_json:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

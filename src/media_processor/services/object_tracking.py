@@ -38,9 +38,7 @@ logger = logging.getLogger(__name__)
 # fps. Confidence floor 0.30 keeps weak detections out (especially on
 # the first / last frames where the subject is partially in frame).
 TRACKING_SAMPLE_FPS: float = float(os.environ.get("TRACKING_SAMPLE_FPS", "5"))
-TRACKING_MIN_CONFIDENCE: float = float(
-    os.environ.get("TRACKING_MIN_CONFIDENCE", "0.30")
-)
+TRACKING_MIN_CONFIDENCE: float = float(os.environ.get("TRACKING_MIN_CONFIDENCE", "0.30"))
 # v0.22.2 — drop tracks with fewer than this many sampled detections
 # from any user-facing surface (the /tracking endpoint, the
 # detected-classes aggregator, the AssetTrackingTarget bbox overlay).
@@ -53,7 +51,7 @@ TRACKING_MIN_CONFIDENCE: float = float(
 MIN_TRACK_FRAMES: int = 5
 
 
-def is_track_significant(track: dict) -> bool:
+def is_track_significant(track: dict[str, Any]) -> bool:
     """v0.22.2 — return True when ``track["frames"]`` is long enough
     to surface to the operator. The single source-of-truth predicate
     used by the tracking router, the detected-classes aggregator,
@@ -62,6 +60,8 @@ def is_track_significant(track: dict) -> bool:
         return False
     frames = track.get("frames")
     return isinstance(frames, list) and len(frames) >= MIN_TRACK_FRAMES
+
+
 # Default model — yolov8n.pt is the smallest official YOLOv8 weight
 # (~6 MB), fits in <500 MB VRAM, and runs at 100+ fps on a 2070. Larger
 # variants (s/m/l/x) trade speed for accuracy; override via env if you
@@ -70,9 +70,7 @@ TRACKING_MODEL: str = os.environ.get("TRACKING_MODEL", "yolov8n.pt")
 # Where ultralytics caches downloaded weights inside the worker. Bind-
 # mounted via the existing /app/media volume so a re-pull after a
 # container restart is unnecessary.
-TRACKING_MODEL_DIR: Path = Path(
-    os.environ.get("TRACKING_MODEL_DIR", "/app/media/tracking_models")
-)
+TRACKING_MODEL_DIR: Path = Path(os.environ.get("TRACKING_MODEL_DIR", "/app/media/tracking_models"))
 
 # COCO class names we treat as "the subject" of a video. Order matters
 # for tiebreaks: when two classes are detected with similar frequency
@@ -94,19 +92,86 @@ SUBJECT_CLASS_PRIORITY_HEAD: tuple[str, ...] = (
     "skateboard",
 )
 COCO80_CLASSES: tuple[str, ...] = (
-    "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train",
-    "truck", "boat", "traffic light", "fire hydrant", "stop sign",
-    "parking meter", "bench", "bird", "cat", "dog", "horse", "sheep",
-    "cow", "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella",
-    "handbag", "tie", "suitcase", "frisbee", "skis", "snowboard",
-    "sports ball", "kite", "baseball bat", "baseball glove", "skateboard",
-    "surfboard", "tennis racket", "bottle", "wine glass", "cup", "fork",
-    "knife", "spoon", "bowl", "banana", "apple", "sandwich", "orange",
-    "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair",
-    "couch", "potted plant", "bed", "dining table", "toilet", "tv",
-    "laptop", "mouse", "remote", "keyboard", "cell phone", "microwave",
-    "oven", "toaster", "sink", "refrigerator", "book", "clock", "vase",
-    "scissors", "teddy bear", "hair drier", "toothbrush",
+    "person",
+    "bicycle",
+    "car",
+    "motorcycle",
+    "airplane",
+    "bus",
+    "train",
+    "truck",
+    "boat",
+    "traffic light",
+    "fire hydrant",
+    "stop sign",
+    "parking meter",
+    "bench",
+    "bird",
+    "cat",
+    "dog",
+    "horse",
+    "sheep",
+    "cow",
+    "elephant",
+    "bear",
+    "zebra",
+    "giraffe",
+    "backpack",
+    "umbrella",
+    "handbag",
+    "tie",
+    "suitcase",
+    "frisbee",
+    "skis",
+    "snowboard",
+    "sports ball",
+    "kite",
+    "baseball bat",
+    "baseball glove",
+    "skateboard",
+    "surfboard",
+    "tennis racket",
+    "bottle",
+    "wine glass",
+    "cup",
+    "fork",
+    "knife",
+    "spoon",
+    "bowl",
+    "banana",
+    "apple",
+    "sandwich",
+    "orange",
+    "broccoli",
+    "carrot",
+    "hot dog",
+    "pizza",
+    "donut",
+    "cake",
+    "chair",
+    "couch",
+    "potted plant",
+    "bed",
+    "dining table",
+    "toilet",
+    "tv",
+    "laptop",
+    "mouse",
+    "remote",
+    "keyboard",
+    "cell phone",
+    "microwave",
+    "oven",
+    "toaster",
+    "sink",
+    "refrigerator",
+    "book",
+    "clock",
+    "vase",
+    "scissors",
+    "teddy bear",
+    "hair drier",
+    "toothbrush",
 )
 # Back-compat alias — kept so nothing imports SUBJECT_CLASS_PRIORITY.
 SUBJECT_CLASS_PRIORITY: tuple[str, ...] = SUBJECT_CLASS_PRIORITY_HEAD
@@ -223,11 +288,9 @@ def _resolve_model_path(model_id: str) -> Path:
     # by default). Pull straight into our cache dir so the next worker
     # boot finds it.
     try:
-        from ultralytics import YOLO  # type: ignore[import-not-found]
+        from ultralytics import YOLO  # type: ignore[attr-defined]
     except ImportError as exc:  # pragma: no cover — install-time guard
-        raise TrackingUnavailableError(
-            f"ultralytics not installed: {exc}"
-        ) from exc
+        raise TrackingUnavailableError(f"ultralytics not installed: {exc}") from exc
     cwd = Path.cwd()
     try:
         os.chdir(TRACKING_MODEL_DIR)
@@ -235,9 +298,7 @@ def _resolve_model_path(model_id: str) -> Path:
     finally:
         os.chdir(cwd)
     if not target.is_file():
-        raise TrackingUnavailableError(
-            f"YOLO model {model_id} did not land at {target}"
-        )
+        raise TrackingUnavailableError(f"YOLO model {model_id} did not land at {target}")
     return target
 
 
@@ -246,11 +307,9 @@ def _load_model(model_id: str) -> Any:
     if cached is not None:
         return cached
     try:
-        from ultralytics import YOLO  # type: ignore[import-not-found]
+        from ultralytics import YOLO  # type: ignore[attr-defined]
     except ImportError as exc:  # pragma: no cover — install-time guard
-        raise TrackingUnavailableError(
-            f"ultralytics not installed: {exc}"
-        ) from exc
+        raise TrackingUnavailableError(f"ultralytics not installed: {exc}") from exc
     path = _resolve_model_path(model_id)
     model = YOLO(str(path))
     _MODEL_CACHE[model_id] = model
@@ -258,9 +317,7 @@ def _load_model(model_id: str) -> Any:
     return model
 
 
-def detect(
-    media_path: Path, duration_ms: int, *, model_id: str = TRACKING_MODEL
-) -> TrackingResult:
+def detect(media_path: Path, duration_ms: int, *, model_id: str = TRACKING_MODEL) -> TrackingResult:
     """Run YOLO over ``media_path`` at ``TRACKING_SAMPLE_FPS`` and return
     the dominant subject's per-frame bbox track.
 
@@ -272,11 +329,9 @@ def detect(
         return _fake_result(duration_ms=duration_ms or 5_000)
 
     try:
-        import cv2  # type: ignore[import-not-found]
+        import cv2
     except ImportError as exc:  # pragma: no cover — install-time guard
-        raise TrackingUnavailableError(
-            f"opencv missing: {exc}"
-        ) from exc
+        raise TrackingUnavailableError(f"opencv missing: {exc}") from exc
 
     model = _load_model(model_id)
 
@@ -490,7 +545,7 @@ def aggregate_detected_classes(
                 seen_in_asset.add(cls)
         for cls in seen_in_asset:
             counts[cls]["asset_count"] += 1
-    rows = [
+    rows: list[dict[str, Any]] = [
         {
             "cls_name": cls,
             "total_frames": agg["total_frames"],
@@ -603,7 +658,7 @@ def track_custom_roi(
         )
 
     try:
-        import cv2  # type: ignore[import-not-found]
+        import cv2
     except ImportError as exc:  # pragma: no cover
         raise TrackingUnavailableError(f"opencv missing: {exc}") from exc
 
@@ -639,17 +694,20 @@ def track_custom_roi(
         cap.set(cv2.CAP_PROP_POS_MSEC, init_t_ms)
         ok, frame = cap.read()
         if not ok or frame is None:
-            raise TrackingError(
-                f"could not seek to init_t_ms={init_t_ms} in {media_path}"
-            )
+            raise TrackingError(f"could not seek to init_t_ms={init_t_ms} in {media_path}")
         tracker = creator()
         tracker.init(frame, (init_x, init_y, init_w, init_h))
         last_x, last_y, last_w, last_h = init_x, init_y, init_w, init_h
-        frames.append({
-            "t_ms": int(init_t_ms),
-            "x": last_x, "y": last_y, "w": last_w, "h": last_h,
-            "conf": 1.0,
-        })
+        frames.append(
+            {
+                "t_ms": int(init_t_ms),
+                "x": last_x,
+                "y": last_y,
+                "w": last_w,
+                "h": last_h,
+                "conf": 1.0,
+            }
+        )
         sampled += 1
 
         ts = init_t_ms + interval_ms
@@ -669,11 +727,16 @@ def track_custom_roi(
                 conf = 1.0
             else:
                 conf = 0.0
-            frames.append({
-                "t_ms": int(ts),
-                "x": last_x, "y": last_y, "w": last_w, "h": last_h,
-                "conf": conf,
-            })
+            frames.append(
+                {
+                    "t_ms": int(ts),
+                    "x": last_x,
+                    "y": last_y,
+                    "w": last_w,
+                    "h": last_h,
+                    "conf": conf,
+                }
+            )
             ts += interval_ms
     finally:
         cap.release()

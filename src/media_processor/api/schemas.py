@@ -280,9 +280,7 @@ class SubjectClassPatch(BaseModel):
         if value is None or value == "":
             return None
         if value not in COCO80_CLASSES:
-            raise ValueError(
-                f"subject_class must be one of the 80 COCO classes; got {value!r}"
-            )
+            raise ValueError(f"subject_class must be one of the 80 COCO classes; got {value!r}")
         return value
 
 
@@ -711,9 +709,7 @@ class ScriptCoverageOut(BaseModel):
 class AnalyzeRequest(BaseModel):
     """Body for POST /assets/{id}/analyze — both fields optional."""
 
-    steps: (
-        list[Literal["stt", "scene", "motion", "emotion", "tracking", "coverage"]] | None
-    ) = None
+    steps: list[Literal["stt", "scene", "motion", "emotion", "tracking", "coverage"]] | None = None
     force: bool = False
 
 

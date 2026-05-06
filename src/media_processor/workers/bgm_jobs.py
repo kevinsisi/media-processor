@@ -86,9 +86,7 @@ async def _run(job_id: int) -> dict[str, Any]:
             row.output_path = str(result.output_path)
             row.completed_at = datetime.now(UTC)
         project = (
-            await session.execute(
-                select(Project).where(Project.id == project_id)
-            )
+            await session.execute(select(Project).where(Project.id == project_id))
         ).scalar_one_or_none()
         if project is not None:
             project.bgm_path = str(result.output_path)

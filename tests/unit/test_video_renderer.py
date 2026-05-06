@@ -212,9 +212,7 @@ def test_watermark_position_xy_known_anchors() -> None:
 def test_watermark_position_xy_falls_back_to_default() -> None:
     """Unrecognised anchor names land at the documented default — never crash."""
     fallback = video_renderer._watermark_position_xy("nonsense")
-    default = video_renderer._watermark_position_xy(
-        video_renderer.WATERMARK_DEFAULT_POSITION
-    )
+    default = video_renderer._watermark_position_xy(video_renderer.WATERMARK_DEFAULT_POSITION)
     assert fallback == default
 
 

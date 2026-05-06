@@ -17,6 +17,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +113,8 @@ def _flow_per_frame(
         if not ok:
             break
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        flow = cv2.calcOpticalFlowFarneback(
+        calc_farneback = cast(Any, cv2.calcOpticalFlowFarneback)
+        flow = calc_farneback(
             prev_gray,
             gray,
             None,

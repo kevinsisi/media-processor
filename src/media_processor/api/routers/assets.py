@@ -144,9 +144,7 @@ async def delete_asset(
         asset_id=result.asset_id,
         deleted=result.deleted,
         affected_drafts=[
-            AffectedDraftOut(
-                draft_id=b.draft_id, version=b.version, status=b.status
-            )
+            AffectedDraftOut(draft_id=b.draft_id, version=b.version, status=b.status)
             for b in result.affected_drafts
         ],
         invalidated_versions=list(result.invalidated_versions),
@@ -508,7 +506,7 @@ async def patch_asset_tracking_target(
         if not index_ok:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"object_index={payload.object_index} not in tracking_json[\"tracks\"]",
+                detail=f'object_index={payload.object_index} not in tracking_json["tracks"]',
             )
         asset.tracked_object_index = int(payload.object_index)
     elif payload.mode == "custom":
@@ -587,10 +585,7 @@ async def patch_asset_tracking_target(
         except (KeyError, TypeError, ValueError) as exc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    "point must contain norm_x (0..1), norm_y (0..1), "
-                    f"frame_ms (int): {exc}"
-                ),
+                detail=(f"point must contain norm_x (0..1), norm_y (0..1), frame_ms (int): {exc}"),
             ) from exc
         if not (0.0 <= norm_x <= 1.0) or not (0.0 <= norm_y <= 1.0):
             raise HTTPException(

@@ -412,9 +412,7 @@ async def _run_tracking(
         return "done"
 
     media_path = Path(asset.file_path)
-    result = await asyncio.to_thread(
-        object_tracking.detect, media_path, asset.duration_ms or 0
-    )
+    result = await asyncio.to_thread(object_tracking.detect, media_path, asset.duration_ms or 0)
     try:
         asset.tracking_json = object_tracking.serialise(result)
         await session.commit()
@@ -601,8 +599,7 @@ async def run_translate_subtitle(asset_id: int, *, lang: str = "en") -> dict[str
     """
     if lang not in SUPPORTED_SECONDARY_LANGS:
         raise ValueError(
-            f"unsupported secondary subtitle lang: {lang!r}; "
-            f"supported: {SUPPORTED_SECONDARY_LANGS}"
+            f"unsupported secondary subtitle lang: {lang!r}; supported: {SUPPORTED_SECONDARY_LANGS}"
         )
 
     async with async_session_maker() as session:

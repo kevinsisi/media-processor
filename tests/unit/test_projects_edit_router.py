@@ -166,9 +166,7 @@ def test_edit_trigger_rejects_out_of_range_duration(
     assert fake_enqueue == []
 
 
-def test_edit_trigger_persists_pending_draft(
-    app: FastAPI, fake_enqueue: list[EnqueueCall]
-) -> None:
+def test_edit_trigger_persists_pending_draft(app: FastAPI, fake_enqueue: list[EnqueueCall]) -> None:
     """The POST creates a pending Draft row before returning 202 so the
     UI's immediate ``GET /projects/{id}/drafts`` finds it (no race with
     the worker creating the row asynchronously)."""
@@ -246,9 +244,7 @@ def test_edit_trigger_409_when_pending_draft_exists(
         asyncio.run(engine.dispose())
 
 
-def test_edit_trigger_404_on_missing_project(
-    app: FastAPI, fake_enqueue: list[EnqueueCall]
-) -> None:
+def test_edit_trigger_404_on_missing_project(app: FastAPI, fake_enqueue: list[EnqueueCall]) -> None:
     client = TestClient(app)
     resp = client.post("/projects/999/edit", json={})
     assert resp.status_code == 404

@@ -12,7 +12,7 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:  # heavy deps only present in the worker image.
     from faster_whisper import WhisperModel
@@ -141,7 +141,7 @@ def _load_model(model_name: str, device: str, compute_type: str) -> WhisperModel
 
 
 def _regroup_words(
-    word_iter: list,
+    word_iter: list[Any],
     *,
     max_chars: int = SUBTITLE_MAX_CHARS,
     max_seconds: float = SUBTITLE_MAX_SECONDS,
@@ -269,7 +269,7 @@ def transcribe(audio_path: Path | str) -> TranscriptResult:
     # iterable of Word(start, end, word, probability)). If any segment
     # comes back without word-level data, fall back to that segment as a
     # single pseudo-word so we don't silently lose its text.
-    all_words: list = []
+    all_words: list[Any] = []
     raw_segment_count = 0
     for seg in raw_segments:
         raw_segment_count += 1
@@ -367,7 +367,7 @@ def translate(audio_path: Path | str, *, target_lang: str = "en") -> TranscriptR
         word_timestamps=True,
     )
 
-    all_words: list = []
+    all_words: list[Any] = []
     raw_segment_count = 0
     for seg in raw_segments:
         raw_segment_count += 1
@@ -406,8 +406,7 @@ def translate(audio_path: Path | str, *, target_lang: str = "en") -> TranscriptR
         )
 
     logger.info(
-        "translated %d whisper-segments → %d English cues "
-        "(detected_language=%r duration=%.1fs)",
+        "translated %d whisper-segments → %d English cues (detected_language=%r duration=%.1fs)",
         raw_segment_count,
         len(out),
         getattr(info, "language", None),

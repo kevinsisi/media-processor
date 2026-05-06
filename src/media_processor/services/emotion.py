@@ -134,12 +134,8 @@ def _classify_blendshapes(blendshapes: dict[str, float]) -> str:
     smile = (blendshapes.get("mouthSmileLeft", 0.0) + blendshapes.get("mouthSmileRight", 0.0)) / 2
     jaw_open = blendshapes.get("jawOpen", 0.0)
     brow_up = (blendshapes.get("browInnerUp", 0.0) + blendshapes.get("browOuterUpLeft", 0.0)) / 2
-    brow_down = (
-        blendshapes.get("browDownLeft", 0.0) + blendshapes.get("browDownRight", 0.0)
-    ) / 2
-    eye_wide = (
-        blendshapes.get("eyeWideLeft", 0.0) + blendshapes.get("eyeWideRight", 0.0)
-    ) / 2
+    brow_down = (blendshapes.get("browDownLeft", 0.0) + blendshapes.get("browDownRight", 0.0)) / 2
+    eye_wide = (blendshapes.get("eyeWideLeft", 0.0) + blendshapes.get("eyeWideRight", 0.0)) / 2
 
     if smile >= SMILE_THRESHOLD:
         return "happy"
@@ -220,13 +216,17 @@ def classify_asset(media_path: Path, duration_ms: int) -> EmotionResult:
     if _is_fake():
         # Deterministic stub for orchestration tests.
         ranges = (
-            EmotionRange(emotion="happy", start_ms=0, end_ms=min(duration_ms, 2000)),
-            EmotionRange(
-                emotion="neutral",
-                start_ms=min(duration_ms, 2000),
-                end_ms=duration_ms,
-            ),
-        ) if duration_ms > 0 else ()
+            (
+                EmotionRange(emotion="happy", start_ms=0, end_ms=min(duration_ms, 2000)),
+                EmotionRange(
+                    emotion="neutral",
+                    start_ms=min(duration_ms, 2000),
+                    end_ms=duration_ms,
+                ),
+            )
+            if duration_ms > 0
+            else ()
+        )
         dominant = _pick_dominant(list(ranges)) if ranges else EMOTION_DEFAULT
         return EmotionResult(
             dominant=dominant,
@@ -236,8 +236,8 @@ def classify_asset(media_path: Path, duration_ms: int) -> EmotionResult:
         )
 
     try:
-        import cv2  # type: ignore[import-not-found]
-        import mediapipe as mp  # type: ignore[import-not-found]
+        import cv2
+        import mediapipe as mp
     except ImportError as exc:  # pragma: no cover - install-time guard
         raise EmotionUnavailableError(f"mediapipe / opencv missing: {exc}") from exc
 
@@ -295,11 +295,11 @@ def classify_asset(media_path: Path, duration_ms: int) -> EmotionResult:
     finally:
         cap.release()
 
-    ranges = _merge_adjacent(samples)
-    dominant = _pick_dominant(ranges)
+    real_ranges = _merge_adjacent(samples)
+    dominant = _pick_dominant(real_ranges)
     return EmotionResult(
         dominant=dominant,
-        ranges=tuple(ranges),
+        ranges=tuple(real_ranges),
         sampled_frames=sampled,
         faces_seen=faces_seen,
     )

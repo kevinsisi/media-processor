@@ -244,9 +244,7 @@ async def _load_segment_volumes(draft_id: int) -> list[bgm_mixer.SegmentVolume]:
     return out
 
 
-async def _snapshot_draft_bgm_path(
-    draft_id: int, project_bgm_path: str | None
-) -> str | None:
+async def _snapshot_draft_bgm_path(draft_id: int, project_bgm_path: str | None) -> str | None:
     """Return the BGM path this draft should mix against.
 
     First render: if the draft has no ``bgm_path`` recorded yet, copy the
@@ -277,11 +275,7 @@ async def _persist_plan(handle: _DraftHandle, plan: CutPlan) -> None:
     if asset_ids:
         async with async_session_maker() as session:
             rows = (
-                (
-                    await session.execute(
-                        select(Asset).where(Asset.id.in_(asset_ids))
-                    )
-                )
+                (await session.execute(select(Asset).where(Asset.id.in_(asset_ids))))
                 .scalars()
                 .all()
             )
@@ -361,6 +355,7 @@ async def _gather_render_inputs(
     dict[int, AssetTranscript],
     dict[int, dict[str, Any]],
     dict[int, int | None],
+    dict[int, dict[str, Any]],
     dict[int, dict[str, Any]],
     dict[int, list[dict[str, Any]]],
 ]:
@@ -766,9 +761,9 @@ async def run_render(
                 timeout=10
             )
             next_stage = EditStep.STABILIZE.value if stabilize else EditStep.CONCAT.value
-            asyncio.run_coroutine_threadsafe(
-                update_state(next_stage, "running"), loop
-            ).result(timeout=10)
+            asyncio.run_coroutine_threadsafe(update_state(next_stage, "running"), loop).result(
+                timeout=10
+            )
         elif stage == "stabilize":
             asyncio.run_coroutine_threadsafe(
                 update_state(EditStep.STABILIZE.value, "done"), loop
@@ -870,9 +865,7 @@ async def run_render(
             # v0.24.0 — Project.bgm_fade_out_sec drives the tail fade
             # on the BGM track. Default 3.0 s; user can crank it to 0
             # for the historic hard-cut or up to 5 s in the FE.
-            bgm_fade_out_sec = float(
-                getattr(project, "bgm_fade_out_sec", 0.0) or 0.0
-            )
+            bgm_fade_out_sec = float(getattr(project, "bgm_fade_out_sec", 0.0) or 0.0)
             await asyncio.to_thread(
                 bgm_mixer.mix_bgm,
                 output_path,
@@ -933,7 +926,9 @@ async def run_render(
                 tmp_wm,
                 watermark_path=Path(project.watermark_path),
                 target_aspect=handle.target_aspect,
-                position=str(project.watermark_position or video_renderer.WATERMARK_DEFAULT_POSITION),
+                position=str(
+                    project.watermark_position or video_renderer.WATERMARK_DEFAULT_POSITION
+                ),
                 scale=float(project.watermark_scale or 0.10),
                 opacity=float(project.watermark_opacity or 1.0),
             )

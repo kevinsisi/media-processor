@@ -88,11 +88,7 @@ async def list_watermark_presets(
     session: SessionDep,
 ) -> list[WatermarkPresetOut]:
     rows = (
-        (
-            await session.execute(
-                select(WatermarkPreset).order_by(WatermarkPreset.created_at.desc())
-            )
-        )
+        (await session.execute(select(WatermarkPreset).order_by(WatermarkPreset.created_at.desc())))
         .scalars()
         .all()
     )
@@ -110,9 +106,7 @@ async def save_watermark_preset(
 ) -> WatermarkPresetOut:
     project = await session.get(Project, payload.project_id)
     if project is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="project not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
     if not project.watermark_path:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -123,8 +117,7 @@ async def save_watermark_preset(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
-                "project's watermark file is missing on disk; re-upload "
-                "before saving as a preset"
+                "project's watermark file is missing on disk; re-upload before saving as a preset"
             ),
         )
 

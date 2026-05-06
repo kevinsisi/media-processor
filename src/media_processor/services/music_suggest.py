@@ -40,7 +40,9 @@ SCRIPT_EXCERPT_CHARS: int = 400
 # ("indoor / closeup / studio") to drive a tonally-correct suggestion.
 TRANSCRIPT_EXCERPT_CHARS: int = 800
 PROMPT_TIMEOUT_S: float = 20.0
-FALLBACK_DESCRIPTION: str = "輕快、溫暖的 lo-fi 配樂，鋼琴搭配電子節拍，60-80 BPM，適合一般生活短片。"
+FALLBACK_DESCRIPTION: str = (
+    "輕快、溫暖的 lo-fi 配樂，鋼琴搭配電子節拍，60-80 BPM，適合一般生活短片。"
+)
 
 
 class MusicSuggestError(RuntimeError):
@@ -208,9 +210,7 @@ async def suggest(
         transcripts = list(
             (
                 await session.execute(
-                    select(AssetTranscript).where(
-                        AssetTranscript.asset_id.in_(asset_ids)
-                    )
+                    select(AssetTranscript).where(AssetTranscript.asset_id.in_(asset_ids))
                 )
             )
             .scalars()
@@ -219,10 +219,7 @@ async def suggest(
 
     style_block = ""
     if style_hint.strip():
-        style_block = (
-            "【剪輯風格預設提示 — 請優先遵守】\n"
-            f"{style_hint.strip()}\n\n"
-        )
+        style_block = f"【剪輯風格預設提示 — 請優先遵守】\n{style_hint.strip()}\n\n"
 
     prompt = _PROMPT_TEMPLATE.format(
         style_preset_block=style_block,
@@ -279,15 +276,13 @@ async def suggest(
                     raise MusicSuggestError("empty description in response")
                 return description
             except (json.JSONDecodeError, KeyError, IndexError) as exc:
-                last_invalid = f"{exc}; text={text[:200]}"  # type: ignore[possibly-undefined]
+                last_invalid = f"{exc}; text={text[:200]}"
                 logger.warning("music-suggest JSON parse failed: %s", last_invalid)
                 continue
 
     if last_invalid is not None:
         raise MusicSuggestError(f"all keys returned malformed JSON: {last_invalid}")
-    raise MusicSuggestQuotaError(
-        f"all {len(api_keys)} keys exhausted; last_status={last_status}"
-    )
+    raise MusicSuggestQuotaError(f"all {len(api_keys)} keys exhausted; last_status={last_status}")
 
 
 __all__ = [

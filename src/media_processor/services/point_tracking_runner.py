@@ -116,9 +116,7 @@ async def run_point_tracking(
             row = await session.get(Asset, asset_id)
             if row is not None:
                 row.point_tracking_status = "failed"
-                row.point_tracking_error = (
-                    f"unexpected {type(exc).__name__}: {exc}"
-                )
+                row.point_tracking_error = f"unexpected {type(exc).__name__}: {exc}"
                 await session.commit()
         return {
             "asset_id": asset_id,
@@ -134,9 +132,7 @@ async def run_point_tracking(
     async with async_session_maker() as session:
         row = await session.get(Asset, asset_id)
         if row is None:
-            logger.warning(
-                "run_point_tracking: asset %d disappeared mid-job", asset_id
-            )
+            logger.warning("run_point_tracking: asset %d disappeared mid-job", asset_id)
             return {"asset_id": asset_id, "status": "missing_after"}
         row.point_tracking_json = point_json
         row.point_tracking_origin = {

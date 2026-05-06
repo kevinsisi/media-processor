@@ -585,9 +585,7 @@ async def apply_watermark_preset(
 ) -> ProjectDetail:
     project = await session.get(Project, project_id)
     if project is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="project not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
     preset, src_path = await _load_preset_for_apply(session, payload.preset_id)
 
     wm_dir = Path(settings.watermark_dir)
@@ -652,15 +650,9 @@ async def list_detected_classes(
 ) -> list[DetectedClassOut]:
     project = await session.get(Project, project_id)
     if project is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="project not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
     rows = (
-        (
-            await session.execute(
-                select(Asset.tracking_json).where(Asset.project_id == project_id)
-            )
-        )
+        (await session.execute(select(Asset.tracking_json).where(Asset.project_id == project_id)))
         .scalars()
         .all()
     )
@@ -680,9 +672,7 @@ async def patch_project_subject_class(
 ) -> ProjectDetail:
     project = await session.get(Project, project_id)
     if project is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="project not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
     project.subject_class = payload.subject_class
     await session.commit()
     await session.refresh(project)
@@ -712,9 +702,7 @@ async def patch_project_bgm_fade_out(
 ) -> ProjectDetail:
     project = await session.get(Project, project_id)
     if project is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="project not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
     project.bgm_fade_out_sec = float(payload.fade_out_sec)
     await session.commit()
     await session.refresh(project)
@@ -974,21 +962,23 @@ async def batch_delete_project_assets(
 ) -> AssetBatchDeleteOut:
     project = await session.get(Project, project_id)
     if project is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="project not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
     # Only allow deletion of assets that actually belong to this
     # project — a defensive narrow because the IDs come straight
     # from the request body. SQL injection isn't the concern (they
     # come through Pydantic + ORM); cross-project deletes are.
     valid_rows = (
-        await session.execute(
-            select(Asset.id).where(
-                Asset.project_id == project_id,
-                Asset.id.in_(payload.asset_ids),
+        (
+            await session.execute(
+                select(Asset.id).where(
+                    Asset.project_id == project_id,
+                    Asset.id.in_(payload.asset_ids),
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     valid_ids = set(valid_rows)
     results: list[AssetBatchDeleteResultItem] = []
     for asset_id in payload.asset_ids:
@@ -1001,9 +991,7 @@ async def batch_delete_project_assets(
                 )
             )
 
-    outcomes = await asset_mgmt.batch_delete_assets(
-        session, sorted(valid_ids), force=force
-    )
+    outcomes = await asset_mgmt.batch_delete_assets(session, sorted(valid_ids), force=force)
     for asset_id, result in outcomes.items():
         if result.not_found:
             reason = "not found"
@@ -1034,9 +1022,7 @@ async def batch_delete_project_assets(
     await session.commit()
 
     deleted = sum(1 for r in results if r.deleted)
-    needs_force = sum(
-        1 for r in results if not r.deleted and r.affected_drafts
-    )
+    needs_force = sum(1 for r in results if not r.deleted and r.affected_drafts)
     blocked = len(results) - deleted
     return AssetBatchDeleteOut(
         deleted_count=deleted,

@@ -356,7 +356,9 @@ def cancel_draft_render(draft_id: int) -> bool:
         if job.kwargs.get("draft_id") == draft_id:
             with suppress(InvalidJobOperation, NoSuchJobError):
                 send_stop_job_command(redis, job_id)
-            logger.info("sent stop signal to running render_draft job %s for draft_id=%d", job_id, draft_id)
+            logger.info(
+                "sent stop signal to running render_draft job %s for draft_id=%d", job_id, draft_id
+            )
             found = True
 
     return found

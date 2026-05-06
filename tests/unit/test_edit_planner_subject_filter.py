@@ -58,9 +58,7 @@ def _score(
     )
 
 
-def _dense_frames(
-    start_ms: int, end_ms: int, *, step_ms: int = 200
-) -> list[dict]:
+def _dense_frames(start_ms: int, end_ms: int, *, step_ms: int = 200) -> list[dict]:
     """Generate per-frame dicts for a dense run of detections at the
     given step (default 200 ms = TRACKING_SAMPLE_FPS at 5 Hz)."""
     return [{"t_ms": ts} for ts in range(start_ms, end_ms + 1, step_ms)]
@@ -144,11 +142,7 @@ def test_windows_clamp_to_asset_bounds() -> None:
 
 def test_windows_returns_empty_when_class_absent() -> None:
     asset = _asset(
-        tracking_json={
-            "tracks": [
-                {"cls_name": "person", "frames": _dense_frames(0, 5_000)}
-            ]
-        }
+        tracking_json={"tracks": [{"cls_name": "person", "frames": _dense_frames(0, 5_000)}]}
     )
     assert _subject_presence_windows_ms(asset, "dog") == []
 
@@ -211,9 +205,7 @@ def test_presence_range_returns_longest_window() -> None:
 
 def test_presence_range_returns_none_when_class_absent() -> None:
     asset = _asset(
-        tracking_json={
-            "tracks": [{"cls_name": "person", "frames": _dense_frames(0, 5_000)}]
-        }
+        tracking_json={"tracks": [{"cls_name": "person", "frames": _dense_frames(0, 5_000)}]}
     )
     assert _subject_presence_range_ms(asset, "dog") is None
 
@@ -224,9 +216,7 @@ def test_presence_range_returns_none_when_class_absent() -> None:
 def test_apply_subject_filter_no_op_when_class_unset() -> None:
     asset = _asset()
     score = _score(span_ms=(2_000, 6_000))
-    assert _apply_subject_filter([score], assets=(asset,), subject_class=None) == [
-        score
-    ]
+    assert _apply_subject_filter([score], assets=(asset,), subject_class=None) == [score]
 
 
 def test_apply_subject_filter_clamps_span_to_overlapping_window() -> None:
@@ -234,11 +224,7 @@ def test_apply_subject_filter_clamps_span_to_overlapping_window() -> None:
     the resulting span is the intersection (2.5, 5.5)."""
     asset = _asset(
         duration_ms=10_000,
-        tracking_json={
-            "tracks": [
-                {"cls_name": "person", "frames": _dense_frames(3_000, 5_000)}
-            ]
-        },
+        tracking_json={"tracks": [{"cls_name": "person", "frames": _dense_frames(3_000, 5_000)}]},
     )
     score = _score(span_ms=(1_000, 7_000))
     [out] = _apply_subject_filter([score], assets=(asset,), subject_class="person")
@@ -247,14 +233,10 @@ def test_apply_subject_filter_clamps_span_to_overlapping_window() -> None:
 
 def test_apply_subject_filter_drops_asset_when_class_absent() -> None:
     asset = _asset(
-        tracking_json={
-            "tracks": [{"cls_name": "dog", "frames": _dense_frames(1_000, 4_000)}]
-        }
+        tracking_json={"tracks": [{"cls_name": "dog", "frames": _dense_frames(1_000, 4_000)}]}
     )
     score = _score(span_ms=(2_000, 6_000))
-    assert (
-        _apply_subject_filter([score], assets=(asset,), subject_class="person") == []
-    )
+    assert _apply_subject_filter([score], assets=(asset,), subject_class="person") == []
 
 
 def test_apply_subject_filter_snaps_to_longest_window_when_no_overlap() -> None:

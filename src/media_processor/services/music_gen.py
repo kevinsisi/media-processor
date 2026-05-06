@@ -20,6 +20,7 @@ import wave
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -76,10 +77,10 @@ def _write_silent_wav(path: Path, duration_s: int, sample_rate: int) -> None:
 # load cost once across many generation jobs. Loaded inside a thread
 # (services run under ``asyncio.to_thread``); the dict access is
 # trivially safe even without a lock for our single-worker setup.
-_PIPELINE_CACHE: dict[str, object] = {}
+_PIPELINE_CACHE: dict[str, tuple[Any, Any]] = {}
 
 
-def _load_pipeline(model_id: str) -> tuple[object, object]:
+def _load_pipeline(model_id: str) -> tuple[Any, Any]:
     """Return ``(processor, model)`` for ``model_id``, lazily loaded.
 
     Caches inside ``_PIPELINE_CACHE`` so repeat generations skip the
@@ -90,18 +91,16 @@ def _load_pipeline(model_id: str) -> tuple[object, object]:
     """
     cached = _PIPELINE_CACHE.get(model_id)
     if cached is not None:
-        return cached  # type: ignore[return-value]
+        return cached
 
     try:
-        import torch  # type: ignore[import-not-found]
-        from transformers import (  # type: ignore[import-not-found]
+        import torch
+        from transformers import (
             AutoProcessor,
             MusicgenForConditionalGeneration,
         )
     except ImportError as exc:  # pragma: no cover — install-time guard
-        raise MusicGenUnavailableError(
-            f"transformers / torch not installed: {exc}"
-        ) from exc
+        raise MusicGenUnavailableError(f"transformers / torch not installed: {exc}") from exc
 
     try:
         processor = AutoProcessor.from_pretrained(model_id)
@@ -168,8 +167,8 @@ def generate(
             model=f"{model_id} (FAKE)",
         )
 
-    import numpy as np  # type: ignore[import-not-found]
-    import torch  # type: ignore[import-not-found]
+    import numpy as np
+    import torch
 
     processor, model = _load_pipeline(model_id)
     # Force fp32 for the language-model + audio decoder. MusicGen-small
@@ -178,14 +177,14 @@ def generate(
     # during the multinomial sampling step on Ampere / Turing cards
     # (RTX 2070 hits this consistently). fp32 sidesteps it entirely.
     with suppress(Exception):
-        model = model.to(torch.float32)  # type: ignore[union-attr]
-    device = next(model.parameters()).device  # type: ignore[union-attr]
+        model = model.to(torch.float32)
+    device = next(model.parameters()).device
 
     # padding=True yields the attention_mask the generate loop needs
     # to ignore PAD tokens during cross-attention. Skipping it makes
     # MusicGen attend to PAD positions, which is what feeds NaN logits
     # into multinomial sampling for prompts shorter than the EOS token.
-    inputs = processor(  # type: ignore[operator]
+    inputs = processor(
         text=[prompt],
         padding=True,
         return_tensors="pt",
@@ -241,12 +240,12 @@ def generate(
         {"do_sample": True, "guidance_scale": 1.0, "temperature": 1.0, "top_k": 250},
     ]
 
-    audio_values: object | None = None
+    audio_values: Any | None = None
     last_exc: Exception | None = None
     for attempt_idx, params in enumerate(sampling_attempts, start=1):
         try:
             with torch.no_grad():
-                audio_values = model.generate(  # type: ignore[union-attr]
+                audio_values = model.generate(
                     **inputs,
                     max_new_tokens=max_new_tokens,
                     min_new_tokens=max_new_tokens,
@@ -283,9 +282,11 @@ def generate(
             f"attempts at descending guidance levels: {last_exc}"
         )
 
-    sample_rate = int(getattr(model.config, "audio_encoder", None) and  # type: ignore[union-attr]
-                      model.config.audio_encoder.sampling_rate
-                      or DEFAULT_SAMPLE_RATE)
+    sample_rate = int(
+        getattr(model.config, "audio_encoder", None)
+        and model.config.audio_encoder.sampling_rate
+        or DEFAULT_SAMPLE_RATE
+    )
 
     # Take the first sample, mono channel. Tensor shape is typically
     # (batch, channels, samples). Detach + move to CPU before numpy.

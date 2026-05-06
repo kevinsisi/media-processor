@@ -157,9 +157,7 @@ class AssetInUseError(AssetDeleteError):
         )
 
 
-async def _blocking_drafts_for(
-    session: AsyncSession, asset_id: int
-) -> list[BlockingDraft]:
+async def _blocking_drafts_for(session: AsyncSession, asset_id: int) -> list[BlockingDraft]:
     """Drafts in a blocking status that reference this asset.
 
     We pull only ``Draft.id`` / ``version`` / ``status`` (scalar
@@ -250,9 +248,7 @@ async def _force_invalidate_drafts(
     return sorted(invalidated)
 
 
-async def _drop_dead_drafts_referencing(
-    session: AsyncSession, asset_id: int
-) -> int:
+async def _drop_dead_drafts_referencing(session: AsyncSession, asset_id: int) -> int:
     """Cascade-delete every failed / rejected draft that still uses
     this asset, returning the count.
 
@@ -274,30 +270,28 @@ async def _drop_dead_drafts_referencing(
     failed and don't want to delete the row.
     """
     id_rows = (
-        await session.execute(
-            select(Draft.id)
-            .join(DraftSegment, DraftSegment.draft_id == Draft.id)
-            .where(
-                DraftSegment.asset_id == asset_id,
-                Draft.status.in_(
-                    (
-                        DraftStatus.FAILED.value,
-                        DraftStatus.REJECTED.value,
-                    )
-                ),
-            )
-            .distinct()
-        )
-    ).scalars().all()
-    if not id_rows:
-        return 0
-    drafts = (
         (
             await session.execute(
-                select(Draft).where(Draft.id.in_(id_rows))
+                select(Draft.id)
+                .join(DraftSegment, DraftSegment.draft_id == Draft.id)
+                .where(
+                    DraftSegment.asset_id == asset_id,
+                    Draft.status.in_(
+                        (
+                            DraftStatus.FAILED.value,
+                            DraftStatus.REJECTED.value,
+                        )
+                    ),
+                )
+                .distinct()
             )
-        ).scalars().all()
+        )
+        .scalars()
+        .all()
     )
+    if not id_rows:
+        return 0
+    drafts = (await session.execute(select(Draft).where(Draft.id.in_(id_rows)))).scalars().all()
     for d in drafts:
         await session.delete(d)
     return len(drafts)
@@ -365,9 +359,7 @@ async def delete_asset(
     """
     asset = await session.get(Asset, asset_id)
     if asset is None:
-        return AssetDeleteResult(
-            asset_id=asset_id, deleted=False, not_found=True
-        )
+        return AssetDeleteResult(asset_id=asset_id, deleted=False, not_found=True)
 
     blockers = await _blocking_drafts_for(session, asset_id)
 
@@ -380,9 +372,7 @@ async def delete_asset(
 
     invalidated_versions: list[int] = []
     if blockers:  # force=True path
-        invalidated_versions = await _force_invalidate_drafts(
-            session, asset_id, blockers
-        )
+        invalidated_versions = await _force_invalidate_drafts(session, asset_id, blockers)
 
     # Cascade-delete failed / rejected drafts that still reference
     # this asset (i.e. whose DraftSegment.asset_id row points at it).
@@ -400,12 +390,8 @@ async def delete_asset(
     # Delete dependent rows that have no relationship cascade onto
     # Asset (legacy single-table coverage / transcript / etc. that
     # were never wired up to Asset's relationship tree).
-    await session.execute(
-        delete(AssetTranscript).where(AssetTranscript.asset_id == asset_id)
-    )
-    await session.execute(
-        delete(ScriptCoverage).where(ScriptCoverage.asset_id == asset_id)
-    )
+    await session.execute(delete(AssetTranscript).where(AssetTranscript.asset_id == asset_id))
+    await session.execute(delete(ScriptCoverage).where(ScriptCoverage.asset_id == asset_id))
 
     # Disk cleanup BEFORE the DB delete so a disk failure leaves the
     # row in place and the user can retry. Once the row is gone we

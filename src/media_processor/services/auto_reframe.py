@@ -90,9 +90,7 @@ class CropPath:
     points: list[tuple[float, int, int]]
 
 
-def _crop_dimensions(
-    src_w: int, src_h: int, target_aspect: str
-) -> tuple[int, int]:
+def _crop_dimensions(src_w: int, src_h: int, target_aspect: str) -> tuple[int, int]:
     """Compute the dynamic crop window for ``target_aspect`` inside
     ``(src_w, src_h)``.
 
@@ -195,9 +193,7 @@ def _interpolate(
     return out
 
 
-def _frames_for_object(
-    tracking: dict[str, Any], object_index: int | None
-) -> list[dict[str, Any]]:
+def _frames_for_object(tracking: dict[str, Any], object_index: int | None) -> list[dict[str, Any]]:
     """Pick the right per-frame bbox list out of ``tracking_json``.
 
     ``object_index = None`` (auto) returns the legacy ``frames`` field
@@ -260,9 +256,9 @@ def compute_crop_path(
     # are useful. Tracking is sampled at ~5 Hz so a short cut might see
     # only 2-3 detections — Kalman handles that fine.
     span_frames = [
-        f for f in frames
-        if isinstance(f, dict)
-        and asset_start_ms <= int(f.get("t_ms", -1)) < asset_end_ms
+        f
+        for f in frames
+        if isinstance(f, dict) and asset_start_ms <= int(f.get("t_ms", -1)) < asset_end_ms
     ]
     if not span_frames:
         return None
@@ -273,10 +269,10 @@ def compute_crop_path(
     measurements_y: list[tuple[float, float]] = []
     for f in span_frames:
         t_s = max(0.0, (int(f["t_ms"]) - asset_start_ms) / 1000.0)
-        cx = int(f["x"]) + int(f["w"]) // 2
-        cy = int(f["y"]) + int(f["h"]) // 2
-        measurements_x.append((t_s, float(cx)))
-        measurements_y.append((t_s, float(cy)))
+        center_x = int(f["x"]) + int(f["w"]) // 2
+        center_y = int(f["y"]) + int(f["h"]) // 2
+        measurements_x.append((t_s, float(center_x)))
+        measurements_y.append((t_s, float(center_y)))
 
     # Kalman-smooth the centers, then interpolate to RENDER_FPS so each
     # output frame gets a value.
@@ -301,7 +297,7 @@ def compute_crop_path(
     points: list[tuple[float, int, int]] = []
     last_x: float | None = None
     last_y: float | None = None
-    for t, cx, cy in zip(target_times, cx_list, cy_list, strict=True):
+    for time_s, cx, cy in zip(target_times, cx_list, cy_list, strict=True):
         target_x = max(0.0, min(float(max_x), cx - half_w))
         target_y = max(0.0, min(float(max_y), cy - half_h))
         if last_x is None or last_y is None:
@@ -313,7 +309,7 @@ def compute_crop_path(
             x_now = last_x + max(-MAX_DELTA_PX_PER_FRAME, min(MAX_DELTA_PX_PER_FRAME, dx))
             y_now = last_y + max(-MAX_DELTA_PX_PER_FRAME, min(MAX_DELTA_PX_PER_FRAME, dy))
         last_x, last_y = x_now, y_now
-        points.append((t, int(round(x_now)), int(round(y_now))))
+        points.append((time_s, int(round(x_now)), int(round(y_now))))
 
     return CropPath(
         crop_w=crop_w,

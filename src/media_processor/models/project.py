@@ -276,9 +276,7 @@ class Asset(Base):
     # ``point_tracking_json is not None``, so a stale "done" row
     # without trace data behaves like NULL (back-compat for rows
     # that pre-date this migration).
-    point_tracking_status: Mapped[str | None] = mapped_column(
-        String(16), nullable=True
-    )
+    point_tracking_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
     point_tracking_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     # v0.18 — secondary-language subtitle marker. ``None`` = no translation
     # has been generated. ``"en"`` (current sole supported value) = the

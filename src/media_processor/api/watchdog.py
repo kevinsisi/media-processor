@@ -81,11 +81,7 @@ def _resolve_render_flags(draft: Draft) -> dict[str, bool]:
     Mirrors ``api.routers.drafts._draft_render_flags`` minus the
     override branch.
     """
-    snapshot = (
-        draft.render_flags_json
-        if isinstance(draft.render_flags_json, dict)
-        else {}
-    )
+    snapshot = draft.render_flags_json if isinstance(draft.render_flags_json, dict) else {}
     return {
         key: bool(snapshot[key]) if key in snapshot else default
         for key, default in _LEGACY_FLAG_DEFAULTS.items()

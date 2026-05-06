@@ -25,22 +25,22 @@ _VALUES = ("fast", "slow", "commercial", "artistic", "custom")
 
 
 def upgrade() -> None:
-    op.add_column(
-        "drafts",
-        sa.Column(
-            "style_preset",
-            sa.String(length=32),
-            nullable=False,
-            server_default="custom",
-        ),
-    )
-    op.create_check_constraint(
-        "ck_drafts_style_preset",
-        "drafts",
-        "style_preset IN (" + ",".join(f"'{v}'" for v in _VALUES) + ")",
-    )
+    with op.batch_alter_table("drafts") as batch_op:
+        batch_op.add_column(
+            sa.Column(
+                "style_preset",
+                sa.String(length=32),
+                nullable=False,
+                server_default="custom",
+            ),
+        )
+        batch_op.create_check_constraint(
+            "ck_drafts_style_preset",
+            "style_preset IN (" + ",".join(f"'{v}'" for v in _VALUES) + ")",
+        )
 
 
 def downgrade() -> None:
-    op.drop_constraint("ck_drafts_style_preset", "drafts", type_="check")
-    op.drop_column("drafts", "style_preset")
+    with op.batch_alter_table("drafts") as batch_op:
+        batch_op.drop_constraint("ck_drafts_style_preset", type_="check")
+        batch_op.drop_column("style_preset")

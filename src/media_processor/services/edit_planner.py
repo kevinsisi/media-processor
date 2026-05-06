@@ -122,9 +122,7 @@ STYLE_PRESET_FAST = StylePresetParams(
     max_span_ms=5000,
     transition_allowlist=frozenset({"wipeleft", "slideright", "circlecrop"}),
     default_transition="wipeleft",
-    bgm_hint=(
-        "高能量、快節奏、強勁節拍 (130-150 BPM)，電子或搖滾，鼓點密集"
-    ),
+    bgm_hint=("高能量、快節奏、強勁節拍 (130-150 BPM)，電子或搖滾，鼓點密集"),
     prompt_hint=(
         "【剪輯風格 = 快節奏】每段請挑選 3-5 秒短而有力的段落，"
         "轉場限定 wipeleft / slideright / circlecrop，避免柔和淡出。"
@@ -137,9 +135,7 @@ STYLE_PRESET_SLOW = StylePresetParams(
     max_span_ms=15000,
     transition_allowlist=frozenset({"dissolve", "fade", "fadeblack"}),
     default_transition="dissolve",
-    bgm_hint=(
-        "柔和、緩慢、放鬆的氛圍音樂 (60-80 BPM)，環境音、鋼琴、弦樂"
-    ),
+    bgm_hint=("柔和、緩慢、放鬆的氛圍音樂 (60-80 BPM)，環境音、鋼琴、弦樂"),
     prompt_hint=(
         "【剪輯風格 = 慢節奏】每段請挑選 8-15 秒較長段落，留白與情緒沉澱優先，"
         "轉場限定 dissolve / fade / fadeblack。"
@@ -152,9 +148,7 @@ STYLE_PRESET_COMMERCIAL = StylePresetParams(
     max_span_ms=8000,
     transition_allowlist=frozenset({"slideright", "wipeleft", "fadeblack"}),
     default_transition="slideright",
-    bgm_hint=(
-        "專業、潔淨、商業感的 corporate 配樂 (90-110 BPM)，現代電子合成或乾淨吉他"
-    ),
+    bgm_hint=("專業、潔淨、商業感的 corporate 配樂 (90-110 BPM)，現代電子合成或乾淨吉他"),
     prompt_hint=(
         "【剪輯風格 = 商業感】每段請挑選 5-8 秒、表達清楚有重點的段落，"
         "轉場限定 slideright / wipeleft / fadeblack，俐落不花俏。"
@@ -167,9 +161,7 @@ STYLE_PRESET_ARTISTIC = StylePresetParams(
     max_span_ms=12000,
     transition_allowlist=frozenset({"fade", "fadewhite", "fadeblack"}),
     default_transition="fade",
-    bgm_hint=(
-        "acoustic / indie 木吉他、民謠、文青風 (80-100 BPM)，溫暖人聲或環境氛圍"
-    ),
+    bgm_hint=("acoustic / indie 木吉他、民謠、文青風 (80-100 BPM)，溫暖人聲或環境氛圍"),
     prompt_hint=(
         "【剪輯風格 = 文青風】每段長度可在 3-12 秒之間自由變化，"
         "刻意製造不規則節奏與停頓感，轉場限定 fade / fadewhite / fadeblack。"
@@ -219,6 +211,8 @@ def _coerce_legacy_transition(name: str) -> str:
     if name in VALID_TRANSITIONS:
         return name
     return TRANSITION_DEFAULT
+
+
 # Each xfade between adjacent cuts shortens the timeline by this much, so
 # the planner aims a touch higher than the raw target so the rendered
 # reel actually lands at target_duration_ms. Mirrors
@@ -527,10 +521,7 @@ def _format_prior_feedback_block(prior_feedback: str) -> str:
     body = (prior_feedback or "").strip()
     if not body:
         return ""
-    return (
-        "【上一版使用者回饋（請參考並改進；不要重複同樣的問題）】\n"
-        f"{body}\n\n"
-    )
+    return f"【上一版使用者回饋（請參考並改進；不要重複同樣的問題）】\n{body}\n\n"
 
 
 def _build_asset_prompt(
@@ -657,9 +648,7 @@ SUBJECT_GAP_TOLERANCE_MS: int = 1500
 SUBJECT_MIN_WINDOW_MS: int = 1500
 
 
-def _subject_presence_windows_ms(
-    asset: Asset, subject_class: str
-) -> list[tuple[int, int]]:
+def _subject_presence_windows_ms(asset: Asset, subject_class: str) -> list[tuple[int, int]]:
     """v0.21.5 — return the list of contiguous time windows in this
     asset where ``subject_class`` is detected.
 
@@ -723,9 +712,7 @@ def _subject_presence_windows_ms(
     return out
 
 
-def _subject_presence_range_ms(
-    asset: Asset, subject_class: str
-) -> tuple[int, int] | None:
+def _subject_presence_range_ms(asset: Asset, subject_class: str) -> tuple[int, int] | None:
     """Backwards-compat wrapper used by ``heuristic_fallback`` —
     returns the LONGEST contiguous window or ``None`` when the
     subject never appears (or every window is below the minimum
@@ -966,7 +953,12 @@ def _rhythm_score(
     score = candidate.score
     if prev_motion is not None and candidate.dominant_motion != prev_motion:
         score += _MOTION_ALTERNATION_BONUS
-    if position_preference == "dynamic" and candidate.dominant_motion in DYNAMIC_MOTIONS or position_preference == "static" and candidate.dominant_motion in STATIC_MOTIONS:
+    if (
+        position_preference == "dynamic"
+        and candidate.dominant_motion in DYNAMIC_MOTIONS
+        or position_preference == "static"
+        and candidate.dominant_motion in STATIC_MOTIONS
+    ):
         score += _MOTION_POSITION_BONUS
     return score
 
@@ -1155,9 +1147,7 @@ def _assemble_plan(
     # ---- Span-extend pass: still short after fill → stretch chosen
     # spans up to MAX_SPAN_MS / asset bounds. Distributes the deficit
     # roughly evenly so we don't blow one cut into a 6-second monolog.
-    extended_spans: dict[int, tuple[int, int]] = {
-        i: c.best_span_ms for i, c in enumerate(chosen)
-    }
+    extended_spans: dict[int, tuple[int, int]] = {i: c.best_span_ms for i, c in enumerate(chosen)}
     stop_at = _effective_target_ms(target_duration_ms, num_chosen=len(chosen))
     deficit = stop_at - accumulated
     if deficit > 0 and chosen:
@@ -1528,8 +1518,7 @@ async def plan(
         # the orchestrator's fallback log makes sense.
         if quota_failures and quota_failures >= invalid_failures:
             raise EditPlanQuotaError(
-                f"all {len(results)} per-asset calls quota-exhausted across "
-                f"{len(api_keys)} keys"
+                f"all {len(results)} per-asset calls quota-exhausted across {len(api_keys)} keys"
             )
         if last_invalid is not None:
             raise last_invalid

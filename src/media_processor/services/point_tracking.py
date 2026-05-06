@@ -35,7 +35,7 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
@@ -206,8 +206,8 @@ def track_point(
         )
 
     try:
-        import cv2  # type: ignore[import-not-found]
-        import numpy as np  # type: ignore[import-not-found]
+        import cv2
+        import numpy as np
     except ImportError as exc:  # pragma: no cover
         raise PointTrackUnavailableError(f"opencv missing: {exc}") from exc
 
@@ -246,6 +246,7 @@ def track_point(
             LK_EPSILON,
         ),
     }
+    calc_lk = cast(Any, cv2.calcOpticalFlowPyrLK)
 
     def _grayscale(frame: Any) -> Any:
         return cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -277,9 +278,7 @@ def track_point(
         cap.set(cv2.CAP_PROP_POS_MSEC, float(init_t_ms))
         ok, init_frame = cap.read()
         if not ok or init_frame is None:
-            raise PointTrackError(
-                f"could not seek to init_t_ms={init_t_ms} in {media_path}"
-            )
+            raise PointTrackError(f"could not seek to init_t_ms={init_t_ms} in {media_path}")
         init_gray = _grayscale(init_frame)
         init_pt = np.array([[[float(init_x), float(init_y)]]], dtype=np.float32)
 
@@ -302,9 +301,7 @@ def track_point(
             if not ok or frame is None:
                 break
             curr_gray = _grayscale(frame)
-            curr_pt, status, err = cv2.calcOpticalFlowPyrLK(
-                prev_gray, curr_gray, prev_pt, None, **lk_params
-            )
+            curr_pt, status, err = calc_lk(prev_gray, curr_gray, prev_pt, None, **lk_params)
             lost = (
                 curr_pt is None
                 or status is None
@@ -358,9 +355,7 @@ def track_point(
             if not ok or frame is None:
                 break
             curr_gray = _grayscale(frame)
-            curr_pt, status, err = cv2.calcOpticalFlowPyrLK(
-                prev_gray, curr_gray, prev_pt, None, **lk_params
-            )
+            curr_pt, status, err = calc_lk(prev_gray, curr_gray, prev_pt, None, **lk_params)
             lost = (
                 curr_pt is None
                 or status is None

@@ -208,9 +208,7 @@ def build_cues(
     ]
 
 
-_SRT_TC_RE = (
-    r"(?P<h>\d+):(?P<m>\d{1,2}):(?P<s>\d{1,2})[,.](?P<ms>\d{1,3})"
-)
+_SRT_TC_RE = r"(?P<h>\d+):(?P<m>\d{1,2}):(?P<s>\d{1,2})[,.](?P<ms>\d{1,3})"
 
 
 def _parse_timecode(token: str) -> int:
@@ -220,12 +218,7 @@ def _parse_timecode(token: str) -> int:
     m = re.fullmatch(_SRT_TC_RE, token.strip())
     if m is None:
         raise ValueError(f"bad SRT timecode: {token!r}")
-    return (
-        int(m["h"]) * 3_600_000
-        + int(m["m"]) * 60_000
-        + int(m["s"]) * 1_000
-        + int(m["ms"])
-    )
+    return int(m["h"]) * 3_600_000 + int(m["m"]) * 60_000 + int(m["s"]) * 1_000 + int(m["ms"])
 
 
 def parse_srt(text: str) -> list[SubtitleCue]:

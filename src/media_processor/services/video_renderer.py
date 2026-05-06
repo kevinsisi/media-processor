@@ -46,6 +46,7 @@ VIDEO_FPS: int = 30
 AUDIO_CODEC: str = "aac"
 AUDIO_BITRATE: str = "128k"
 
+
 # Subtitle burn-in style — white text + 2 px black edge + bottom-centre.
 # Sizes/margins below are interpreted in canvas pixels because
 # ``burn_subtitles`` sets ``original_size=WxH`` on the ffmpeg
@@ -176,6 +177,7 @@ def _hex_to_drawtext_color(hex_color: str) -> str:
     if len(s) != 6 or any(c not in "0123456789abcdefABCDEF" for c in s):
         return "0xFFFFFF"
     return f"0x{s.upper()}"
+
 
 # Timeouts. Per-call covers a single ffmpeg invocation; the worker job
 # layers its own outer cap on the whole render.
@@ -453,9 +455,7 @@ def _cut_segment(
             sendcmd_path = sendcmd_dir / f"reframe_seg_{cut.order:04d}.txt"
             auto_reframe.write_sendcmd_file(crop_path, sendcmd_path)
             target_w, target_h = ASPECT_DIMENSIONS[target_aspect]
-            vf_chain = auto_reframe.build_filter_chain(
-                crop_path, sendcmd_path, target_w, target_h
-            )
+            vf_chain = auto_reframe.build_filter_chain(crop_path, sendcmd_path, target_w, target_h)
 
     if _should_zoompan(cut):
         # zoompan operates on its own canvas, so we run it AFTER the
@@ -540,9 +540,7 @@ def cut_segments(
     intermediate_dir.mkdir(parents=True, exist_ok=True)
     sendcmd_dir = intermediate_dir / "reframe"
     has_any_reframe = (
-        bool(tracking_by_asset)
-        or bool(custom_roi_by_asset)
-        or bool(point_track_by_asset)
+        bool(tracking_by_asset) or bool(custom_roi_by_asset) or bool(point_track_by_asset)
     )
     if has_any_reframe:
         sendcmd_dir.mkdir(parents=True, exist_ok=True)
@@ -571,7 +569,9 @@ def cut_segments(
             target_aspect,
             tracking=track,
             sendcmd_dir=sendcmd_dir if has_any_reframe else None,
-            tracking_object_index=target_idx if (target_idx is not None and target_idx >= 0) else None,
+            tracking_object_index=target_idx
+            if (target_idx is not None and target_idx >= 0)
+            else None,
             custom_roi=custom_roi if target_idx == -1 else None,
             point_track=point_track if target_idx == -4 else None,
         )
@@ -824,6 +824,8 @@ def concat_segments(
     )
 
     if use_xfade:
+        assert durations_ms is not None
+        assert transitions is not None
         v_chain, a_chain = _build_xfade_filter(durations_ms, transitions)
         cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y"]
         for p in intermediate_paths:
@@ -965,8 +967,8 @@ def _build_drawtext_chain(
     visible above it. Filter ordering: primary first, then secondary,
     so the secondary is the last layer drawn.
     """
-    font_path, font_size, font_color, outline_color, border_w, y_expr = (
-        _resolve_subtitle_style(style)
+    font_path, font_size, font_color, outline_color, border_w, y_expr = _resolve_subtitle_style(
+        style
     )
     parts: list[str] = []
     for start_s, end_s, text in cues:
@@ -975,9 +977,7 @@ def _build_drawtext_chain(
         # still draws the border colour when border_w == 0 on some
         # builds; gate the bordercolor field too so the user-selected
         # "none" outline really has no edge.
-        outline_part = (
-            f":borderw={border_w}:bordercolor={outline_color}" if border_w > 0 else ""
-        )
+        outline_part = f":borderw={border_w}:bordercolor={outline_color}" if border_w > 0 else ""
         parts.append(
             f"drawtext=fontfile={font_path}"
             f":fontsize={font_size}"
@@ -1058,9 +1058,7 @@ def burn_subtitles(
     secondary_cues: list[tuple[float, float, str]] = []
     if secondary_srt_path is not None and secondary_srt_path.is_file():
         try:
-            secondary_cues = _parse_srt_cues(
-                secondary_srt_path.read_text(encoding="utf-8")
-            )
+            secondary_cues = _parse_srt_cues(secondary_srt_path.read_text(encoding="utf-8"))
         except OSError as exc:
             # Non-fatal: primary still burns. Log and skip the secondary
             # layer rather than failing the whole subtitles stage.
@@ -1181,6 +1179,7 @@ def render(
     # holding the subject still while the camera pans) and would push
     # the subject right back off-centre. Skip those positions.
     if stabilize:
+
         def _stab_progress(done: int, total: int) -> None:
             if on_progress is not None:
                 on_progress("stabilize", done, total)
@@ -1210,12 +1209,8 @@ def render(
     # the helper fall through to the plain concat-demuxer ``-c copy``
     # path, which is hard-cut + no re-encode.
     if transitions_enabled and len(plan.segments) > 1:
-        durations_ms: list[int] | None = [
-            s.asset_end_ms - s.asset_start_ms for s in plan.segments
-        ]
-        transitions: list[str] | None = [
-            s.transition_to_next for s in plan.segments[:-1]
-        ]
+        durations_ms: list[int] | None = [s.asset_end_ms - s.asset_start_ms for s in plan.segments]
+        transitions: list[str] | None = [s.transition_to_next for s in plan.segments[:-1]]
     else:
         durations_ms = None
         transitions = None
@@ -1230,9 +1225,7 @@ def render(
         on_progress("concat", 1, 1)
 
     used_subs = False
-    has_primary_srt = (
-        srt_path is not None and srt_path.is_file() and srt_path.stat().st_size > 0
-    )
+    has_primary_srt = srt_path is not None and srt_path.is_file() and srt_path.stat().st_size > 0
     has_secondary_srt = (
         secondary_srt_path is not None
         and secondary_srt_path.is_file()
@@ -1330,12 +1323,9 @@ def _watermark_filter(
     # gives a clean shrink without the moire that bilinear leaves on
     # high-contrast logos.
     logo_chain = (
-        f"[1:v]format=rgba,colorchannelmixer=aa={opacity:.4f},"
-        f"scale={target_w}:-1:flags=lanczos[wm]"
+        f"[1:v]format=rgba,colorchannelmixer=aa={opacity:.4f},scale={target_w}:-1:flags=lanczos[wm]"
     )
-    overlay_chain = (
-        f"[0:v][wm]overlay={x_expr}:{y_expr}:format=auto[vout]"
-    )
+    overlay_chain = f"[0:v][wm]overlay={x_expr}:{y_expr}:format=auto[vout]"
     return f"{logo_chain};{overlay_chain}"
 
 

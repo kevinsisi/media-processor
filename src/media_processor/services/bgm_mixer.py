@@ -46,6 +46,7 @@ class SegmentVolume:
     voice_volume: float = 1.0
     bgm_volume: float | None = None
 
+
 # Step-function ducking curve. 0.55 is loud-but-not-clashing for a
 # speaking voice mixed at original gain; 0.20 still keeps the BGM
 # audible-but-out-of-the-way under voice. Tunable constants — bump
@@ -120,10 +121,7 @@ def _build_voice_volume_expr(segments: list[SegmentVolume]) -> str:
     for seg in reversed(segments):
         if seg.voice_volume == 1.0:
             continue
-        expr = (
-            f"if(between(t,{seg.start_s:.3f},{seg.end_s:.3f}),"
-            f"{seg.voice_volume:.3f},{expr})"
-        )
+        expr = f"if(between(t,{seg.start_s:.3f},{seg.end_s:.3f}),{seg.voice_volume:.3f},{expr})"
     return expr
 
 
@@ -146,10 +144,7 @@ def _build_bgm_volume_expr(
     for seg in reversed(overrides):
         # Mypy needs the assert; logically guarded by the filter above.
         assert seg.bgm_volume is not None
-        expr = (
-            f"if(between(t,{seg.start_s:.3f},{seg.end_s:.3f}),"
-            f"{seg.bgm_volume:.3f},{expr})"
-        )
+        expr = f"if(between(t,{seg.start_s:.3f},{seg.end_s:.3f}),{seg.bgm_volume:.3f},{expr})"
     return expr
 
 
@@ -335,6 +330,7 @@ def apply_voice_volume(
             output_path.write_bytes(b"")
             return
         import shutil as _shutil
+
         _shutil.copyfile(video_path, output_path)
         return
 

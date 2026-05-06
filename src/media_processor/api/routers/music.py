@@ -52,9 +52,7 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 # Filename extensions the library endpoint surfaces. wav for MusicGen
 # defaults; the others let operators drop in human-recorded tracks.
-_LIBRARY_EXTS: frozenset[str] = frozenset(
-    {".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg"}
-)
+_LIBRARY_EXTS: frozenset[str] = frozenset({".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg"})
 
 
 def _library_dir() -> Path:
@@ -174,9 +172,7 @@ async def project_music_suggestion(
     """
     project = await session.get(Project, project_id)
     if project is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="project not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
 
     style_hint = resolve_style_preset(style_preset).bgm_hint
 
@@ -198,9 +194,7 @@ async def project_music_suggestion(
         )
         return MusicSuggestionOut(description=description, used_fallback=False)
     except music_suggest.MusicSuggestError as exc:
-        logger.warning(
-            "music-suggestion fell back for project %d: %s", project_id, exc
-        )
+        logger.warning("music-suggestion fell back for project %d: %s", project_id, exc)
         return MusicSuggestionOut(
             description=music_suggest.FALLBACK_DESCRIPTION,
             used_fallback=True,
@@ -229,9 +223,7 @@ async def trigger_generate_bgm(
     """
     project = await session.get(Project, project_id)
     if project is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="project not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
 
     job = BgmGenerationJob(
         project_id=project_id,
@@ -302,9 +294,7 @@ async def select_library_bgm(
     """
     project = await session.get(Project, project_id)
     if project is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="project not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
 
     # Look the requested name up in the library by either display name
     # or the raw stem so callers can pass whatever the /music-library
