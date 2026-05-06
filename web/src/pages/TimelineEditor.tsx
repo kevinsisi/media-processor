@@ -87,7 +87,7 @@ export default function TimelineEditor() {
   // Initial load.
   useEffect(() => {
     if (!Number.isFinite(projectId) || !Number.isFinite(draftId)) {
-      setLoadError("URL 缺少 projectId / draftId");
+      setLoadError("網址缺少專案或版本資訊");
       return;
     }
     let cancelled = false;
@@ -264,7 +264,7 @@ export default function TimelineEditor() {
       <main className="timeline-editor timeline-editor--error">
         <p>載入失敗：{loadError}</p>
         <Link to={`/projects/${projectId}/edit`} className="cta cta--secondary">
-          ← 返回基本編輯
+          ← 返回成品頁
         </Link>
       </main>
     );
@@ -285,7 +285,7 @@ export default function TimelineEditor() {
           <Link
             to={`/projects/${projectId}/edit`}
             className="timeline-editor__icon-btn"
-            aria-label="返回基本編輯"
+            aria-label="返回成品頁"
             title="返回"
           >
             ←
@@ -300,9 +300,9 @@ export default function TimelineEditor() {
   }
 
   const applyTitle = applying
-    ? "排隊中…"
+    ? "等待開始…"
     : dirty
-      ? "套用變更並重新渲染"
+      ? "套用變更並重新產生成品"
       : "尚無待套用的變更";
   // v0.22 — short label shown next to the icon so the button reads as
   // "套用 ↻" instead of just an emoji. ``applying`` keeps the dots
@@ -315,8 +315,8 @@ export default function TimelineEditor() {
         <Link
           to={`/projects/${projectId}/edit`}
           className="timeline-editor__icon-btn"
-          aria-label="返回基本編輯"
-          title="返回基本編輯"
+          aria-label="返回成品頁"
+          title="返回成品頁"
         >
           ←
         </Link>
@@ -400,7 +400,7 @@ export default function TimelineEditor() {
                     navigate(`/projects/${projectId}/edit`);
                   }}
                 >
-                  回到基本編輯
+                  回到成品頁
                 </button>
               </div>
             )}

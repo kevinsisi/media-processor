@@ -22,10 +22,10 @@ function formatCreatedAt(iso: string): string {
 // copy. Keep them informative for the unknown-status case (e.g.
 // future statuses returned by the API before the FE adds a branch).
 const STATUS_LABEL: Record<string, string> = {
-  drafted: "剪輯就緒",
-  analyzing: "AI 分析中（約 2–5 分鐘）",
+  drafted: "短影音可預覽",
+  analyzing: "素材檢查中（約 2–5 分鐘）",
   approved: "成品就緒",
-  rejected: "已退回，待重剪",
+  rejected: "已退回，待重做",
   pending: "等待上傳素材",
 };
 
@@ -40,7 +40,7 @@ function StatusCell({ project }: { project: ProjectSummary }) {
         <div className="status-line">
           <span className="dot dot--gold" />
           <span className="status-text">
-            剪輯 v{project.latest_draft_version} 可預覽
+            短影音 v{project.latest_draft_version} 可預覽
           </span>
         </div>
         <Link to={`/projects/${project.id}/edit`} className="cta cta--primary">
@@ -55,7 +55,7 @@ function StatusCell({ project }: { project: ProjectSummary }) {
       <div className="status-cell status-cell--processing">
         <div className="status-line">
           <span className="dot dot--processing" />
-          <span className="status-text">AI 分析中（約 2–5 分鐘）</span>
+          <span className="status-text">素材檢查中（約 2–5 分鐘）</span>
         </div>
         {/* v0.22 — replaced the fake 55% bar with an indeterminate
             shimmer so we don't lie about progress. The actual per-step
@@ -124,14 +124,13 @@ export default function ProjectList() {
     <main className="page projects">
       <section className="hero">
         <div className="hero__kicker">
-          工作清單 &nbsp;·&nbsp; {loading ? "…" : `${list.length} 件`}
+          專案清單 &nbsp;·&nbsp; {loading ? "…" : `${list.length} 件`}
         </div>
         <h1 className="hero__title">
-          待<em>檢視</em>的剪輯。
+          準備<em>發佈</em>的短影音。
         </h1>
         <p className="hero__lede">
-          每一件代表一個專案 ── AI 已將原始素材剪成短片。
-          定剪任一剪輯，即會送入你的剪輯軟體。
+          每一件代表一個專案。上傳素材後，系統會自動檢查內容並做成可預覽、可下載的短片。
         </p>
         <div className="hero__actions">
           <Link to="/projects/new" className="cta cta--primary cta--new">
@@ -149,7 +148,7 @@ export default function ProjectList() {
 
         {error && (
           <div className="board__notice" role="alert">
-            <span className="mono">API 錯誤 · {error.message}</span>
+            <span className="mono">服務錯誤 · {error.message}</span>
           </div>
         )}
 
@@ -163,7 +162,7 @@ export default function ProjectList() {
           <div className="board__notice board__notice--empty">
             <p className="board__notice-title">還沒有任何專案</p>
             <p className="board__notice-hint">
-              建立第一個專案，上傳素材後 AI 會自動分析並剪出短片。
+              建立第一個專案，上傳素材後系統會自動檢查內容並做出短片。
             </p>
             <Link to="/projects/new" className="cta cta--primary">
               新增第一個專案 →

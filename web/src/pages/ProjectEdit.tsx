@@ -208,7 +208,7 @@ function DraftComments({ draftId }: DraftCommentsProps) {
         <textarea
           className="draft-comments__body"
           value={body}
-          placeholder="告訴系統下次怎麼改進這個版本（例：「不要轉場特效」「蚊子館重複太多」「片頭再有力一點」）。下次重新生成時，這裡的留言會作為改進指引。"
+          placeholder="告訴系統下次怎麼改進這個版本（例：「不要轉場特效」「蚊子館重複太多」「片頭再有力一點」）。下次重新產生時，這裡的留言會作為改進指引。"
           rows={3}
           maxLength={4000}
           onChange={(e) => setBody(e.currentTarget.value)}
@@ -248,7 +248,7 @@ function VersionSwitcher({
 }: VersionSwitcherProps) {
   if (drafts.length === 0) return null;
   return (
-    <nav className="version-switcher" aria-label="剪輯版本">
+    <nav className="version-switcher" aria-label="短影音版本">
       <span className="version-switcher__label">版本</span>
       <div className="version-switcher__chips" role="tablist">
         {drafts.map((d) => {
@@ -388,14 +388,14 @@ function StylePresetPicker({
 }: StylePresetPickerProps) {
   return (
     <fieldset className="style-preset-picker" disabled={disabled}>
-      <legend className="style-preset-picker__legend">剪輯風格預設</legend>
+      <legend className="style-preset-picker__legend">短影音風格</legend>
       <p className="style-preset-picker__hint mono">
         選一種成品感覺，系統會自動調整節奏與配樂方向。
       </p>
       <div
         className="style-preset-picker__grid"
         role="radiogroup"
-        aria-label="剪輯風格預設"
+        aria-label="短影音風格"
       >
         {STYLE_PRESET_CARDS.map((card) => {
           const selected = card.value === value;
@@ -485,7 +485,7 @@ function RenderOptions({
     <div className="render-options">
       <EditOptionToggle
         label="畫面防手震"
-        hint="手機手持拍攝建議開啟；畫面本來很穩時可關閉，加快輸出。"
+        hint="手機手持拍攝建議開啟；畫面本來很穩時可關閉，加快成品產出。"
         value={stabilize}
         onChange={setStabilize}
         disabled={disabled}
@@ -506,7 +506,7 @@ function RenderOptions({
       />
       <EditOptionToggle
         label="自動跟住主角"
-        hint="輸出直式或方形影片時，系統會盡量讓人物、車或商品留在畫面中間。"
+        hint="建立直式或方形影片時，系統會盡量讓人物、車或商品留在畫面中間。"
         value={autoReframe}
         onChange={setAutoReframe}
         disabled={disabled}
@@ -540,8 +540,8 @@ function formatBasicSummary(opts: {
   if (opts.subtitlesOn) flags.push("字幕");
   if (opts.transitionsOn) flags.push("轉場");
   if (opts.autoReframe) flags.push("自動構圖");
-  if (opts.stabilize) flags.push("防抖");
-  const flagText = flags.length > 0 ? flags.join(" / ") : "純硬切";
+  if (opts.stabilize) flags.push("畫面更穩");
+  const flagText = flags.length > 0 ? flags.join(" / ") : "直接銜接";
   return `${opts.durationSec} 秒 · ${STYLE_PRESET_LABELS[opts.stylePreset]} · ${flagText}`;
 }
 
@@ -555,7 +555,7 @@ function formatBgmSummary(opts: {
     case "preset":
       return opts.bgmFilename
         ? `風格預設配樂：${opts.bgmFilename}`
-        : "依風格預設自動生成（待產生）";
+        : "依風格自動配樂（待產生）";
     case "library":
       return opts.bgmFilename
         ? `音樂庫：${opts.bgmFilename}`
@@ -563,7 +563,7 @@ function formatBgmSummary(opts: {
     case "ai":
       return opts.bgmFilename
         ? `自訂配樂：${opts.bgmFilename}`
-        : "自訂生成（待產生）";
+        : "自訂配樂（待產生）";
     case "upload":
       return opts.bgmFilename
         ? `已上傳：${opts.bgmFilename}`
@@ -579,9 +579,9 @@ function formatVisualSummary(project: ProjectDetail | null): string {
   }
   if (project.watermark_path) {
     const scalePct = Math.round((project.watermark_scale ?? 0.1) * 100);
-    parts.push(`浮水印 ✓ ${scalePct}%`);
+    parts.push(`品牌標誌 ✓ ${scalePct}%`);
   } else {
-    parts.push("浮水印 — 未上傳");
+    parts.push("品牌標誌 — 未上傳");
   }
   const sizeLabel: Record<SubtitleSize, string> = {
     small: "小",
@@ -678,7 +678,7 @@ function EditSettingsBlock(props: EditSettingsBlockProps) {
 
   return (
     <div className="edit-settings">
-      <SettingsGroup title="基本剪輯設定" summary={basicSummary}>
+      <SettingsGroup title="短影音設定" summary={basicSummary}>
         <DurationPicker
           value={props.durationSec}
           onChange={props.setDurationSec}
@@ -718,7 +718,7 @@ function EditSettingsBlock(props: EditSettingsBlockProps) {
         />
       </SettingsGroup>
 
-      <SettingsGroup title="視覺疊加" summary={visualSummary}>
+      <SettingsGroup title="畫面與品牌" summary={visualSummary}>
         <SubjectClassPicker
           project={props.project}
           onProjectUpdated={props.setProject}
@@ -764,7 +764,7 @@ function ProgressTracker({ steps }: ProgressTrackerProps) {
   );
   return (
     <div className="edit-progress-wrap">
-      <div className="edit-progress" role="list" aria-label="剪輯進度">
+      <div className="edit-progress" role="list" aria-label="成品進度">
         {EDIT_STEP_ORDER.map((step) => {
           const raw = steps?.[step];
           const cls = classifyStepState(raw);
@@ -815,8 +815,8 @@ export default function ProjectEdit() {
   const [triggerError, setTriggerError] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState<boolean>(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
-  // v0.25.0 — queue inspector modal. Opened from the "排隊中" card's
-  // "查看排隊" button so the operator can see what's blocking and
+  // v0.25.0 — queue inspector modal. Opened from the "等待開始" card's
+  // "查看處理狀態" button so the operator can see what's blocking and
   // (optionally) drop their own pending job.
   const [queueModalOpen, setQueueModalOpen] = useState<boolean>(false);
   const [durationSec, setDurationSec] = useState<number>(DEFAULT_DURATION_S);
@@ -978,7 +978,7 @@ export default function ProjectEdit() {
         // Edge-trigger the completion toast when allDone goes false → true.
         const prev = prevAnalysisAllDoneRef.current;
         if (next.allDone && prev === false) {
-          setAnalysisToast("分析完成！");
+          setAnalysisToast("素材檢查完成！");
         }
         prevAnalysisAllDoneRef.current = next.allDone;
         // Schedule the next poll only if there's still work to wait on.
@@ -1061,7 +1061,7 @@ export default function ProjectEdit() {
       } catch (err) {
         if (err instanceof ApiError && err.status === 409) {
           setTriggerError(
-            "已有正在剪輯中的版本；待其完成或勾選「強制重新剪輯」。",
+            "已有正在製作中的版本；待其完成後再重新產生。",
           );
         } else {
           setTriggerError(
@@ -1127,7 +1127,7 @@ export default function ProjectEdit() {
 
   const handleCancel = useCallback(async () => {
     if (selectedDraftId === null) return;
-    if (!window.confirm("確定要停止這次剪輯？已跑的時間會丟掉。")) return;
+    if (!window.confirm("確定要停止這次產生？已處理的進度會丟掉。")) return;
     setCancelling(true);
     setCancelError(null);
     try {
@@ -1182,7 +1182,7 @@ export default function ProjectEdit() {
       },
       {
         label: "品牌標示",
-        value: "請預覽確認浮水印",
+        value: "請預覽確認品牌標誌",
       },
     ];
   }, [draft, project]);
@@ -1201,7 +1201,7 @@ export default function ProjectEdit() {
             : seedLoading
               ? "載入中…"
               : triggering || awaitingFirstFetch
-                ? "排隊中…"
+                ? "送出中…"
                 : "尚未產生短影音"}
           {polling.isPolling && draft && (
             <span className="polling-indicator" aria-live="polite">
@@ -1214,7 +1214,7 @@ export default function ProjectEdit() {
             to={`/projects/${validProjectId}/assets`}
             className="cta cta--quiet"
           >
-            ← 回到素材分析
+            ← 回到素材檢查
           </Link>
           <Link to="/" className="cta cta--quiet">
             專案清單
@@ -1236,7 +1236,7 @@ export default function ProjectEdit() {
 
       {drafts.length > 1 && !isLatestSelected && (
         <p className="edit-hint">
-          目前檢視的是舊版 v{selectedSummary?.version ?? "?"}；按「重新剪輯」會建立 v
+          目前檢視的是舊版 v{selectedSummary?.version ?? "?"}；按「重新產生」會建立 v
           {drafts[0].version + 1}，舊版保留。
         </p>
       )}
@@ -1255,12 +1255,12 @@ export default function ProjectEdit() {
             ⏳
           </span>
           <div className="analysis-banner__body">
-            <strong>部分分析尚未完成（剩 {analysisStatus.inFlight} 個步驟）</strong>
+            <strong>素材檢查尚未完成（剩 {analysisStatus.inFlight} 項）</strong>
             <span className="analysis-banner__hint">
               現在產生成品可能不完整 — 等素材檢查完成後再開始，成品會更穩。
               {analysisStatus.failed > 0 ? (
                 <>
-                  {" "}有 {analysisStatus.failed} 個步驟失敗；到「分析」頁可手動重試。
+                  {" "}有 {analysisStatus.failed} 項檢查失敗；到「素材檢查」頁可手動重試。
                 </>
               ) : null}
             </span>
@@ -1328,7 +1328,7 @@ export default function ProjectEdit() {
               }
             >
               {triggering
-                ? "排隊中…"
+                ? "等待開始…"
                 : analysisBlocked
                   ? `素材檢查中（剩 ${analysisStatus?.inFlight ?? 0} 項），完成後可開始`
                   : `產生 ${durationSec} 秒短影音`}
@@ -1339,9 +1339,9 @@ export default function ProjectEdit() {
 
       {showQueued && (
         <section className="edit-card" aria-live="polite">
-          <h2 className="edit-card__title">排隊中…</h2>
+          <h2 className="edit-card__title">等待開始…</h2>
           <p className="edit-card__body">
-            已建立短影音任務，正在排隊等候開始。開始後畫面會自動更新。
+            已送出短影音處理項目，正在等待開始。開始後畫面會自動更新。
           </p>
           <div className="edit-card__actions">
             <button
@@ -1349,7 +1349,7 @@ export default function ProjectEdit() {
               className="cta cta--secondary"
               onClick={() => setQueueModalOpen(true)}
             >
-              查看排隊
+              查看處理狀態
             </button>
           </div>
           <ProgressTracker steps={null} />
@@ -1375,7 +1375,7 @@ export default function ProjectEdit() {
               onClick={() => void handleCancel()}
               disabled={cancelling}
             >
-              {cancelling ? "停止中…" : "停止剪輯"}
+              {cancelling ? "停止中…" : "停止產生"}
             </button>
           </div>
           {cancelError && (
@@ -1461,15 +1461,15 @@ export default function ProjectEdit() {
                 disabled={triggering || analysisBlocked}
                 title={
                   analysisBlocked
-                    ? "等待素材檢查完成後即可重新生成"
+                    ? "等待素材檢查完成後即可重新產生"
                     : "重新挑選片段，建立另一個版本"
                 }
               >
                 {triggering
-                  ? "排隊中…"
+                  ? "送出中…"
                   : analysisBlocked
                     ? `素材檢查中（剩 ${analysisStatus?.inFlight ?? 0} 項）`
-                    : "重新生成一版"}
+                    : "重新產生一版"}
               </button>
             </div>
           </section>
@@ -1478,7 +1478,7 @@ export default function ProjectEdit() {
             <summary className="edit-advanced-panel__summary">
               <span className="edit-advanced-panel__title">進階微調</span>
               <span className="edit-advanced-panel__hint">
-                需要改片段、字幕、配樂或浮水印時再打開。
+                需要改片段、字幕、配樂或品牌標誌時再打開。
               </span>
             </summary>
 
@@ -1505,9 +1505,9 @@ export default function ProjectEdit() {
                     className="cta cta--secondary"
                     onClick={() => void handleReRender()}
                     disabled={triggering}
-                    title="保留目前片段順序，只用最新的配樂、字幕、浮水印與轉場設定重新輸出"
+                    title="保留目前片段順序，只用最新的配樂、字幕、品牌標誌與轉場設定重新產生成品"
                   >
-                    {triggering ? "排隊中…" : "套用設定再輸出"}
+                    {triggering ? "送出中…" : "套用設定再產生"}
                   </button>
                   <button
                     type="button"
@@ -1521,66 +1521,66 @@ export default function ProjectEdit() {
                     }
                   >
                     {triggering
-                      ? "排隊中…"
+                      ? "送出中…"
                       : analysisBlocked
                         ? `素材檢查中（剩 ${analysisStatus?.inFlight ?? 0} 項）`
                         : `重新選片段（${durationSec} 秒）`}
                   </button>
                 </div>
               </div>
-            <EditSettingsBlock
-              durationSec={durationSec}
-              setDurationSec={setDurationSec}
-              stylePreset={stylePreset}
-              setStylePreset={setStylePreset}
-              stabilize={stabilize}
-              setStabilize={setStabilize}
-              subtitlesOn={subtitlesOn}
-              setSubtitlesOn={setSubtitlesOn}
-              transitionsOn={transitionsOn}
-              setTransitionsOn={setTransitionsOn}
-              autoReframe={autoReframe}
-              setAutoReframe={setAutoReframe}
-              triggering={triggering}
-              validProjectId={validProjectId}
-              project={project}
-              setProject={setProject}
-              currentBgmSource={currentBgmSource}
-              setCurrentBgmSource={setCurrentBgmSource}
-            />
-            <div className="edit-card__advanced-row">
-              <Link
-                to={`/projects/${validProjectId}/edit/timeline/${draft.id}`}
-                className="cta cta--secondary edit-card__advanced-link"
-              >
-                進階編輯
-              </Link>
-              <span className="edit-card__advanced-hint">
-                打開時間軸視圖，可調整順序、分割或刪除片段
-              </span>
-            </div>
-            <DraggableTimeline
-              draft={draft}
-              videoRef={videoRef as React.RefObject<HTMLVideoElement>}
-              assetThumbs={assetThumbs}
-              onReorderStart={() => void refreshDrafts().catch(() => {})}
-              onReorderCommitted={(fresh) => {
-                // The PATCH already returned the fresh DraftDetail
-                // (status=processing, reset progress_steps_json). Pump
-                // it into the polling hook so the UI flips from 已完成
-                // → 剪輯中 immediately. Also nudge the drafts list so
-                // the version chip mirrors the new state.
-                polling.applyDraft(fresh);
-                void refreshDrafts().catch(() => {});
-              }}
-              onReorderError={(msg) => setTriggerError(msg)}
-              renderFlags={{
-                transitions: transitionsOn,
-                stabilize,
-                subtitles: subtitlesOn,
-                autoReframe,
-              }}
-            />
+              <EditSettingsBlock
+                durationSec={durationSec}
+                setDurationSec={setDurationSec}
+                stylePreset={stylePreset}
+                setStylePreset={setStylePreset}
+                stabilize={stabilize}
+                setStabilize={setStabilize}
+                subtitlesOn={subtitlesOn}
+                setSubtitlesOn={setSubtitlesOn}
+                transitionsOn={transitionsOn}
+                setTransitionsOn={setTransitionsOn}
+                autoReframe={autoReframe}
+                setAutoReframe={setAutoReframe}
+                triggering={triggering}
+                validProjectId={validProjectId}
+                project={project}
+                setProject={setProject}
+                currentBgmSource={currentBgmSource}
+                setCurrentBgmSource={setCurrentBgmSource}
+              />
+              <div className="edit-card__advanced-row">
+                <Link
+                  to={`/projects/${validProjectId}/edit/timeline/${draft.id}`}
+                  className="cta cta--secondary edit-card__advanced-link"
+                >
+                  進階片段編輯
+                </Link>
+                <span className="edit-card__advanced-hint">
+                  打開時間軸，可調整順序、分割或刪除片段
+                </span>
+              </div>
+              <DraggableTimeline
+                draft={draft}
+                videoRef={videoRef as React.RefObject<HTMLVideoElement>}
+                assetThumbs={assetThumbs}
+                onReorderStart={() => void refreshDrafts().catch(() => {})}
+                onReorderCommitted={(fresh) => {
+                  // The PATCH already returned the fresh DraftDetail
+                  // (status=processing, reset progress_steps_json). Pump
+                  // it into the polling hook so the UI flips from 已完成
+                  // → 剪輯中 immediately. Also nudge the drafts list so
+                  // the version chip mirrors the new state.
+                  polling.applyDraft(fresh);
+                  void refreshDrafts().catch(() => {});
+                }}
+                onReorderError={(msg) => setTriggerError(msg)}
+                renderFlags={{
+                  transitions: transitionsOn,
+                  stabilize,
+                  subtitles: subtitlesOn,
+                  autoReframe,
+                }}
+              />
             {draft.cut_plan?.notes && (
               <p className="edit-card__hint mono">「{draft.cut_plan.notes}」</p>
             )}
@@ -1619,17 +1619,17 @@ export default function ProjectEdit() {
         return (
           <section className="edit-card edit-card--failed">
             <h2 className="edit-card__title">
-              {isOrphan ? "任務沒有完成" : "短影音產生失敗"}
+              {isOrphan ? "這次沒有完成" : "短影音產生失敗"}
             </h2>
             <p className="edit-card__body">
               {isOrphan
-                ? "這次產生成品的工作中斷或逾時，沒有成功完成。請點下方按鈕重新送出。"
+                ? "這次產生成品的處理中斷或逾時，沒有成功完成。請點下方按鈕重新送出。"
                 : "這次成品沒有成功產出。下方會標出停在哪一步；常見原因是素材不夠、AI 暫時忙碌，或某段影片格式不穩。"}
             </p>
             {!isOrphan && <ProgressTracker steps={draft.progress_steps} />}
             {draft.prompt_feedback && (
               <details className="edit-card__error-details">
-                <summary>展開技術細節（給開發者參考）</summary>
+                <summary>展開錯誤細節（給開發者參考）</summary>
                 <pre className="edit-card__error mono">
                   {draft.prompt_feedback}
                 </pre>
@@ -1643,10 +1643,10 @@ export default function ProjectEdit() {
                 disabled={triggering}
               >
                 {triggering
-                  ? "排隊中…"
+                  ? "送出中…"
                   : isOrphan
                     ? "重新送出"
-                    : "重新生成一版"}
+                    : "重新產生一版"}
               </button>
             </div>
           </section>
@@ -1656,7 +1656,7 @@ export default function ProjectEdit() {
       {selectedDraftId !== null && <DraftComments draftId={selectedDraftId} />}
 
       {/* v0.25.0 — queue inspector. Mounted at page level so the
-          "排隊中" card's "查看排隊" button can pop it without nested
+          "等待開始" card's "查看處理狀態" button can pop it without nested
           DOM constraints. ``highlightDraftId`` so the user's own
           job lights up amber in the queue list. */}
       <QueueStatusModal

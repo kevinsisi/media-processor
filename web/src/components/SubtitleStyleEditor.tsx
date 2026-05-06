@@ -333,8 +333,7 @@ export default function SubtitleStyleEditor({
         </p>
       )}
       <p className="subtitle-style__hint mono">
-        改動會立即儲存，下次「重新剪輯」時套用。預覽是瀏覽器近似版，實際成品以
-        ffmpeg drawtext 為準。
+        改動會立即儲存，下次「重新產生」時套用。預覽為近似效果，實際成品可能略有差異。
       </p>
     </section>
   );

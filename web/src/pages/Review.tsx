@@ -49,13 +49,13 @@ function PromptDialog({
   return (
     <div className="modal-scrim" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal__eyebrow">依指示重新剪輯</div>
+        <div className="modal__eyebrow">依指示重新產生</div>
         <h3 className="modal__title">
-          告訴 AI <em>要改什麼</em>。
+          告訴系統<em>要改什麼</em>。
         </h3>
         <p className="modal__lede">
-          用一般文字描述你要的剪法，模型會調整風格檔權重並重新規劃片段，
-          每次大約耗費數元新台幣的 API 費用。
+          用一般文字描述你想調整的方向，系統會重新挑選與安排片段，
+          每次大約耗費數元新台幣的 AI 服務費用。
         </p>
         <textarea
           className="modal__input"
@@ -74,7 +74,7 @@ function PromptDialog({
             disabled={!text.trim() || busy}
             onClick={() => onSubmit(text)}
           >
-            {busy ? "重新剪輯中…" : "重新剪輯 →"}
+            {busy ? "重新產生中…" : "重新產生 →"}
           </button>
         </div>
       </div>
@@ -139,10 +139,10 @@ function ReviewBody({ project, draft }: ReviewBodyProps) {
           <span className="bread__sep">·</span>
           <span className="bread__name">{project.name}</span>
           <span className="bread__sep">·</span>
-          <span className="bread__draft">剪輯 v{draft.version}</span>
+          <span className="bread__draft">短影音 v{draft.version}</span>
         </div>
         <div className="bread__score">
-          <span className="mono">AI 信心分數</span>
+          <span className="mono">系統建議分數</span>
           <span className="bread__score-fig">{aiScore.toFixed(1)}</span>
           <span className="mono">/ 10</span>
         </div>
@@ -168,12 +168,12 @@ function ReviewBody({ project, draft }: ReviewBodyProps) {
           <figcaption className="player__caption">
             <span className="mono">9:16 直式預覽</span>
             <span className="mono">·</span>
-            <span className="mono">{segments.length} 段剪輯</span>
+            <span className="mono">{segments.length} 個片段</span>
           </figcaption>
         </figure>
 
         <aside className="intel">
-          <div className="intel__eyebrow">剪輯</div>
+          <div className="intel__eyebrow">短影音</div>
 
           <div className="intel__score">
             <div className="intel__score-fig">{aiScore.toFixed(1)}</div>
@@ -184,7 +184,7 @@ function ReviewBody({ project, draft }: ReviewBodyProps) {
           <ul className="intel__list">
             <li className="intel__row">
               <span className="pill pill--quiet">v</span>
-              <span className="intel__row-label">剪輯版本</span>
+              <span className="intel__row-label">短影音版本</span>
               <span className="intel__row-count mono">{draft.version}</span>
             </li>
             <li className="intel__row">
@@ -201,7 +201,7 @@ function ReviewBody({ project, draft }: ReviewBodyProps) {
             </li>
             <li className="intel__row">
               <span className="pill pill--quiet">P</span>
-              <span className="intel__row-label">風格檔</span>
+              <span className="intel__row-label">影片風格</span>
               <span className="intel__row-count mono">{draft.profile_name}</span>
             </li>
             <li className="intel__row">
@@ -277,7 +277,7 @@ function ReviewBody({ project, draft }: ReviewBodyProps) {
         >
           <span className="action__glyph">✓</span>
           <span className="action__label">
-            {pendingAction === "approve" ? "定剪中…" : "通過定剪"}
+            {pendingAction === "approve" ? "採用中…" : "採用此版"}
           </span>
           <span className="action__hint">把這版標為最終版</span>
         </button>
@@ -289,10 +289,10 @@ function ReviewBody({ project, draft }: ReviewBodyProps) {
           <span className="action__glyph">↺</span>
           <span className="action__label">
             {pendingAction === "repatch" && !promptOpen
-              ? "重新剪輯中…"
-              : "重新剪一版"}
+              ? "重新產生中…"
+              : "重新產生一版"}
           </span>
-          <span className="action__hint">不變風格，AI 重抽片段</span>
+          <span className="action__hint">不變風格，重新挑片段</span>
         </button>
         <button
           className="action action--prompt"
@@ -300,8 +300,8 @@ function ReviewBody({ project, draft }: ReviewBodyProps) {
           onClick={() => setPromptOpen(true)}
         >
           <span className="action__glyph">❉</span>
-          <span className="action__label">依指示重剪</span>
-          <span className="action__hint">告訴 AI 哪裡要改</span>
+          <span className="action__label">依指示重做</span>
+          <span className="action__hint">告訴系統哪裡要改</span>
         </button>
         <button
           className={`action${review.result?.action === "download" ? " action--done" : ""}`}
@@ -331,11 +331,11 @@ function ReviewBody({ project, draft }: ReviewBodyProps) {
         <div className="toast">
           <span className="mono">
             {review.error
-              ? `× API 錯誤 · ${review.error.message}`
+              ? `× 服務錯誤 · ${review.error.message}`
               : review.result?.action === "approve"
-                ? "✓ 已定剪 · 同步到 CapCut 資料夾"
+                ? "✓ 已採用 · 可交付到成品資料夾"
                 : review.result?.action === "repatch"
-                  ? "↺ 已排入重新剪輯佇列"
+                  ? "↺ 已排入重新產生"
                   : review.result?.action === "reject"
                     ? "× 已退回"
                     : "↓ 已記錄下載 · 請手動將 zip 移到 CapCut 資料夾"}
@@ -388,7 +388,7 @@ export default function Review() {
           </Link>
         </div>
         <p className="mono" role="alert">
-          API 錯誤 · {error.message}
+          服務錯誤 · {error.message}
         </p>
       </main>
     );
@@ -427,7 +427,7 @@ export default function Review() {
             <span className="bread__name">{projectQ.data.name}</span>
           </div>
         </div>
-        <p className="mono">此專案尚未產出剪輯。</p>
+        <p className="mono">此專案尚未產出短影音。</p>
       </main>
     );
   }

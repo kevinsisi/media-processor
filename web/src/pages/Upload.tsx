@@ -383,7 +383,7 @@ export default function Upload() {
           <p className="hero__lede">
             {project.client ? `${project.client} ／ ` : ""}
             {project.name}
-            <span className="hero__lede-aspect">輸出比例 {project.target_aspect_ratio}</span>
+            <span className="hero__lede-aspect">成品比例 {project.target_aspect_ratio}</span>
           </p>
         )}
         {projectError && (
@@ -407,7 +407,7 @@ export default function Upload() {
             點擊下方按鈕選取影片，可一次選多個檔案
           </p>
           <p className="upload-drop__hint upload-drop__hint--meta">
-            上傳完成後會自動檢查內容、畫面重點與腳本對應。可在「素材分析」查看每支影片的進度，完成後即可產生短影音。
+            上傳完成後會自動檢查內容、畫面重點與腳本對應。可在「素材檢查」查看每支影片的進度，完成後即可產生短影音。
           </p>
           <input
             ref={fileInputRef}
@@ -454,7 +454,7 @@ export default function Upload() {
                   {row.state === "queued" && "等待上傳…"}
                   {row.state === "uploading" &&
                     `上傳中 ${formatPct(row.uploadedBytes, row.totalBytes)}`}
-                  {row.state === "complete" && "✓ 已完成（AI 分析自動進行中）"}
+                  {row.state === "complete" && "✓ 已完成（系統正在自動檢查內容）"}
                   {row.state === "error" && (
                     <>
                       <span className="upload-row__state-fail">上傳失敗</span>
@@ -558,7 +558,7 @@ export default function Upload() {
             </span>
           </div>
           <div className="summary-cell">
-            <span className="summary-cell__label">輸出比例</span>
+            <span className="summary-cell__label">成品比例</span>
             <span className="summary-cell__value">
               {project?.target_aspect_ratio ?? "-"}
             </span>
@@ -580,9 +580,9 @@ export default function Upload() {
             <span
               className="cta summary-next summary-next--inactive"
               aria-disabled="true"
-              title="請先上傳至少一個影片，才能進入素材分析。"
+              title="請先上傳至少一個影片，才能進入素材檢查。"
             >
-              下一步：查看分析 →
+              下一步：查看素材檢查 →
             </span>
           ) : pendingUploadCount > 0 ? (
             <button
@@ -590,11 +590,11 @@ export default function Upload() {
               className="summary-next summary-next--warning"
               onClick={() => void handleNextStep()}
               disabled={scriptSaving || !scriptInitialLoaded}
-              title={`還有 ${pendingUploadCount} 個影片未上傳完，前往分析頁可能看不到全部素材。`}
+              title={`還有 ${pendingUploadCount} 個影片未上傳完，前往素材檢查可能看不到全部素材。`}
             >
               {scriptSaving
                 ? "正在保存腳本…"
-                : `下一步：查看分析（${pendingUploadCount} 個還在上傳）→`}
+                : `下一步：查看素材檢查（${pendingUploadCount} 個還在上傳）→`}
             </button>
           ) : (
             <button
@@ -605,7 +605,7 @@ export default function Upload() {
             >
               {scriptSaving
                 ? "正在保存腳本…"
-                : `下一步：查看分析（${assetCount} 個素材）→`}
+                : `下一步：查看素材檢查（${assetCount} 個素材）→`}
             </button>
           )}
         </div>

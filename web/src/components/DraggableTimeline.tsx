@@ -258,8 +258,8 @@ function SegmentVolumeSliders({
           className="dt-cell__volume-reset"
           onClick={onBgmAutoToggle}
           disabled={disabled || saving}
-          aria-label={bgmAuto ? "切換為手動" : "切回自動 ducking"}
-          title={bgmAuto ? "切換為手動" : "切回自動 ducking"}
+          aria-label={bgmAuto ? "切換為手動調整" : "切回自動壓低配樂"}
+          title={bgmAuto ? "切換為手動調整" : "切回自動壓低配樂"}
         >
           {bgmAuto ? "✋" : "↺"}
         </button>
@@ -580,13 +580,13 @@ export default function DraggableTimeline({
     <div className={`dt-timeline${inFlight ? " dt-timeline--locked" : ""}`}>
       <p className="dt-timeline__hint mono">
         {inFlight
-          ? "剪輯進行中，完成後可拖拉排序"
+          ? "成品正在製作中，完成後可拖拉排序"
           : "長按 ⋮⋮ 或拖拉卡片可調整片段順序"}
       </p>
       {dirty && !inFlight && (
         <div className="dt-timeline__commit" role="status">
           <span className="dt-timeline__commit-label">
-            順序已調整。新順序只會在點下方按鈕後才套用並重新渲染。
+            順序已調整。新順序只會在點下方按鈕後套用，並重新產生成品。
           </span>
           <div className="dt-timeline__commit-actions">
             <button
@@ -603,7 +603,7 @@ export default function DraggableTimeline({
               onClick={() => void handleCommit()}
               disabled={committing}
             >
-              {committing ? "排隊中…" : "以此順序重新生成"}
+              {committing ? "送出中…" : "以此順序重新產生"}
             </button>
           </div>
         </div>
@@ -619,7 +619,7 @@ export default function DraggableTimeline({
           items={localRows.map((r) => r.key)}
           strategy={verticalListSortingStrategy}
         >
-          <ol className="dt-timeline__list" aria-label="剪輯時間軸">
+          <ol className="dt-timeline__list" aria-label="片段時間軸">
             {localRows.map((r) => {
               const info =
                 r.segment.asset_id != null

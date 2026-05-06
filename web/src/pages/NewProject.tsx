@@ -5,7 +5,7 @@ import type { TargetAspectRatio } from "../api/types";
 import "./NewProject.css";
 
 const PROFILE_OPTIONS = [
-  { value: "universal", label: "通用 universal" },
+  { value: "universal", label: "通用短影音" },
   { value: "carsmeet-luxury", label: "Carsmeet 豪車" },
 ];
 
@@ -16,8 +16,8 @@ const RATIO_OPTIONS: Array<{
   ratio: number; // width / height
 }> = [
   { value: "9:16", label: "9 : 16", hint: "Reels · 直式短片", ratio: 9 / 16 },
-  { value: "4:5", label: "4 : 5", hint: "Feed · 直式貼文", ratio: 4 / 5 },
-  { value: "1:1", label: "1 : 1", hint: "Feed · 方形貼文", ratio: 1 },
+  { value: "4:5", label: "4 : 5", hint: "貼文牆 · 直式貼文", ratio: 4 / 5 },
+  { value: "1:1", label: "1 : 1", hint: "貼文牆 · 方形貼文", ratio: 1 },
 ];
 
 export default function NewProject() {
@@ -55,10 +55,10 @@ export default function NewProject() {
       <section className="hero">
         <div className="hero__kicker">新增專案</div>
         <h1 className="hero__title">
-          先把<em>骨架</em>立起來。
+          建立一支<em>短影音</em>專案。
         </h1>
         <p className="hero__lede">
-          輸入名稱、選定風格與輸出比例。建立後即可上傳影片與腳本。
+          輸入名稱、選定影片風格與成品比例。建立後即可上傳影片與腳本。
         </p>
       </section>
 
@@ -92,7 +92,7 @@ export default function NewProject() {
         </label>
 
         <label className="np-field">
-          <span className="np-field__label">風格檔</span>
+          <span className="np-field__label">影片風格</span>
           <select
             className="np-field__input"
             value={profile}
@@ -108,7 +108,7 @@ export default function NewProject() {
         </label>
 
         <fieldset className="np-ratios">
-          <legend className="np-ratios__legend">IG 輸出比例</legend>
+          <legend className="np-ratios__legend">IG / FB 成品比例</legend>
           <div className="np-ratios__grid">
             {RATIO_OPTIONS.map((opt) => (
               <label

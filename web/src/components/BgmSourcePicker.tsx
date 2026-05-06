@@ -98,16 +98,28 @@ function bgmFilename(bgmPath: string | null | undefined): string | null {
 // Backend status text → zh-Hant chip. Keep keys in sync with
 // ``services.queue.GENERATE_BGM_FN`` + worker error tokens.
 function labelForGenStatus(status: string | null): string {
-  if (!status) return "尚未生成";
-  if (status === "pending") return "排隊中";
-  if (status === "running") return "生成中（約 30–60 秒）";
+  if (!status) return "尚未製作";
+  if (status === "pending") return "等待開始";
+  if (status === "running") return "製作中（約 30–60 秒）";
   if (status === "done") return "已完成";
   if (status.startsWith("failed:")) {
     const reason = status.slice("failed:".length);
-    if (reason === "model-unavailable") return "失敗：模型未安裝";
-    return `失敗：${reason}`;
+    if (reason === "model-unavailable") {
+      return "配樂製作失敗，請先改用音樂庫或上傳自己的音樂";
+    }
+    return "配樂製作失敗，請稍後重試或改用音樂庫";
   }
-  return status;
+  return "狀態需確認";
+}
+
+function formatBgmSubmitError(err: unknown): string {
+  const detail =
+    err instanceof ApiError
+      ? err.message
+      : err instanceof Error
+        ? err.message
+        : String(err);
+  return `配樂送出失敗，請稍後重試或改用音樂庫。錯誤細節：${detail}`;
 }
 
 export default function BgmSourcePicker({
@@ -326,13 +338,7 @@ export default function BgmSourcePicker({
       const s = await apiClient.generateProjectBgm(projectId, aiPrompt.trim());
       setAiStatus(s);
     } catch (err) {
-      setAiError(
-        err instanceof ApiError
-          ? `${err.status}: ${err.message}`
-          : err instanceof Error
-            ? err.message
-            : String(err),
-      );
+      setAiError(formatBgmSubmitError(err));
     } finally {
       setAiSubmitting(false);
     }
@@ -348,13 +354,7 @@ export default function BgmSourcePicker({
       const s = await apiClient.generateProjectBgm(projectId, presetHint);
       setAiStatus(s);
     } catch (err) {
-      setAiError(
-        err instanceof ApiError
-          ? `${err.status}: ${err.message}`
-          : err instanceof Error
-            ? err.message
-            : String(err),
-      );
+      setAiError(formatBgmSubmitError(err));
     } finally {
       setAiSubmitting(false);
     }
@@ -489,9 +489,9 @@ export default function BgmSourcePicker({
         {(
           [
             ["none", "不使用配樂"],
-            ["preset", "依風格預設自動生成"],
+            ["preset", "依影片風格自動配樂"],
             ["library", "從音樂庫選擇"],
-            ["ai", "AI 自訂生成"],
+            ["ai", "描述想要的配樂"],
             ["upload", "上傳自己的音樂"],
           ] as const
         ).map(([val, label]) => {
@@ -506,7 +506,7 @@ export default function BgmSourcePicker({
               }
               title={
                 isPreset && !presetActive
-                  ? "請先在「剪輯風格預設」選擇非「自訂」的風格"
+                  ? "請先在「影片風格」選擇非「自訂」的風格"
                   : undefined
               }
             >
@@ -526,7 +526,7 @@ export default function BgmSourcePicker({
 
       {source === "none" && (
         <p className="bgm-picker__hint mono">
-          影片渲染時不混入背景音樂，只保留人聲。
+          產生成品時不加入背景音樂，只保留原聲與人聲。
         </p>
       )}
 
@@ -538,13 +538,13 @@ export default function BgmSourcePicker({
         const regenLabel = isBusy
           ? null
           : filename
-            ? "🔄 重新生成配樂"
-            : "🎵 生成 30 秒配樂";
+            ? "🔄 重新製作配樂"
+            : "🎵 製作 30 秒配樂";
 
         return (
           <div className="bgm-picker__panel">
             <p className="bgm-picker__hint mono">
-              風格描述（將直接送給 MusicGen 作為提示詞）：
+              配樂風格描述（系統會依這段文字製作配樂）：
             </p>
             <div className="bgm-picker__preset-readonly mono">
               <span className="bgm-picker__preset-readonly-tag">
@@ -558,7 +558,7 @@ export default function BgmSourcePicker({
             {presetMatches && (
               <div className="bgm-picker__status-banner bgm-picker__status-banner--match">
                 <span aria-hidden="true">✓</span>
-                <span>已根據「{presetLabel}」生成配樂</span>
+                <span>已根據「{presetLabel}」製作配樂</span>
               </div>
             )}
             {presetMismatch && lastGenPreset && (
@@ -578,14 +578,14 @@ export default function BgmSourcePicker({
                   風格已從「{PRESET_LABEL[lastGenPreset]}」改為「{presetLabel}」，
                   但配樂仍是「{PRESET_LABEL[lastGenPreset]}」
                   （{PRESET_GENRE_SHORT[lastGenPreset]}）的版本。請按下方
-                  <strong>「重新生成配樂」</strong>套用新風格。
+                  <strong>「重新製作配樂」</strong>套用新風格。
                 </p>
               </div>
             )}
             {bgmIsExternal && (
               <p className="bgm-picker__hint mono">
                 目前配樂為自行上傳或音樂庫選曲（{filename}）。要使用「
-                {presetLabel}」風格的話，按下方重新生成。
+                {presetLabel}」風格的話，按下方重新製作。
               </p>
             )}
 
@@ -601,7 +601,7 @@ export default function BgmSourcePicker({
                   className="bgm-picker__regen-link"
                   onClick={() => void handleGeneratePreset()}
                   disabled={disabled}
-                  title="MusicGen 每次結果不同，按一下生成另一個版本"
+                  title="每次製作都會有不同結果，按一下換另一個版本"
                 >
                   🔄 換一首
                 </button>
@@ -623,10 +623,10 @@ export default function BgmSourcePicker({
                         aria-hidden="true"
                       />
                       {aiSubmitting
-                        ? "排隊中…"
+                        ? "等待開始…"
                         : aiStatus?.status === "running"
-                          ? "生成中…"
-                          : "排隊中…"}
+                          ? "製作中…"
+                          : "等待開始…"}
                     </span>
                   ) : (
                     regenLabel
@@ -637,8 +637,7 @@ export default function BgmSourcePicker({
 
             {aiStatus && aiStatus.job_id != null && (
               <div className="bgm-picker__status">
-                {(aiStatus.status === "pending"
-                  || aiStatus.status === "running") && (
+                {aiStatus.status !== "done" && (
                   <span className="bgm-picker__status-label mono">
                     {labelForGenStatus(aiStatus.status)}
                   </span>
@@ -646,10 +645,10 @@ export default function BgmSourcePicker({
                 {aiStatus.status === "done" && (
                   <span className="bgm-picker__status-label mono">
                     {presetMismatch && lastGenPreset
-                      ? `🕘 舊版本：${PRESET_GENRE_SHORT[lastGenPreset]} 風格（按上方重新生成才會更新）`
+                      ? `🕘 舊版本：${PRESET_GENRE_SHORT[lastGenPreset]} 風格（按上方重新製作才會更新）`
                       : lastGenPreset
-                        ? `配樂已生成（${PRESET_GENRE_SHORT[lastGenPreset]} 風格）`
-                        : "配樂已生成（自訂提示詞）"}
+                        ? `配樂已製作（${PRESET_GENRE_SHORT[lastGenPreset]} 風格）`
+                        : "配樂已製作（自訂描述）"}
                   </span>
                 )}
                 {aiStatus.status === "done" && aiStatus.output_url && (
@@ -666,7 +665,7 @@ export default function BgmSourcePicker({
                 )}
                 {aiStatus.error && (
                   <span className="bgm-picker__err mono">
-                    {aiStatus.error}
+                    錯誤細節：{aiStatus.error}
                   </span>
                 )}
               </div>
@@ -692,7 +691,7 @@ export default function BgmSourcePicker({
           )}
           {library && library.length === 0 && (
             <p className="bgm-picker__hint mono">
-              音樂庫正在準備中，第一批風格樣本即將上線。請改用「AI 自訂生成」或「上傳自己的音樂」。
+              音樂庫正在準備中，第一批風格樣本即將上線。請改用「描述想要的配樂」或「上傳自己的音樂」。
             </p>
           )}
           {library && library.length > 0 && (
@@ -734,11 +733,11 @@ export default function BgmSourcePicker({
       {source === "ai" && (
         <div className="bgm-picker__panel">
           <p className="bgm-picker__hint mono">
-            自行描述音樂風格送給 MusicGen 生成 30 秒配樂（約需 30–60 秒）。
+            自行描述音樂風格，系統會製作 30 秒配樂（約需 30–60 秒）。
           </p>
           {filename && (
             <p className="bgm-picker__hint mono">
-              目前配樂：<span className="mono">{filename}</span>。重新生成會建立新檔案，舊草稿仍會沿用原本的配樂。
+              目前配樂：<span className="mono">{filename}</span>。重新製作會建立新檔案，舊版本仍會沿用原本的配樂。
             </p>
           )}
           {aiPromptLoading && (
@@ -746,7 +745,7 @@ export default function BgmSourcePicker({
           )}
           {aiPromptUsedFallback && !aiPromptLoading && (
             <p className="bgm-picker__hint mono">
-              （Gemini 暫不可用，已填入預設描述。）
+              （AI 建議暫不可用，已填入預設描述。）
             </p>
           )}
           <textarea
@@ -789,15 +788,15 @@ export default function BgmSourcePicker({
                 <span className="cta__spinner-row">
                   <span className="bgm-picker__spinner" aria-hidden="true" />
                   {aiSubmitting
-                    ? "排隊中…"
+                    ? "等待開始…"
                     : aiStatus?.status === "running"
-                      ? "生成中…"
-                      : "排隊中…"}
+                      ? "製作中…"
+                      : "等待開始…"}
                 </span>
               ) : filename ? (
-                "重新生成（覆寫舊配樂）"
+                "重新製作（更換舊配樂）"
               ) : (
-                "🎵 生成 30 秒配樂"
+                "🎵 製作 30 秒配樂"
               )}
             </button>
           </div>
@@ -815,7 +814,9 @@ export default function BgmSourcePicker({
                 />
               )}
               {aiStatus.error && (
-                <span className="bgm-picker__err mono">{aiStatus.error}</span>
+                <span className="bgm-picker__err mono">
+                  錯誤細節：{aiStatus.error}
+                </span>
               )}
             </div>
           )}
@@ -853,7 +854,7 @@ export default function BgmSourcePicker({
                 : "選擇音檔"}
           </button>
           <p className="bgm-picker__hint mono">
-            支援 mp3 / wav / m4a / aac / flac / ogg；上限 50 MB。配樂會自動與人聲混音並 ducking。
+            支援 mp3 / wav / m4a / aac / flac / ogg；上限 50 MB。配樂會自動與人聲混合，說話時會自動降低音量。
           </p>
           {uploadError && (
             <p className="bgm-picker__err mono" role="alert">

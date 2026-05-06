@@ -94,7 +94,7 @@ function summaryForStep(
     }
     case "scene": {
       const tags = asset.scene_tags;
-      if (tags.length === 0) return "未偵測場景";
+      if (tags.length === 0) return "未找到明顯場景";
       // Top tag + count — tags are already sorted by confidence by the
       // analysis pipeline.
       const top = tags[0];
@@ -104,7 +104,7 @@ function summaryForStep(
     }
     case "motion": {
       const segs = asset.motion_segments;
-      if (segs.length === 0) return "未偵測運鏡";
+      if (segs.length === 0) return "未找到明顯畫面動態";
       // Bucket by motion_type, get the dominant by total ms.
       const bucket: Record<string, number> = {};
       for (const s of segs) {
@@ -120,14 +120,14 @@ function summaryForStep(
     }
     case "emotion": {
       const e = asset.emotion_tags;
-      if (!e) return "未偵測情緒";
+      if (!e) return "未找到明顯情緒";
       const dom = labelForEmotionTag(e.dominant);
       const ranges = e.ranges.length;
       return ranges > 1 ? `${dom} 等 ${ranges} 段` : dom;
     }
     case "tracking": {
       const t = asset.tracking_summary;
-      if (!t || !t.subject_class) return "未偵測主體";
+      if (!t || !t.subject_class) return "未找到明顯主角";
       const conf = Math.round((t.confidence ?? 0) * 100);
       return `${labelForTrackingSubject(t.subject_class)} ${conf}%`;
     }
@@ -161,7 +161,7 @@ function AnalysisStepStatusGrid({
   retryingStep,
 }: AnalysisStepStatusGridProps) {
   return (
-    <div className="step-grid" role="list" aria-label="分析步驟狀態">
+    <div className="step-grid" role="list" aria-label="素材檢查項目狀態">
       {ANALYSIS_STEP_ORDER.map((step) => {
         const raw = asset.analysis_steps?.[step];
         const cls = classifyStepState(raw);
@@ -202,8 +202,8 @@ function AnalysisStepStatusGrid({
                     "step-card__retry"
                     + (cls === "failed" ? " step-card__retry--prominent" : "")
                   }
-                  aria-label={`重新分析「${ANALYSIS_STEP_LABELS[step]}」`}
-                  title={`重新分析「${ANALYSIS_STEP_LABELS[step]}」`}
+                  aria-label={`重新檢查「${ANALYSIS_STEP_LABELS[step]}」`}
+                  title={`重新檢查「${ANALYSIS_STEP_LABELS[step]}」`}
                   disabled={busy}
                   onClick={() => onRetryStep(asset.id, step)}
                 >
@@ -301,14 +301,14 @@ function AnalysisProgressSummary({ assets }: AnalysisProgressSummaryProps) {
   return (
     <section
       className="analysis-progress-summary"
-      aria-label="整體分析進度"
+      aria-label="素材檢查進度"
     >
       <div className="analysis-progress-summary__head">
         <span className="analysis-progress-summary__title">
-          整體分析進度
+          素材檢查進度
         </span>
         <span className="analysis-progress-summary__nums mono">
-          {counts.stepDone} / {counts.stepTotal} 步驟完成（{stepPctDone}%）
+          {counts.stepDone} / {counts.stepTotal} 項完成（{stepPctDone}%）
         </span>
       </div>
       <div
@@ -334,7 +334,7 @@ function AnalysisProgressSummary({ assets }: AnalysisProgressSummaryProps) {
         )}
         {counts.stepPending > 0 && (
           <span className="aps-pill aps-pill--pending">
-            · 待分析 {counts.stepPending}
+            · 等待檢查 {counts.stepPending}
           </span>
         )}
         {counts.stepFailed > 0 && (
@@ -359,10 +359,10 @@ interface MotionTimelineProps {
 
 function MotionTimeline({ totalMs, segments }: MotionTimelineProps) {
   if (totalMs <= 0 || segments.length === 0) {
-    return <div className="motion-timeline motion-timeline--empty">無運鏡資訊</div>;
+    return <div className="motion-timeline motion-timeline--empty">無畫面動態資訊</div>;
   }
   return (
-    <div className="motion-timeline" aria-label="運鏡時間軸">
+    <div className="motion-timeline" aria-label="畫面動態時間軸">
       {segments.map((seg, i) => {
         const left = (seg.start_ms / totalMs) * 100;
         const width = Math.max(1, ((seg.end_ms - seg.start_ms) / totalMs) * 100);
@@ -686,8 +686,8 @@ function SecondarySubtitleToggle({
         disabled={disabled}
         title={
           sttDone
-            ? "用 Whisper 把這個素材翻譯成英文字幕（可疊在主字幕之上）"
-            : "請先完成 STT（語音辨識），翻譯才能執行"
+            ? "把這個素材翻成英文字幕（可疊在主字幕之上）"
+            : "請先完成語音文字檢查，才能翻譯"
         }
       >
         {buttonLabel}
@@ -788,17 +788,17 @@ function AssetCard({
           }`}
           aria-label={
             asset.tracking_summary.subject_class
-              ? `追蹤主體：${labelForTrackingSubject(
+              ? `畫面主角：${labelForTrackingSubject(
                   asset.tracking_summary.subject_class,
                 )}`
-              : "未偵測到主體"
+              : "未找到明顯主角"
           }
           title={
             asset.tracking_summary.subject_class
               ? `${asset.tracking_summary.frame_count} 幀（共取樣 ${asset.tracking_summary.sampled_frames}），平均信心 ${(
                   asset.tracking_summary.confidence * 100
                 ).toFixed(0)}%`
-              : "本片段沒有偵測到可追蹤主體"
+              : "本片段沒有找到可跟住的主角"
           }
         >
           <span className="tracking-chip__icon" aria-hidden>
@@ -806,10 +806,10 @@ function AssetCard({
           </span>
           <span className="tracking-chip__label">
             {asset.tracking_summary.subject_class
-              ? `追蹤：${labelForTrackingSubject(asset.tracking_summary.subject_class)}（${(
+              ? `主角：${labelForTrackingSubject(asset.tracking_summary.subject_class)}（${(
                   asset.tracking_summary.confidence * 100
                 ).toFixed(0)}%）`
-              : "追蹤：無主體"}
+              : "主角：未找到"}
           </span>
         </div>
       )}
@@ -852,9 +852,9 @@ function AssetCard({
           type="button"
           className="cta cta--quiet"
           onClick={() => onAnalyze(asset.id, false)}
-          title="只重跑尚未完成或失敗的步驟；手動編輯過的字幕會保留。"
+          title="只重新檢查尚未完成或失敗的項目；手動編輯過的字幕會保留。"
         >
-          重新分析（保留手改）
+          重新檢查（保留手改）
         </button>
         <button
           type="button"
@@ -862,15 +862,15 @@ function AssetCard({
           onClick={() => {
             if (
               window.confirm(
-                "強制重跑會覆蓋手動編輯過的逐字稿與字幕。確定要繼續？",
+                "重新檢查全部會覆蓋手動編輯過的逐字稿與字幕。確定要繼續？",
               )
             ) {
               onAnalyze(asset.id, true);
             }
           }}
-          title="所有分析步驟全部重跑，並覆寫手動編輯過的字幕。"
+          title="所有檢查項目全部重跑，並覆寫手動編輯過的字幕。"
         >
-          強制重跑（覆寫手改）
+          重新檢查全部（覆寫手改）
         </button>
       </footer>
     </article>
@@ -908,7 +908,7 @@ export default function ProjectAnalysis() {
       } catch (err) {
         setTriggerError(
           err instanceof Error
-            ? `重新分析「${step}」失敗：${err.message}`
+            ? `重新檢查「${ANALYSIS_STEP_LABELS[step]}」失敗：${err.message}`
             : String(err),
         );
       } finally {
@@ -954,7 +954,7 @@ export default function ProjectAnalysis() {
       } catch (err) {
         setTriggerError(
           err instanceof Error
-            ? `翻譯任務觸發失敗：${err.message}`
+            ? `英文字幕建立失敗：${err.message}`
             : String(err),
         );
       } finally {
@@ -1032,7 +1032,7 @@ export default function ProjectAnalysis() {
       if (force) {
         if (
           !window.confirm(
-            `將強制重跑 ${selectedIds.size} 個素材，會覆蓋手動編輯的逐字稿。確定？`,
+            `將重新檢查 ${selectedIds.size} 個素材的全部項目，會覆蓋手動編輯的逐字稿。確定？`,
           )
         ) {
           return;
@@ -1051,7 +1051,7 @@ export default function ProjectAnalysis() {
         } catch (err) {
           failed += 1;
           setTriggerError(
-            `素材 #${id} 觸發失敗：${
+            `素材 #${id} 送出檢查失敗：${
               err instanceof Error ? err.message : String(err)
             }`,
           );
@@ -1083,7 +1083,7 @@ export default function ProjectAnalysis() {
     if (selectedIds.size === 0 || validProjectId == null) return;
     if (
       !window.confirm(
-        `確定要刪除 ${selectedIds.size} 個素材？檔案、縮圖、追蹤資料都會一起清掉，無法復原。`,
+        `確定要刪除 ${selectedIds.size} 個素材？檔案、縮圖、畫面重點資料都會一起清掉，無法復原。`,
       )
     ) {
       return;
@@ -1173,19 +1173,19 @@ export default function ProjectAnalysis() {
     );
   }, [assets]);
   const editLabel = useMemo(() => {
-    if (!latestDraft) return "開始剪輯";
+    if (!latestDraft) return "產生短影音";
     if (latestDraft.status === "processing" || latestDraft.status === "pending") {
-      return "查看剪輯進度";
+      return "查看製作進度";
     }
-    if (latestDraft.status === "ready_for_review") return "預覽剪輯";
-    if (latestDraft.status === "failed") return "重新剪輯";
-    return "開始剪輯";
+    if (latestDraft.status === "ready_for_review") return "預覽成品";
+    if (latestDraft.status === "failed") return "重新產生";
+    return "產生短影音";
   }, [latestDraft]);
 
   return (
     <main className="page project-analysis">
       <header className="analysis-hero">
-        <div className="analysis-hero__kicker">素材分析</div>
+        <div className="analysis-hero__kicker">素材檢查</div>
         <h1 className="analysis-hero__title">
           {project ? project.name : "載入中…"}
         </h1>
@@ -1215,7 +1215,7 @@ export default function ProjectAnalysis() {
         </div>
         {!polling.data?.has_script && project && (
           <p className="analysis-hint">
-            尚未設定腳本 — 對稿步驟會自動跳過。
+            尚未設定腳本 — 腳本對照會自動略過。
             <Link to={`/projects/${validProjectId}/upload`}>前往設定 →</Link>
           </p>
         )}
@@ -1239,7 +1239,7 @@ export default function ProjectAnalysis() {
       <AnalysisProgressSummary assets={assets} />
 
       {assets.length > 0 && (
-        <div className="batch-toolbar" role="toolbar" aria-label="批次分析">
+        <div className="batch-toolbar" role="toolbar" aria-label="批次素材檢查">
           <label className="batch-toolbar__select-all">
             <input
               type="checkbox"
@@ -1248,7 +1248,7 @@ export default function ProjectAnalysis() {
               disabled={unanalyzedIds.length === 0}
             />
             <span>
-              全選未分析
+              全選需檢查
               <span className="batch-toolbar__count mono">
                 {" "}
                 ({unanalyzedIds.length})
@@ -1272,20 +1272,20 @@ export default function ProjectAnalysis() {
               className="cta cta--primary"
               onClick={() => void runBatchAnalyze(false)}
               disabled={selectedIds.size === 0 || batchRunning}
-              title="只跑未完成或失敗的步驟，手改字幕會保留。"
+              title="只檢查未完成或失敗的項目，手改字幕會保留。"
             >
               {batchRunning
-                ? "觸發中…"
-                : `重新分析所選（${selectedIds.size}）`}
+                ? "送出中…"
+                : `重新檢查所選（${selectedIds.size}）`}
             </button>
             <button
               type="button"
               className="cta"
               onClick={() => void runBatchAnalyze(true)}
               disabled={selectedIds.size === 0 || batchRunning}
-              title="所有步驟全部重跑，會覆寫手改字幕。"
+              title="所有檢查項目全部重跑，會覆寫手改字幕。"
             >
-              強制重跑（覆寫手改）
+              重新檢查全部（覆寫手改）
             </button>
             {/* v0.26.0 / v0.27.1 — bulk delete. v0.27.1 stops
                 hard-blocking on active drafts; instead a second
@@ -1296,7 +1296,7 @@ export default function ProjectAnalysis() {
               className="cta cta--danger"
               onClick={() => void runBatchDelete()}
               disabled={selectedIds.size === 0 || batchRunning}
-              title="刪除所選素材（檔案 + 縮圖 + 追蹤資料）。被啟用中的 draft 引用時會出現二次確認，確定後該版本會被標為失敗。"
+              title="刪除所選素材（檔案、縮圖、畫面重點資料）。被使用中的版本引用時會出現二次確認，確定後該版本會被標為失敗。"
             >
               刪除所選（{selectedIds.size}）
             </button>

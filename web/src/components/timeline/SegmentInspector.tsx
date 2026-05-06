@@ -96,7 +96,7 @@ export default function SegmentInspector({
       {error && <div className="seg-inspector__error">{error}</div>}
       <div className="seg-inspector__grid">
         <label className="seg-inspector__field">
-          <span>素材起點 (ms)</span>
+          <span>片段開始（毫秒）</span>
           <input
             type="number"
             value={startMs}
@@ -107,7 +107,7 @@ export default function SegmentInspector({
           />
         </label>
         <label className="seg-inspector__field">
-          <span>素材終點 (ms)</span>
+          <span>片段結束（毫秒）</span>
           <input
             type="number"
             value={endMs}
@@ -124,7 +124,7 @@ export default function SegmentInspector({
             disabled={busy}
             onChange={(e) => onPatch({ transition: e.target.value })}
           >
-            <option value="">(無預設)</option>
+            <option value="">不加轉場</option>
             {TRANSITIONS.map((t) => (
               <option key={t} value={t}>
                 {t}
@@ -148,7 +148,7 @@ export default function SegmentInspector({
         </label>
         <label className="seg-inspector__field">
           <span>
-            BGM 音量 ({bgmVolume === null ? "auto" : bgmVolume.toFixed(2)})
+            配樂音量 ({bgmVolume === null ? "自動" : bgmVolume.toFixed(2)})
           </span>
           <input
             type="range"

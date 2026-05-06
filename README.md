@@ -2,7 +2,7 @@
 
 Content factory pipeline for novice-friendly Instagram and Facebook short-video production.
 
-**Status:** v0.28.3 / M9.13.3 — hardened background job lifecycle.
+**Status:** v0.28.4 / M9.13.4 — beginner-facing Traditional Chinese copy cleanup.
 
 ## Spec
 
@@ -87,6 +87,16 @@ The React/Vite app is API-backed. Main routes:
 | `/health` | Developer-facing status dashboard |
 
 `/projects/:id/review` is a legacy route and redirects to `/projects/:id/edit`.
+
+## v0.28.4 Beginner Copy Notes
+
+- Main workflow copy now uses the same beginner-facing terms throughout the app:
+  `素材檢查`, `產生成品`, `建立下載版本`, `品牌標誌`, `畫面防手震`, and `自動跟住主角`.
+- Queue, worker, render, export, BGM, tracking, and failure states lead with what
+  the user can do next. Raw backend details remain secondary in settings,
+  diagnostics, or developer-facing error details.
+- Technical component/API names stay unchanged in code; only visible labels,
+  helper text, aria labels, empty states, and error copy are normalized.
 
 ## v0.28.3 Job Lifecycle Reliability Notes
 

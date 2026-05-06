@@ -322,13 +322,13 @@ export default function WatermarkPicker({
   const handleSavePreset = useCallback(async () => {
     if (!filename) return;
     const raw = window.prompt(
-      "輸入這組浮水印設定的名稱（之後可以套用到其他專案）",
+      "輸入這組品牌標誌設定的名稱（之後可以套用到其他專案）",
       `預設 ${(presets?.length ?? 0) + 1}`,
     );
     if (raw === null) return; // user cancelled
     const name = raw.trim();
     if (!name) {
-      setError("浮水印名稱不可空白");
+      setError("品牌標誌名稱不可空白");
       return;
     }
     setError(null);
@@ -377,7 +377,7 @@ export default function WatermarkPicker({
   return (
     <section className="watermark-picker" aria-busy={busy}>
       <header className="watermark-picker__head">
-        <h3 className="watermark-picker__title">浮水印 / LOGO</h3>
+        <h3 className="watermark-picker__title">品牌標誌</h3>
         {displayFilename ? (
           <span
             className={
@@ -407,11 +407,11 @@ export default function WatermarkPicker({
       {presets !== null && (presets.length > 0 || filename) ? (
         <section
           className="watermark-presets"
-          aria-label="已儲存的浮水印預設"
+          aria-label="已儲存的品牌標誌預設"
         >
           <header className="watermark-presets__head">
             <span className="watermark-presets__title">
-              已儲存的浮水印（{presets.length}）
+              已儲存的品牌標誌（{presets.length}）
             </span>
             {filename && presetBusy !== "saving" ? (
               <button
@@ -419,7 +419,7 @@ export default function WatermarkPicker({
                 className="watermark-presets__save"
                 onClick={() => void handleSavePreset()}
                 disabled={!interactive || presetBusy !== null}
-                title="把目前的浮水印 + 位置 / 大小 / 透明度存成可重用的預設"
+                title="把目前的品牌標誌、位置、大小與透明度存成可重用的預設"
               >
                 💾 儲存目前設定為預設
               </button>
@@ -471,7 +471,7 @@ export default function WatermarkPicker({
             </ul>
           ) : (
             <p className="watermark-presets__empty">
-              還沒有預設。上傳浮水印後可按上方「💾 儲存目前設定為預設」存成可重用的版本。
+              還沒有預設。上傳品牌標誌後可按上方「💾 儲存目前設定為預設」存成可重用的版本。
             </p>
           )}
         </section>
@@ -486,7 +486,7 @@ export default function WatermarkPicker({
             disabled={!interactive}
             onChange={handleFile}
           />
-          <span>{watermarkUrl ? "更換 PNG" : "上傳 PNG"}</span>
+          <span>{watermarkUrl ? "更換標誌圖" : "上傳標誌圖"}</span>
         </label>
         {watermarkUrl ? (
           <button
@@ -503,13 +503,13 @@ export default function WatermarkPicker({
       <div className="watermark-picker__preview-row">
         <div
           className="watermark-picker__canvas"
-          aria-label="浮水印預覽"
+          aria-label="品牌標誌預覽"
           role="img"
         >
           {previewSrc ? (
             <img
               src={previewSrc}
-              alt="watermark preview"
+              alt="品牌標誌預覽"
               className={`watermark-picker__logo watermark-picker__logo--${position}`}
               style={{
                 width: `${Math.max(SCALE_MIN, Math.min(SCALE_MAX, scalePct))}%`,
@@ -524,7 +524,7 @@ export default function WatermarkPicker({
         <div
           className="watermark-picker__grid"
           role="radiogroup"
-          aria-label="浮水印位置"
+          aria-label="品牌標誌位置"
         >
           {POSITIONS.map((p) => (
             <button
@@ -581,7 +581,7 @@ export default function WatermarkPicker({
         </p>
       ) : null}
       <p className="watermark-picker__hint">
-        下次剪輯時會將 PNG 烙印到成片角落（{POSITION_LABEL[position]}），
+        下次產生成品時會將 PNG 標誌放到成片角落（{POSITION_LABEL[position]}），
         大小與透明度即時生效。
       </p>
     </section>

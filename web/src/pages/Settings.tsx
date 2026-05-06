@@ -6,8 +6,8 @@ import "./Settings.css";
 const DEFAULT_KEY_MANAGER_URL = "http://key.sisihome.org:7823";
 
 const SOURCE_LABEL: Record<SettingsOut["llm_api_keys"]["source"], string> = {
-  db: "資料庫（從這裡管理）",
-  env: "環境變數 .env（fallback）",
+  db: "已在系統內管理",
+  env: "使用主機環境設定（備援）",
   none: "未設定",
 };
 
@@ -49,7 +49,7 @@ export default function Settings() {
       });
       setFlash({
         kind: "ok",
-        text: `已儲存 · 接受 ${out.accepted_count} / 拒絕 ${out.rejected_count} · 目前共 ${out.stored_count} 把 key`,
+        text: `已儲存 · 接受 ${out.accepted_count} / 拒絕 ${out.rejected_count} · 目前共 ${out.stored_count} 把金鑰`,
       });
       setTextarea("");
       await refresh();
@@ -58,7 +58,7 @@ export default function Settings() {
         kind: "error",
         text:
           err instanceof ApiError
-            ? `儲存失敗 (HTTP ${err.status}): ${err.message}`
+            ? `儲存失敗：${err.message}`
             : err instanceof Error
               ? err.message
               : String(err),
@@ -79,7 +79,7 @@ export default function Settings() {
       });
       setFlash({
         kind: "ok",
-        text: `從 key-manager 抓取 ${out.fetched} 把 · 新匯入 ${out.imported} · 略過重複 ${out.skipped} · 目前共 ${out.stored_count} 把 key`,
+        text: `從金鑰管理服務抓取 ${out.fetched} 把 · 新匯入 ${out.imported} · 略過重複 ${out.skipped} · 目前共 ${out.stored_count} 把金鑰`,
       });
       await refresh();
     } catch (err) {
@@ -87,7 +87,7 @@ export default function Settings() {
         kind: "error",
         text:
           err instanceof ApiError
-            ? `同步失敗 (HTTP ${err.status}): ${err.message}`
+            ? `同步失敗：${err.message}`
             : err instanceof Error
               ? err.message
               : String(err),
@@ -98,21 +98,21 @@ export default function Settings() {
   };
 
   const handleClear = async () => {
-    if (!confirm("確定要清空 DB 中的 key pool？清空後系統會 fallback 回環境變數的設定。")) {
+    if (!confirm("確定要清空系統內金鑰？清空後會改用主機環境設定。")) {
       return;
     }
     setBusy("clear");
     setFlash(null);
     try {
       await apiClient.clearLLMKeys();
-      setFlash({ kind: "ok", text: "已清空 DB key pool。" });
+      setFlash({ kind: "ok", text: "已清空系統內金鑰。" });
       await refresh();
     } catch (err) {
       setFlash({
         kind: "error",
         text:
           err instanceof ApiError
-            ? `清空失敗 (HTTP ${err.status}): ${err.message}`
+            ? `清空失敗：${err.message}`
             : err instanceof Error
               ? err.message
               : String(err),
@@ -127,11 +127,10 @@ export default function Settings() {
       <section className="settings__hero">
         <div className="settings__kicker">系統設定</div>
         <h1 className="settings__title">
-          AI 模型與<em>金鑰池</em>
+          AI 服務與<em>金鑰管理</em>
         </h1>
         <p className="settings__lede">
-          場景分析、對稿、與草稿修補都共用同一組 Gemini key pool。
-          從這裡批次匯入或從 key-manager 同步即可，無需重啟容器。
+          素材檢查、腳本對照與 AI 建議都共用這組金鑰。可批次匯入或從金鑰管理服務同步，無需重啟服務。
         </p>
       </section>
 
@@ -151,9 +150,9 @@ export default function Settings() {
             <dd className="mono">{data.llm_model}</dd>
             <dt>逾時</dt>
             <dd className="mono">{data.llm_timeout_s}s</dd>
-            <dt>Key 數量</dt>
+            <dt>金鑰數量</dt>
             <dd className="mono">{data.llm_api_keys.count}</dd>
-            <dt>Key 來源</dt>
+            <dt>金鑰來源</dt>
             <dd>{SOURCE_LABEL[data.llm_api_keys.source]}</dd>
             <dt>後 4 碼</dt>
             <dd className="mono settings__suffixes">
@@ -171,7 +170,7 @@ export default function Settings() {
 
       <section className="settings__panel">
         <div className="settings__panel-head">
-          <h2>批次匯入 Gemini API Key</h2>
+          <h2>批次匯入 AI 服務金鑰</h2>
           <p className="settings__hint">
             支援逗號或換行分隔；可貼整段{" "}
             <code>LLM_API_KEYS=AIza...,AIza...</code> 行，會自動清理。
@@ -180,7 +179,7 @@ export default function Settings() {
         <textarea
           className="settings__textarea mono"
           rows={8}
-          placeholder={"AIzaSy...,AIzaSy...\n# 或一行一把 key\nAIzaSy..."}
+          placeholder={"AIzaSy...,AIzaSy...\n# 或一行一把金鑰\nAIzaSy..."}
           value={textarea}
           onChange={(e) => setTextarea(e.target.value)}
           spellCheck={false}
@@ -192,7 +191,7 @@ export default function Settings() {
               checked={replace}
               onChange={(e) => setReplace(e.target.checked)}
             />
-            <span>取代既有 pool（取消勾選＝合併）</span>
+            <span>取代既有金鑰（取消勾選＝合併）</span>
           </label>
           <div className="settings__actions">
             <button
@@ -209,7 +208,7 @@ export default function Settings() {
               onClick={handleClear}
               disabled={busy !== null || data?.llm_api_keys.source !== "db"}
             >
-              {busy === "clear" ? "清空中…" : "清空 DB pool"}
+              {busy === "clear" ? "清空中…" : "清空系統內金鑰"}
             </button>
           </div>
         </div>
@@ -217,15 +216,15 @@ export default function Settings() {
 
       <section className="settings__panel">
         <div className="settings__panel-head">
-          <h2>從 key-manager 同步</h2>
+          <h2>從金鑰管理服務同步</h2>
           <p className="settings__hint">
-            呼叫 <code>GET /api/keys/export?trusted_only=1</code> 抓出 trusted
-            pool，與目前 DB 既有 key 合併（會去重）。
+            從金鑰管理服務抓取可用金鑰，與目前系統內既有金鑰合併（會去重）。
+            進階：使用 trusted-only 匯出。
           </p>
         </div>
         <div className="settings__row settings__row--top">
           <label className="settings__field">
-            <span>key-manager URL</span>
+            <span>金鑰管理服務 URL</span>
             <input
               type="url"
               className="settings__input mono"

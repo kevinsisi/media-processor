@@ -61,7 +61,7 @@ function pickRepresentativeFrame(track: TrackingTrackOut): number[] | null {
 function displayTrackName(track: TrackingTrackOut): string {
   const labelled = labelForTrackingSubject(track.cls_name);
   if (labelled) return labelled;
-  return "追蹤主體";
+  return "畫面主角";
 }
 
 function isLegacyTracking(detail: TrackingDetailOut): boolean {
@@ -201,7 +201,7 @@ export default function AssetTrackingTarget({
     ? detail.point_tracking_error ?? "point tracking failed"
     : null;
   useEffect(() => {
-    if (failedError) setError(`追蹤失敗：${failedError}`);
+    if (failedError) setError(`跟住主角失敗：${failedError}`);
   }, [failedError]);
 
   const handleModeClick = useCallback(
@@ -367,14 +367,14 @@ export default function AssetTrackingTarget({
   if (!loaded) {
     return (
       <div className="tracking-target">
-        <p className="tracking-target__hint">追蹤資料載入中…</p>
+        <p className="tracking-target__hint">畫面重點載入中…</p>
       </div>
     );
   }
   if (!detail) {
     return (
       <div className="tracking-target">
-        <p className="tracking-target__hint">尚未跑追蹤分析。</p>
+        <p className="tracking-target__hint">尚未完成畫面重點檢查。</p>
       </div>
     );
   }
@@ -401,9 +401,9 @@ export default function AssetTrackingTarget({
     : null;
 
   return (
-    <div className="tracking-target" aria-label="追蹤目標">
+    <div className="tracking-target" aria-label="畫面要跟住誰">
       <div className="tracking-target__head">
-        <h4 className="tracking-target__title">追蹤目標</h4>
+        <h4 className="tracking-target__title">畫面要跟住誰</h4>
         <div className="tracking-target__mode" role="tablist">
           {TRACKING_MODES.map((mode) => {
             const active = activeMode === mode || pendingMode === mode;
@@ -436,7 +436,7 @@ export default function AssetTrackingTarget({
           <img
             className="tracking-target__canvas-img"
             src={thumbnailUrl}
-            alt="追蹤縮圖"
+            alt="畫面重點縮圖"
             draggable={false}
           />
         )}
@@ -482,14 +482,14 @@ export default function AssetTrackingTarget({
               left: `${detail.point_tracking_origin.norm_x * renderRect.renderedW + renderRect.offsetX}px`,
               top: `${detail.point_tracking_origin.norm_y * renderRect.renderedH + renderRect.offsetY}px`,
             }}
-            aria-label="追蹤點位置"
+            aria-label="跟住的位置"
           />
         )}
       </div>
 
       {pendingMode === "custom" && !roiDraft && (
         <p className="tracking-target__hint">
-          在縮圖上拖曳以畫出自訂追蹤區域；放開手指即套用。
+          在縮圖上拖曳框出想保留的畫面範圍；放開手指即套用。
         </p>
       )}
       {/* v0.23.1 — full-screen modal handles point picking. The
@@ -497,11 +497,11 @@ export default function AssetTrackingTarget({
          (the modal has its own header copy), so we just show a
          brief "選擇中…" while it's mounted. */}
       {pendingMode === "point" && (
-        <p className="tracking-target__hint">選擇追蹤點…</p>
+        <p className="tracking-target__hint">選擇要跟住的位置…</p>
       )}
       {activeMode === "point" && pendingMode !== "point" && detail.has_point_track && (
         <p className="tracking-target__hint">
-          ✓ 已建立精準像素追蹤；按上方「精準像素」可重點。
+          ✓ 已建立指定位置；按上方「點選位置」可重新選點。
         </p>
       )}
       {activeMode === "object" && (
@@ -536,22 +536,22 @@ export default function AssetTrackingTarget({
           polling effect sees the status flip to ``done`` / ``failed``. */}
       {!busy && detail?.point_tracking_status === "pending" && (
         <p className="tracking-target__busy">
-          精準像素追蹤分析中…（worker 正在跑 LK 光流，較長 / 高解析度的素材需要幾分鐘）
+          正在跟住你點的位置…較長或高解析度素材可能需要幾分鐘。
         </p>
       )}
       {error && (
         <p className="tracking-target__hint tracking-target__hint--err">
-          失敗：{error}
+          無法套用：{error}
         </p>
       )}
       {visibleTracks.length === 0 && (
         <p className="tracking-target__hint">
-          這段素材沒有偵測到可追蹤主體；可改用「自訂區域」或「固定構圖」。
+          這段素材沒有找到明顯主角；可改用「框選區域」或「固定構圖」。
         </p>
       )}
       {visibleTracks.length > 0 && isLegacyTracking(detail) && (
         <p className="tracking-target__hint">
-          這是 v0.17 之前的舊追蹤資料（單主體），重新跑追蹤分析可取得多物件選擇。
+          這是舊版畫面重點資料（單一主角）；重新檢查可取得更多主角選擇。
         </p>
       )}
 

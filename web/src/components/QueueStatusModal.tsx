@@ -7,7 +7,7 @@
 // server view.
 //
 // Used by the header badge (<QueueStatusBadge>) AND by ProjectEdit's
-// "查看排隊" button — both pop the same modal.
+// "查看處理狀態" button — both pop the same modal.
 
 import { useCallback, useEffect, useState } from "react";
 import { ApiError, apiClient } from "../api/client";
@@ -25,12 +25,12 @@ interface QueueStatusModalProps {
 const POLL_INTERVAL_MS = 3000;
 
 const KIND_LABEL: Record<string, string> = {
-  analyze: "分析",
+  analyze: "素材檢查",
   translate: "翻譯",
-  render: "剪輯",
-  export: "匯出",
-  bgm: "AI 配樂",
-  point_track: "精準像素追蹤",
+  render: "產生成品",
+  export: "建立下載版本",
+  bgm: "製作配樂",
+  point_track: "跟住指定位置",
   unknown: "其他",
 };
 
@@ -48,9 +48,9 @@ function fmtWaiting(enqueuedAt: string | null): string {
   const ms = Date.now() - new Date(enqueuedAt).getTime();
   if (ms < 0) return "";
   const s = Math.floor(ms / 1000);
-  if (s < 60) return `已排 ${s} 秒`;
+  if (s < 60) return `已等 ${s} 秒`;
   const m = Math.floor(s / 60);
-  return `已排 ${m} 分`;
+  return `已等 ${m} 分`;
 }
 
 function jobLabel(item: QueueJobItem): string {
@@ -116,7 +116,7 @@ export default function QueueStatusModal({
         await refresh();
       } catch (exc) {
         const msg = exc instanceof ApiError ? exc.message : String(exc);
-        setError(`取消失敗：${msg}`);
+        setError(`取消等待失敗：${msg}`);
       } finally {
         setCancelling(null);
       }
@@ -134,14 +134,14 @@ export default function QueueStatusModal({
       className="queue-modal__backdrop"
       role="dialog"
       aria-modal="true"
-      aria-label="排隊狀態"
+      aria-label="處理狀態"
       onClick={(ev) => {
         if (ev.target === ev.currentTarget) onClose();
       }}
     >
       <div className="queue-modal">
         <header className="queue-modal__head">
-          <h2 className="queue-modal__title">排隊狀態</h2>
+          <h2 className="queue-modal__title">處理狀態</h2>
           <button
             type="button"
             className="queue-modal__close"
@@ -163,10 +163,10 @@ export default function QueueStatusModal({
               setup: 1 analysis + 3 editing + 1 bgm). Pre-0.27 the
               single-worker setup capped this at 1. */}
           <h3 className="queue-modal__section-title">
-            目前處理中（{running.length}）
+            正在處理（{running.length}）
           </h3>
           {running.length === 0 ? (
-            <p className="queue-modal__empty">— 沒有任務在跑</p>
+            <p className="queue-modal__empty">— 目前沒有項目在處理</p>
           ) : (
             <ul className="queue-modal__list">
               {running.map((job) => {
@@ -188,7 +188,7 @@ export default function QueueStatusModal({
                       </span>
                       {isMine && (
                         <span className="queue-modal__row-mine-tag">
-                          你的任務
+                          你的項目
                         </span>
                       )}
                     </div>
@@ -206,10 +206,10 @@ export default function QueueStatusModal({
 
         <section className="queue-modal__section">
           <h3 className="queue-modal__section-title">
-            排隊中（{queued.length}）
+            等待開始（{queued.length}）
           </h3>
           {queued.length === 0 ? (
-            <p className="queue-modal__empty">— 排隊清空</p>
+            <p className="queue-modal__empty">— 沒有等待中的項目</p>
           ) : (
             <ol className="queue-modal__list">
               {queued.map((job) => {
@@ -232,7 +232,7 @@ export default function QueueStatusModal({
                         {jobLabel(job)}
                       </span>
                       {isMine && (
-                        <span className="queue-modal__row-mine-tag">你的任務</span>
+                        <span className="queue-modal__row-mine-tag">你的項目</span>
                       )}
                     </div>
                     <div className="queue-modal__row-meta">
@@ -244,7 +244,7 @@ export default function QueueStatusModal({
                       onClick={() => onCancel(job.job_id)}
                       disabled={cancelling === job.job_id}
                     >
-                      {cancelling === job.job_id ? "取消中…" : "取消"}
+                      {cancelling === job.job_id ? "取消中…" : "取消等待"}
                     </button>
                   </li>
                 );

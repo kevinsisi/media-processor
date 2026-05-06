@@ -126,7 +126,7 @@ export default function Health() {
         <div className="hairline" aria-hidden />
         <div className="meta">
           {error ? (
-            <span className="meta-error">API 錯誤 · {error}</span>
+            <span className="meta-error">服務錯誤 · {error}</span>
           ) : fetchedAgo === null ? (
             <span>查詢中…</span>
           ) : (

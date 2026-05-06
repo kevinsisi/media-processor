@@ -395,13 +395,13 @@ export default function PointPickerModal({
       className="point-picker-modal"
       role="dialog"
       aria-modal="true"
-      aria-label="精準像素追蹤點選擇"
+      aria-label="點選畫面重點"
       onClick={(ev) => {
         if (ev.target === ev.currentTarget) onCancel();
       }}
     >
       <header className="point-picker-modal__head">
-        <span className="point-picker-modal__title">點一下要追蹤的像素</span>
+        <span className="point-picker-modal__title">點一下要跟住的位置</span>
         <span className="point-picker-modal__hint">
           滑鼠滾輪 / 雙指縮放放大；拖曳平移；單擊送出。
         </span>
@@ -462,7 +462,7 @@ export default function PointPickerModal({
           取消
         </button>
         {busy ? (
-          <span className="point-picker-modal__busy">追蹤中…</span>
+          <span className="point-picker-modal__busy">建立中…</span>
         ) : null}
       </footer>
     </div>

@@ -61,10 +61,10 @@ const SOCIAL_EXPORT_PRESETS: SocialExportPreset[] = [
 ];
 
 const STATUS_LABEL: Record<DraftExportStatus, string> = {
-  queued: "排隊中",
-  running: "匯出中",
+  queued: "等待建立",
+  running: "建立中",
   done: "可下載",
-  failed: "失敗",
+  failed: "建立失敗",
 };
 
 function exportKey(aspect: string, height: number): string {
@@ -137,7 +137,7 @@ export default function ExportSheet({ draftId, draftVersion, ready }: ExportShee
           : err instanceof Error
             ? err.message
             : String(err);
-      setError(`匯出失敗：${msg}`);
+      setError(`建立下載版本失敗：${msg}`);
     } finally {
       setSubmittingId(null);
     }
@@ -185,17 +185,17 @@ export default function ExportSheet({ draftId, draftVersion, ready }: ExportShee
           type="button"
           className="cta cta--quiet export-sheet__trigger"
           onClick={() => setOpen(true)}
-          aria-label="匯出 IG / FB 版本"
+          aria-label="建立 IG / FB 版本"
         >
-          匯出 IG / FB 版本
+          建立 IG / FB 版本
         </button>
       ) : (
         <div className="export-sheet__panel" aria-modal="false">
           <div className="export-sheet__head">
             <div>
-              <h3 className="export-sheet__title">匯出 IG / FB 短影音</h3>
+              <h3 className="export-sheet__title">建立 IG / FB 短影音版本</h3>
               <p className="export-sheet__subtitle">
-                選要發佈的平台，系統會用適合的尺寸輸出 v{draftVersion}。
+                選要發佈的平台，系統會用適合的尺寸建立 v{draftVersion} 下載檔。
               </p>
             </div>
             <button
@@ -208,7 +208,7 @@ export default function ExportSheet({ draftId, draftVersion, ready }: ExportShee
             </button>
           </div>
 
-          <div className="export-preset-grid" aria-label="社群平台匯出預設">
+          <div className="export-preset-grid" aria-label="社群平台版本預設">
             {SOCIAL_EXPORT_PRESETS.map((preset) => {
               const existingActive = activeArtifactsByKey.get(
                 exportKey(preset.aspect, preset.height),
@@ -246,7 +246,7 @@ export default function ExportSheet({ draftId, draftVersion, ready }: ExportShee
           </div>
 
           <details className="export-sheet__advanced">
-            <summary>進階：自訂比例與解析度</summary>
+            <summary>進階：自訂社群比例與清晰度</summary>
             <fieldset className="export-sheet__group">
               <legend className="mono">比例</legend>
               <div className="export-sheet__chips">
@@ -308,18 +308,18 @@ export default function ExportSheet({ draftId, draftVersion, ready }: ExportShee
 
           {loadError && (
             <p className="export-sheet__error mono" role="alert">
-              匯出清單讀取失敗：{loadError}
+              版本清單讀取失敗：{loadError}
             </p>
           )}
 
           {latest && !error && (
             <p className="export-sheet__queued mono" aria-live="polite">
-              已排入匯出 #{latest.job_id.slice(0, 6)}…，完成後下方會出現下載鈕。
+              已開始建立 #{latest.job_id.slice(0, 6)}…，完成後下方會出現下載鈕。
             </p>
           )}
 
           <div className="export-sheet__list" aria-live="polite">
-            <h4 className="export-sheet__list-title">已建立的匯出</h4>
+            <h4 className="export-sheet__list-title">已建立的下載版本</h4>
             {artifacts.length === 0 ? (
               <p className="export-sheet__empty mono">尚未建立其他比例。</p>
             ) : (
@@ -368,7 +368,7 @@ export default function ExportSheet({ draftId, draftVersion, ready }: ExportShee
               onClick={() => setOpen(false)}
               disabled={submitting}
             >
-              取消
+              關閉
             </button>
           </div>
         </div>

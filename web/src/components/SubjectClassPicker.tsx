@@ -93,7 +93,7 @@ export default function SubjectClassPicker({
         if (cancelled) return;
         setLoadError(
           err instanceof ApiError
-            ? `載入偵測類別失敗（${err.status}）：${err.message}`
+            ? `載入主角清單失敗（${err.status}）：${err.message}`
             : err instanceof Error
               ? err.message
               : String(err),
@@ -168,9 +168,9 @@ export default function SubjectClassPicker({
 
   if (!project) {
     return (
-      <section className="subject-class" aria-label="主角類別">
+      <section className="subject-class" aria-label="主要拍攝對象">
         <header className="subject-class__head">
-          <h3 className="subject-class__title">主角類別</h3>
+          <h3 className="subject-class__title">主要拍攝對象</h3>
         </header>
         <p className="subject-class__hint mono">載入專案中…</p>
       </section>
@@ -187,9 +187,9 @@ export default function SubjectClassPicker({
     saved !== null && !detectedList.some((d) => d.cls_name === saved);
 
   return (
-    <section className="subject-class" aria-label="主角類別">
+    <section className="subject-class" aria-label="主要拍攝對象">
       <header className="subject-class__head">
-        <h3 className="subject-class__title">主角類別</h3>
+        <h3 className="subject-class__title">主要拍攝對象</h3>
         {saving && (
           <span className="subject-class__saving mono" aria-live="polite">
             儲存中…
@@ -204,12 +204,12 @@ export default function SubjectClassPicker({
       )}
 
       {loading && !loadError && (
-        <p className="subject-class__hint mono">載入偵測類別中…</p>
+        <p className="subject-class__hint mono">載入主角清單中…</p>
       )}
 
       {!loading && !loadError && detectedList.length === 0 && (
         <p className="subject-class__hint mono">
-          請先完成追蹤分析（偵測尚未產出任何類別）。
+          請先完成素材檢查，目前還沒有找到可指定的主角。
         </p>
       )}
 
@@ -221,7 +221,7 @@ export default function SubjectClassPicker({
               value={saved ?? ""}
               disabled={isLocked}
               onChange={handleChange}
-              aria-label="主角類別選單"
+              aria-label="主要拍攝對象選單"
             >
               <option value="">不限（使用所有素材）</option>
               {detectedList.map((d) => (
@@ -238,7 +238,7 @@ export default function SubjectClassPicker({
           </div>
 
           <p className="subject-class__hint mono">
-            選定後，自動剪輯只會用「主角出現的範圍 ± 0.5 秒」；完全沒偵測到主角的素材會被略過。
+            選定後，系統會優先使用主角出現的片段；完全沒有看到主角的素材會被略過。
           </p>
         </>
       )}

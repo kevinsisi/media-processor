@@ -148,7 +148,7 @@ export default function SubtitleEditor({
           : err instanceof Error
             ? err.message
             : String(err);
-      onRebuildError?.(`重新燒入字幕失敗：${msg}`);
+        onRebuildError?.(`用新字幕更新成品失敗：${msg}`);
     } finally {
       setRebuilding(false);
     }
@@ -196,10 +196,10 @@ export default function SubtitleEditor({
         </span>
       </header>
       {locked ? (
-        <p className="sub-editor__hint mono">剪輯進行中，完成後再來編輯字幕</p>
+        <p className="sub-editor__hint mono">成品正在製作中，完成後再來編輯字幕</p>
       ) : (
         <p className="sub-editor__hint mono">
-          點擊文字直接編輯；改完按下「重新燒入字幕」會用新字幕重新渲染。
+          點擊文字直接編輯；改完按下「用新字幕更新成品」會重新產生一版。
         </p>
       )}
       <ol className="sub-editor__list">
@@ -230,7 +230,7 @@ export default function SubtitleEditor({
           onClick={() => void triggerRebuild()}
           disabled={!edited || locked || rebuilding}
         >
-          {rebuilding ? "排隊中…" : "重新燒入字幕"}
+          {rebuilding ? "送出中…" : "用新字幕更新成品"}
         </button>
       </div>
     </section>

@@ -25,12 +25,12 @@ export const MOTION_TAG_LABELS: Record<string, string> = {
 };
 
 export const ANALYSIS_STEP_LABELS: Record<string, string> = {
-  stt: "轉錄",
-  scene: "場景",
-  motion: "運鏡",
-  emotion: "情緒",
-  tracking: "追蹤",
-  coverage: "對稿",
+  stt: "語音文字",
+  scene: "場景重點",
+  motion: "畫面動態",
+  emotion: "情緒氛圍",
+  tracking: "主角位置",
+  coverage: "腳本對照",
 };
 
 // v0.16 — YOLO/COCO subject class names → Chinese labels for the
@@ -129,11 +129,11 @@ export function labelForTrackingSubject(name: string | null | undefined): string
 // v0.17 / v0.23 — tracking-target picker modes.
 export const TRACKING_MODE_LABELS: Record<string, string> = {
   auto: "自動",
-  object: "指定物件",
-  point: "精準像素",
-  custom: "自訂區域",
+  object: "指定主角",
+  point: "點選位置",
+  custom: "框選區域",
   fixed: "固定構圖",
-  none: "不追蹤",
+  none: "不跟主角",
 };
 
 export function labelForTrackingMode(mode: string): string {
@@ -180,8 +180,8 @@ export const EDIT_STEP_LABELS: Record<string, string> = {
 };
 
 export const DRAFT_STATUS_LABELS: Record<string, string> = {
-  pending: "排隊中",
-  processing: "剪輯中",
+  pending: "等待開始",
+  processing: "製作中",
   ready_for_review: "完成",
   approved: "已採用",
   rejected: "已退回",
@@ -208,15 +208,15 @@ export function labelForCutSource(value: string | null | undefined): string {
 
 // Top-level asset status pills.
 export const ASSET_STATUS_LABELS: Record<string, string> = {
-  pending: "待分析",
-  analyzing: "分析中",
-  analyzed: "已分析",
-  analysis_failed: "分析失敗",
+  pending: "待檢查",
+  analyzing: "檢查中",
+  analyzed: "可使用",
+  analysis_failed: "檢查有問題",
 };
 
 // Per-step status pills (the values stored in analysis_steps_json).
 export const STEP_STATE_LABELS: Record<string, string> = {
-  pending: "等待",
+  pending: "等待檢查",
   running: "進行中",
   done: "完成",
 };

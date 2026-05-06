@@ -69,7 +69,7 @@ export default function QueueStatusBadge() {
       ? "狀態未知"
       : runningCount > 0
       ? `處理中 ${runningCount} +${queuedCount}`
-      : `排隊 ${queuedCount}`;
+      : `等待 ${queuedCount}`;
 
   return (
     <>
@@ -79,10 +79,10 @@ export default function QueueStatusBadge() {
         onClick={() => setOpen(true)}
         aria-label={
           error !== null
-            ? `排隊狀態無法取得：${error}`
-            : `排隊狀態：${label}（共 ${totalDepth} 個任務）`
+            ? `處理狀態無法取得：${error}`
+            : `處理狀態：${label}（共 ${totalDepth} 個項目）`
         }
-        title={error !== null ? `排隊狀態無法取得：${error}` : "點擊查看排隊"}
+        title={error !== null ? `處理狀態無法取得：${error}` : "點擊查看處理狀態"}
       >
         {runningCount > 0 && (
           <span className="queue-badge__pulse" aria-hidden="true" />
