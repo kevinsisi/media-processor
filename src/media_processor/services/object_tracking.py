@@ -27,8 +27,9 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass, field
+from importlib import import_module
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
@@ -278,6 +279,17 @@ def _fake_result(src_w: int = 1920, src_h: int = 1080, duration_ms: int = 5_000)
 _MODEL_CACHE: dict[str, Any] = {}
 
 
+def _load_yolo_class() -> Any:
+    try:
+        module = cast(Any, import_module("ultralytics"))
+    except ImportError as exc:  # pragma: no cover — install-time guard
+        raise TrackingUnavailableError(f"ultralytics not installed: {exc}") from exc
+    try:
+        return module.YOLO
+    except AttributeError as exc:  # pragma: no cover — dependency contract guard
+        raise TrackingUnavailableError("ultralytics.YOLO is unavailable") from exc
+
+
 def _resolve_model_path(model_id: str) -> Path:
     """Return a local path to the YOLO weights, downloading on miss."""
     TRACKING_MODEL_DIR.mkdir(parents=True, exist_ok=True)
@@ -287,14 +299,11 @@ def _resolve_model_path(model_id: str) -> Path:
     # ultralytics' YOLO() will auto-download to its cache (current dir
     # by default). Pull straight into our cache dir so the next worker
     # boot finds it.
-    try:
-        from ultralytics import YOLO  # type: ignore[attr-defined]
-    except ImportError as exc:  # pragma: no cover — install-time guard
-        raise TrackingUnavailableError(f"ultralytics not installed: {exc}") from exc
+    yolo_class = _load_yolo_class()
     cwd = Path.cwd()
     try:
         os.chdir(TRACKING_MODEL_DIR)
-        YOLO(model_id)  # triggers download → cwd / model_id
+        yolo_class(model_id)  # triggers download → cwd / model_id
     finally:
         os.chdir(cwd)
     if not target.is_file():
@@ -306,12 +315,9 @@ def _load_model(model_id: str) -> Any:
     cached = _MODEL_CACHE.get(model_id)
     if cached is not None:
         return cached
-    try:
-        from ultralytics import YOLO  # type: ignore[attr-defined]
-    except ImportError as exc:  # pragma: no cover — install-time guard
-        raise TrackingUnavailableError(f"ultralytics not installed: {exc}") from exc
+    yolo_class = _load_yolo_class()
     path = _resolve_model_path(model_id)
-    model = YOLO(str(path))
+    model = yolo_class(str(path))
     _MODEL_CACHE[model_id] = model
     logger.info("YOLO model loaded: %s", path)
     return model
