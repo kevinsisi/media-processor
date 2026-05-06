@@ -921,8 +921,7 @@ def _drawtext_escape(text: str) -> str:
     text = text.replace("'", "\\'")
     text = text.replace(":", "\\:")
     text = text.replace("%", "\\%")
-    text = text.replace("\n", "\\n")
-    return text
+    return text.replace("\n", "\\n")
 
 
 def _resolve_subtitle_style(

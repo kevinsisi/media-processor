@@ -18,7 +18,12 @@ from media_processor.api.routers.assets import thumbnail_urls_for_asset
 from media_processor.api.routers.drafts import _draft_url, _expected_draft_path
 from media_processor.api.routers.watermark_presets import _load_preset_for_apply
 from media_processor.api.schemas import (
+    AffectedDraftOut,
     AssetAnalysisItem,
+    AssetBatchDeleteOut,
+    AssetBatchDeleteRequest,
+    AssetBatchDeleteResultItem,
+    BgmFadeOutPatch,
     CoverageSummaryOut,
     DetectedClassOut,
     DraftSummary,
@@ -35,11 +40,6 @@ from media_processor.api.schemas import (
     ScriptOut,
     ScriptUpsert,
     SecondarySubtitleSummaryOut,
-    AffectedDraftOut,
-    AssetBatchDeleteOut,
-    AssetBatchDeleteRequest,
-    AssetBatchDeleteResultItem,
-    BgmFadeOutPatch,
     SubjectClassPatch,
     SubtitleStylePatch,
     TrackingSummaryOut,

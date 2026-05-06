@@ -22,7 +22,6 @@ from media_processor.api.main import app as production_app
 from media_processor.api.routers import projects as projects_router
 from media_processor.models import Asset, Base, Draft, Project
 
-
 # (project_id, draft_id, force, target_duration_ms)
 EnqueueCall = tuple[int, int, bool, int | None]
 

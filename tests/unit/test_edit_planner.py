@@ -484,8 +484,8 @@ def test_assemble_plan_tops_up_to_target() -> None:
     """
     from media_processor.services.edit_planner import (
         TRANSITION_DEFAULT,
-        _AssetScore,
         _assemble_plan,
+        _AssetScore,
     )
 
     scores: list[_AssetScore] = []

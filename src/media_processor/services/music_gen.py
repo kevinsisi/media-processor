@@ -17,6 +17,7 @@ import logging
 import os
 import struct
 import wave
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -176,10 +177,8 @@ def generate(
     # paths produce ``probability tensor contains either inf, nan``
     # during the multinomial sampling step on Ampere / Turing cards
     # (RTX 2070 hits this consistently). fp32 sidesteps it entirely.
-    try:
+    with suppress(Exception):
         model = model.to(torch.float32)  # type: ignore[union-attr]
-    except Exception:  # noqa: BLE001
-        pass
     device = next(model.parameters()).device  # type: ignore[union-attr]
 
     # padding=True yields the attention_mask the generate loop needs
@@ -226,25 +225,25 @@ def generate(
     # less faithful. We try strongest guidance first and step down on
     # NaN, ending at ``guidance_scale=1.0`` (CFG fully off) which is
     # numerically rock-solid.
-    SAMPLING_ATTEMPTS = [
+    sampling_attempts = [
         # Strict prompt adherence; usually works on second-or-later
         # generations after the model warms up.
-        dict(do_sample=True, guidance_scale=3.0, temperature=1.0, top_k=250),
+        {"do_sample": True, "guidance_scale": 3.0, "temperature": 1.0, "top_k": 250},
         # Loose prompt adherence; combats NaN by halving the unguided
         # contribution.
-        dict(do_sample=True, guidance_scale=1.5, temperature=1.0, top_k=250),
+        {"do_sample": True, "guidance_scale": 1.5, "temperature": 1.0, "top_k": 250},
         # No CFG — sampler sees only the guided forward pass, which
         # never NaN'd in our soak. Bonus: slightly faster (one forward
         # per token instead of two). top_k=250 keeps the distribution
         # broad enough that the LM doesn't collapse into low-energy
         # decoder regions (top_k=50 + top_p=0.95 produced 1 s of music
         # then silence on this hardware).
-        dict(do_sample=True, guidance_scale=1.0, temperature=1.0, top_k=250),
+        {"do_sample": True, "guidance_scale": 1.0, "temperature": 1.0, "top_k": 250},
     ]
 
     audio_values: object | None = None
     last_exc: Exception | None = None
-    for attempt_idx, params in enumerate(SAMPLING_ATTEMPTS, start=1):
+    for attempt_idx, params in enumerate(sampling_attempts, start=1):
         try:
             with torch.no_grad():
                 audio_values = model.generate(  # type: ignore[union-attr]
@@ -257,7 +256,7 @@ def generate(
                 logger.info(
                     "MusicGen succeeded on attempt %d/%d with %r",
                     attempt_idx,
-                    len(SAMPLING_ATTEMPTS),
+                    len(sampling_attempts),
                     params,
                 )
             break
@@ -267,7 +266,7 @@ def generate(
                 logger.warning(
                     "MusicGen attempt %d/%d hit NaN/Inf with %r; trying next",
                     attempt_idx,
-                    len(SAMPLING_ATTEMPTS),
+                    len(sampling_attempts),
                     params,
                 )
                 last_exc = exc
@@ -280,7 +279,7 @@ def generate(
         # it just produces identical garbage across prompts. Surface
         # the error so the BGM gen job is marked failed.
         raise MusicGenError(
-            f"MusicGen inference failed after {len(SAMPLING_ATTEMPTS)} sampling "
+            f"MusicGen inference failed after {len(sampling_attempts)} sampling "
             f"attempts at descending guidance levels: {last_exc}"
         )
 
