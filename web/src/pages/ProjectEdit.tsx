@@ -1286,6 +1286,19 @@ export default function ProjectEdit() {
   const showQueued = !draft && !seedLoading && (triggering || awaitingFirstFetch);
   const showInitial =
     !seedLoading && !triggering && !awaitingFirstFetch && drafts.length === 0;
+  // Safety net: any draft status the four explicit cards above don't
+  // recognise (approved / rejected / legacy values added later) used to
+  // render zero actionable UI — the operator was stuck with no way to
+  // produce a new version. Render the same trigger surface as
+  // showInitial so they always have a path forward.
+  const showFallback =
+    !seedLoading
+    && !triggering
+    && !awaitingFirstFetch
+    && drafts.length > 0
+    && !showProcessing
+    && !showReady
+    && !showFailed;
   const analysisBlocked = analysisStatus !== null && !analysisStatus.allDone;
   const publishingChecklist = useMemo(() => {
     if (!draft) return [];
@@ -1788,6 +1801,61 @@ export default function ProjectEdit() {
           </section>
         );
       })()}
+
+      {showFallback && (
+        <section className="edit-card">
+          <h2 className="edit-card__title">再產生一版短影音</h2>
+          <p className="edit-card__body">
+            目前選取的版本（v{selectedSummary?.version ?? "?"}，{
+              selectedSummary
+                ? labelForDraftStatus(selectedSummary.status)
+                : "未知狀態"
+            }）沒有額外動作可以執行。如需建立新的版本，可調整下方設定後重新產生。
+          </p>
+          <EditSettingsBlock
+            durationSec={durationSec}
+            setDurationSec={setDurationSec}
+            stylePreset={stylePreset}
+            setStylePreset={setStylePreset}
+            stabilize={stabilize}
+            setStabilize={setStabilize}
+            subtitlesOn={subtitlesOn}
+            setSubtitlesOn={setSubtitlesOn}
+            transitionsOn={transitionsOn}
+            setTransitionsOn={setTransitionsOn}
+            autoReframe={autoReframe}
+            setAutoReframe={setAutoReframe}
+            smartCamera={smartCamera}
+            setSmartCamera={handleSmartCameraChange}
+            triggering={triggering}
+            validProjectId={validProjectId}
+            project={project}
+            setProject={setProject}
+            currentBgmSource={currentBgmSource}
+            setCurrentBgmSource={setCurrentBgmSource}
+            cropDirection={cropDirection}
+          />
+          <div className="edit-card__actions">
+            <button
+              type="button"
+              className="cta cta--primary"
+              onClick={() => void handleStartEdit(true)}
+              disabled={triggering || analysisBlocked}
+              title={
+                analysisBlocked
+                  ? "等待素材檢查完成後即可重新產生"
+                  : undefined
+              }
+            >
+              {triggering
+                ? "送出中…"
+                : analysisBlocked
+                  ? `素材檢查中（剩 ${analysisStatus?.inFlight ?? 0} 項）`
+                  : `產生 ${durationSec} 秒短影音`}
+            </button>
+          </div>
+        </section>
+      )}
 
       {selectedDraftId !== null && <DraftComments draftId={selectedDraftId} />}
 

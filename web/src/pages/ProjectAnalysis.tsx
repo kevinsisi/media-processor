@@ -1204,10 +1204,15 @@ export default function ProjectAnalysis() {
           <Link to="/" className="cta cta--quiet">
             專案清單
           </Link>
-          {(allAssetsTerminal || latestDraft) && (
+          {assets.length > 0 && (
             <Link
               to={`/projects/${validProjectId}/edit`}
               className="cta cta--primary"
+              title={
+                !allAssetsTerminal && !latestDraft
+                  ? "前往剪輯頁；尚未檢查完成的素材會在剪輯頁顯示提示"
+                  : undefined
+              }
             >
               {editLabel}
             </Link>
