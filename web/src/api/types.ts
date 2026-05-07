@@ -98,6 +98,21 @@ export interface ProjectDetail {
   // mounts a CropRegionPicker only when the project has at least one
   // analysed asset whose orientation disagrees with target_aspect_ratio.
   crop_region?: CropRegion | null;
+  // v0.30.0 — opt-in AI Smart Camera. Persistent project toggle the
+  // FE renders as an experimental-feature checkbox. Default ``false``
+  // (the entire feature is opt-in by design; running smart camera
+  // costs extra Gemini quota and the resulting moves can surprise
+  // operators who wanted a static camera). Mutually exclusive with
+  // vidstab > auto-reframe / point-tracking; smart camera wins over
+  // emotion zoompan when both could fire.
+  smart_camera_enabled?: boolean;
+}
+
+// v0.30.0 — body for ``PATCH /projects/{id}/smart-camera``. Single
+// boolean — there's no third "inherit" state at the project level;
+// the per-render override lives on EditTriggerRequest.
+export interface SmartCameraPatch {
+  enabled: boolean;
 }
 
 // v0.29.0 — fraction-of-source crop anchor. (0.5, 0.5) is centre;
@@ -329,6 +344,10 @@ export interface EditTriggerRequest {
   // back to the static centered crop so leaving this on is safe even
   // on partially analyzed projects.
   auto_reframe?: boolean;
+  // v0.30.0 — opt-in AI Smart Camera per-run override. ``null`` /
+  // omitted = inherit ``Project.smart_camera_enabled``; explicit
+  // ``true`` / ``false`` overrides for this single render.
+  smart_camera?: boolean | null;
   // v0.18 — clip-style preset. ``custom`` (default) keeps legacy
   // free-form behaviour; the four named presets steer span / transition
   // / BGM hint together so the user gets a coherent rhythm.
@@ -371,6 +390,10 @@ export interface RenderFlagsOverride {
   stabilize?: boolean;
   subtitles?: boolean;
   auto_reframe?: boolean;
+  // v0.30.0 — opt-in AI Smart Camera flag for the skip-plan
+  // re-render endpoints. Same priority semantics as the others:
+  // body > snapshot > false (legacy default).
+  smart_camera?: boolean;
 }
 
 export interface DraftReorderRequest {

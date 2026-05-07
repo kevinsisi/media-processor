@@ -88,6 +88,8 @@ _LEGACY_FLAG_DEFAULTS: dict[str, bool] = {
     "stabilize": True,
     "subtitles": True,
     "auto_reframe": True,
+    # v0.30.0 — opt-in smart camera; legacy rows default to off.
+    "smart_camera": False,
 }
 
 
@@ -209,6 +211,7 @@ async def _handle_orphan(session: Any, draft: Draft) -> None:
             stabilize=flags["stabilize"],
             subtitles=flags["subtitles"],
             auto_reframe=flags["auto_reframe"],
+            smart_camera=flags["smart_camera"],
             style_preset=str(draft.style_preset or "custom"),
         )
     except Exception:  # noqa: BLE001 — Redis enqueue failed; revert.

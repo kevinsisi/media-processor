@@ -283,6 +283,17 @@ class CutPlanSegment:
     # was actually visible during the cut, not just somewhere in the
     # asset. Read alongside ``dominant_motion`` by the renderer.
     has_face: bool = False
+    # v0.30.0 — opt-in AI Smart Camera directive. ``None`` = no camera
+    # move (the renderer falls through to the historical static aspect
+    # crop / emotion zoompan path). When the orchestrator's smart-camera
+    # stage runs and Gemini Vision returns usable focus_regions, this
+    # holds a serialised dict produced by
+    # ``services.smart_camera_planner._serialise_directive`` — see that
+    # module for the schema. Stored as a free-form ``dict`` so the
+    # renderer can read it without the planner module having to import
+    # the smart-camera dataclass (keeps the module-import graph
+    # one-way).
+    smart_camera_json: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -1701,6 +1712,10 @@ def serialise_plan(plan_obj: CutPlan) -> dict[str, Any]:
                 "dominant_emotion": s.dominant_emotion,
                 "dominant_motion": s.dominant_motion,
                 "has_face": s.has_face,
+                # v0.30.0 — opt-in smart camera directive. ``None`` for
+                # legacy / unscanned segments; the renderer treats
+                # ``None`` as "no camera move".
+                "smart_camera_json": s.smart_camera_json,
             }
             for s in plan_obj.segments
         ],
@@ -1731,6 +1746,14 @@ def deserialise_plan(blob: dict[str, Any]) -> CutPlan:
                 dominant_emotion=str(seg.get("dominant_emotion", EMOTION_DEFAULT)),
                 dominant_motion=str(seg.get("dominant_motion", _MOTION_DEFAULT)),
                 has_face=bool(seg.get("has_face", False)),
+                # v0.30.0 — preserve ``None`` distinctly from a missing
+                # key so legacy plans (no key) and scanned-but-no-move
+                # segments (explicit ``None``) round-trip the same way.
+                smart_camera_json=(
+                    dict(seg["smart_camera_json"])
+                    if isinstance(seg.get("smart_camera_json"), dict)
+                    else None
+                ),
             )
         )
     segments.sort(key=lambda s: s.order)

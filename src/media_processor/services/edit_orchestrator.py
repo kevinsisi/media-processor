@@ -35,7 +35,13 @@ from media_processor.models import (
     SubtitleCueRow,
 )
 from media_processor.profile.loader import ProfileSpec, load_profile
-from media_processor.services import bgm_mixer, edit_planner, subtitles, video_renderer
+from media_processor.services import (
+    bgm_mixer,
+    edit_planner,
+    smart_camera_planner,
+    subtitles,
+    video_renderer,
+)
 from media_processor.services.edit_planner import CutPlan
 from media_processor.services.settings_store import get_llm_api_keys
 
@@ -270,6 +276,46 @@ async def _snapshot_draft_bgm_path(draft_id: int, project_bgm_path: str | None) 
             draft.bgm_path = project_bgm_path
             await session.commit()
         return draft.bgm_path
+
+
+def _resolve_smart_camera_flag(
+    project: Project,
+    override: bool | None,
+) -> bool:
+    """Pick the effective AI Smart Camera flag.
+
+    Priority (highest first):
+      1. Explicit ``override`` kwarg — populated from the
+         ``EditTriggerRequest.smart_camera`` body field by the API
+         endpoint. Distinguishes "user toggled it off for this run"
+         from "user didn't touch the toggle".
+      2. ``Project.smart_camera_enabled`` — the persistent project
+         toggle the user flipped on the project edit page.
+
+    v0.24.0 ``voice_volume = 0`` taught us not to use ``or`` on
+    nullable booleans — a body value of ``False`` is meaningful
+    (explicit opt-out) and must be preserved.
+    """
+    if override is not None:
+        return bool(override)
+    return bool(getattr(project, "smart_camera_enabled", False))
+
+
+async def _restore_plan_blob(handle: _DraftHandle, plan: CutPlan) -> None:
+    """Re-serialise a plan back onto ``Draft.cut_plan_json`` after the
+    smart-camera stage decorated each segment. Doesn't touch
+    ``DraftSegment`` rows because the segment shape (asset / span /
+    order) is unchanged — only the ``smart_camera_json`` decoration
+    inside the JSON blob differs.
+    """
+    async with async_session_maker() as session:
+        draft = await session.get(Draft, handle.draft_id)
+        if draft is None:
+            return
+        if draft.status not in (DraftStatus.PENDING.value, DraftStatus.PROCESSING.value):
+            return
+        draft.cut_plan_json = edit_planner.serialise_plan(plan)
+        await session.commit()
 
 
 async def _persist_plan(handle: _DraftHandle, plan: CutPlan) -> None:
@@ -595,6 +641,7 @@ async def run_render(
     subtitles_enabled: bool = True,
     transitions_enabled: bool = False,
     auto_reframe_enabled: bool = True,
+    smart_camera_enabled: bool | None = None,
     style_preset: str = "custom",
 ) -> dict[str, Any]:
     """Run the full M5 pipeline for ``project_id`` and return a summary.
@@ -703,6 +750,54 @@ async def run_render(
         point_track_by_asset,
         secondary_segments_by_asset,
     ) = await _gather_render_inputs(project_id)
+
+    # v0.30.0 — opt-in AI Smart Camera stage. Resolves the project
+    # toggle + render-flag override (priority: explicit kwarg from
+    # caller > project.smart_camera_enabled > False), then runs
+    # ``smart_camera_planner.plan_smart_camera`` against the cut
+    # plan when enabled. Failures are partial-success (BGM stage
+    # contract) — a Gemini error on cut N just means cut N renders
+    # without a camera move.
+    smart_camera_active = _resolve_smart_camera_flag(project, smart_camera_enabled)
+    if smart_camera_active and not skip_plan and plan.segments:
+        try:
+            async with async_session_maker() as session:
+                api_keys = await get_llm_api_keys(session)
+            if api_keys:
+                directives = await smart_camera_planner.plan_smart_camera(
+                    plan,
+                    asset_paths,
+                    api_keys=api_keys,
+                    model=settings.llm_model,
+                    base_url=_GEMINI_BASE_URL,
+                    timeout_s=settings.llm_timeout_s,
+                    scratch_dir=Path(settings.analysis_dir) / "smart_camera" / str(handle.draft_id),
+                )
+                if directives:
+                    plan = smart_camera_planner.apply_smart_camera_to_plan(plan, directives)
+                    await _restore_plan_blob(handle, plan)
+                    logger.info(
+                        "draft %d: smart-camera applied to %d/%d cuts",
+                        handle.draft_id,
+                        len(directives),
+                        len(plan.segments),
+                    )
+                else:
+                    logger.info(
+                        "draft %d: smart-camera ran but produced no directives",
+                        handle.draft_id,
+                    )
+            else:
+                logger.warning(
+                    "draft %d: smart-camera enabled but no LLM_API_KEYS configured",
+                    handle.draft_id,
+                )
+        except Exception:  # noqa: BLE001 — never let smart-camera fail the render.
+            logger.exception(
+                "draft %d: smart-camera stage failed; rendering without camera moves",
+                handle.draft_id,
+            )
+
     if not subtitles_enabled:
         srt_text = ""
         secondary_srt_text = ""
@@ -861,6 +956,7 @@ async def run_render(
             custom_roi_by_asset=custom_roi_by_asset if auto_reframe_enabled else None,
             point_track_by_asset=point_track_by_asset if auto_reframe_enabled else None,
             crop_region=crop_region_tuple,
+            smart_camera_enabled=smart_camera_active,
             subtitle_style=subtitle_style if subtitles_enabled else None,
             on_progress=_sync_progress,
         )
