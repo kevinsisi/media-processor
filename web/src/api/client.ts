@@ -46,6 +46,7 @@ import type {
   SegmentVolumeOut,
   SegmentVolumePatch,
   SettingsOut,
+  SmartCameraPatch,
   SubjectClassPatch,
   SubtitleCueOut,
   SubtitleCuePatch,
@@ -179,6 +180,25 @@ export class ApiClient {
   ): Promise<ProjectDetail> {
     return this.request<ProjectDetail>(
       `/projects/${projectId}/crop-region`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  // v0.30.0 — flip the persistent AI Smart Camera toggle. Default
+  // ``false`` (opt-in feature). Per-run overrides ride on
+  // EditTriggerRequest.smart_camera; this PATCH is the cheap durable
+  // setting the FE writes when the operator ticks the experimental
+  // checkbox.
+  patchProjectSmartCamera(
+    projectId: number,
+    payload: SmartCameraPatch,
+  ): Promise<ProjectDetail> {
+    return this.request<ProjectDetail>(
+      `/projects/${projectId}/smart-camera`,
       {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },

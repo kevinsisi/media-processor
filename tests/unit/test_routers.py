@@ -308,6 +308,22 @@ def test_patch_project_crop_region_round_trip(app: FastAPI) -> None:
     assert clear_resp.json()["crop_region"] is None
 
 
+def test_patch_project_smart_camera_round_trip(app: FastAPI) -> None:
+    """v0.30.0 — flip the persistent AI Smart Camera toggle."""
+    client = TestClient(app)
+    # Default off — opt-in feature.
+    detail = client.get("/projects/1").json()
+    assert detail["smart_camera_enabled"] is False
+
+    on_resp = client.patch("/projects/1/smart-camera", json={"enabled": True})
+    assert on_resp.status_code == 200, on_resp.text
+    assert on_resp.json()["smart_camera_enabled"] is True
+
+    off_resp = client.patch("/projects/1/smart-camera", json={"enabled": False})
+    assert off_resp.status_code == 200, off_resp.text
+    assert off_resp.json()["smart_camera_enabled"] is False
+
+
 def test_patch_project_crop_region_rejects_partial_payload(app: FastAPI) -> None:
     """v0.29.0 — mixed null + value must 400; storing a half-anchor
     would leave the renderer guessing."""

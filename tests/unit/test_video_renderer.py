@@ -216,6 +216,173 @@ def test_should_zoompan_skips_non_dynamic_emotion() -> None:
     assert video_renderer._should_zoompan(cut) is False
 
 
+# ----- v0.30.0 — AI Smart Camera filter -----
+
+
+def test_smart_camera_filter_zoom_in_emits_zoompan() -> None:
+    """zoom_in directive lands as a zoompan filter with the canvas dims."""
+    chain = video_renderer._smart_camera_filter(
+        {
+            "kind": "zoom_in",
+            "from_rect": [0.0, 0.0, 1.0, 1.0],
+            "to_rect": [0.30, 0.30, 0.40, 0.40],
+            "ease": "linear",
+        },
+        "9:16",
+        duration_s=2.0,
+    )
+    assert chain is not None
+    assert "zoompan=" in chain
+    assert "s=1080x1920" in chain
+    # d=1 mirrors the M8.1 emotion-zoompan fix so the underlying
+    # video keeps playing while the camera moves.
+    assert ":d=1:" in chain or chain.endswith(":d=1") or ":d=1," in chain
+
+
+def test_smart_camera_filter_pan_uses_constant_zoom() -> None:
+    """Pan keeps zoom constant — no interpolation expression needed for z."""
+    chain = video_renderer._smart_camera_filter(
+        {
+            "kind": "pan",
+            "from_rect": [0.0, 0.40, 0.20, 0.20],
+            "to_rect": [0.80, 0.40, 0.20, 0.20],
+            "ease": "linear",
+        },
+        "16:9",
+        duration_s=3.0,
+    )
+    assert chain is not None
+    assert "zoompan=" in chain
+    assert "s=1920x1080" in chain
+
+
+def test_smart_camera_filter_rejects_malformed_directive() -> None:
+    """Bad inputs return None so the renderer falls back to the static path."""
+    assert video_renderer._smart_camera_filter({}, "9:16", 1.0) is None
+    assert (
+        video_renderer._smart_camera_filter(
+            {"kind": "wibble", "from_rect": [0, 0, 1, 1], "to_rect": [0, 0, 1, 1]},
+            "9:16",
+            1.0,
+        )
+        is None
+    )
+    # Out-of-range rect coords are rejected, not silently clamped past 1.
+    assert (
+        video_renderer._smart_camera_filter(
+            {"kind": "zoom_in", "from_rect": [0, 0, 1, 1], "to_rect": [0, 0, 5, 5]},
+            "9:16",
+            1.0,
+        )
+        is None
+    )
+
+
+def test_smart_camera_filter_uses_exp_ease_when_requested() -> None:
+    """ease=exp injects an exp-shaped progress expression."""
+    chain = video_renderer._smart_camera_filter(
+        {
+            "kind": "zoom_in",
+            "from_rect": [0.0, 0.0, 1.0, 1.0],
+            "to_rect": [0.40, 0.40, 0.20, 0.20],
+            "ease": "exp",
+        },
+        "9:16",
+        duration_s=2.0,
+    )
+    assert chain is not None
+    assert "exp(" in chain  # exp ease curve appears in the progress expr.
+
+
+def test_smart_camera_overrides_emotion_zoompan(tmp_path: Path) -> None:
+    """When a smart-camera directive is present AND the cut is also
+    eligible for emotion zoompan (happy + face), smart-camera wins.
+    Test guarantees the renderer's internal mutex picks the smart-
+    camera filter for that cut without raising."""
+    src = tmp_path / "asset.mp4"
+    src.write_bytes(b"fake")
+    plan = CutPlan(
+        schema_version="m5.cut-plan.v1",
+        target_duration_ms=1_000,
+        target_aspect_ratio="9:16",
+        profile_name="universal",
+        segments=(
+            CutPlanSegment(
+                0,
+                1,
+                0,
+                1_000,
+                "improv",
+                "",
+                dominant_emotion="happy",
+                dominant_motion="static",
+                has_face=True,
+                smart_camera_json={
+                    "kind": "zoom_in",
+                    "from_rect": [0.0, 0.0, 1.0, 1.0],
+                    "to_rect": [0.30, 0.30, 0.40, 0.40],
+                    "ease": "linear",
+                },
+            ),
+        ),
+    )
+    out_dir = tmp_path / "out"
+    paths, reframed = video_renderer.cut_segments(
+        plan,
+        asset_paths={1: src},
+        intermediate_dir=out_dir,
+        target_aspect="9:16",
+        smart_camera_enabled=True,
+    )
+    assert len(paths) == 1
+    assert paths[0].is_file()
+    # Smart camera does NOT route through the auto-reframe sendcmd
+    # path, so reframed_flags stays False.
+    assert reframed == [False]
+
+
+def test_smart_camera_skipped_when_stabilize_active(tmp_path: Path) -> None:
+    """vidstab > smart camera mutex: when stabilize is on, the smart-
+    camera filter must be skipped (vidstab rewrites in_w/in_h, layering
+    crop on top blows up — v0.23.4 root cause)."""
+    src = tmp_path / "asset.mp4"
+    src.write_bytes(b"fake")
+    plan = CutPlan(
+        schema_version="m5.cut-plan.v1",
+        target_duration_ms=1_000,
+        target_aspect_ratio="9:16",
+        profile_name="universal",
+        segments=(
+            CutPlanSegment(
+                0,
+                1,
+                0,
+                1_000,
+                "improv",
+                "",
+                smart_camera_json={
+                    "kind": "zoom_in",
+                    "from_rect": [0.0, 0.0, 1.0, 1.0],
+                    "to_rect": [0.30, 0.30, 0.40, 0.40],
+                    "ease": "linear",
+                },
+            ),
+        ),
+    )
+    out_dir = tmp_path / "out"
+    # Both flags on → mutex picks vidstab, smart camera filter is suppressed.
+    paths, reframed = video_renderer.cut_segments(
+        plan,
+        asset_paths={1: src},
+        intermediate_dir=out_dir,
+        target_aspect="9:16",
+        smart_camera_enabled=True,
+        stabilize_enabled=True,
+    )
+    assert len(paths) == 1
+    assert reframed == [False]
+
+
 def test_circlecrop_in_transition_whitelist() -> None:
     """Phase 8.1 — emotion-shift transitions resolve to circlecrop, not the default."""
     assert "circlecrop" in video_renderer.VALID_TRANSITIONS

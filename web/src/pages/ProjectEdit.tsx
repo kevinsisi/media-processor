@@ -470,6 +470,8 @@ interface RenderOptionsProps {
   setTransitionsOn: (v: boolean) => void;
   autoReframe: boolean;
   setAutoReframe: (v: boolean) => void;
+  smartCamera: boolean;
+  setSmartCamera: (v: boolean) => void;
   disabled?: boolean;
 }
 
@@ -482,6 +484,8 @@ function RenderOptions({
   setTransitionsOn,
   autoReframe,
   setAutoReframe,
+  smartCamera,
+  setSmartCamera,
   disabled,
 }: RenderOptionsProps) {
   return (
@@ -512,6 +516,13 @@ function RenderOptions({
         hint="建立直式或方形影片時，系統會盡量讓人物、車或商品留在畫面中間。"
         value={autoReframe}
         onChange={setAutoReframe}
+        disabled={disabled}
+      />
+      <EditOptionToggle
+        label="AI 智慧運鏡（實驗性）"
+        hint="啟用後重新產生時會多打一次 Gemini 規劃鏡頭運動。可能蓋過情緒縮放；與穩定畫面、跟住主角同時開啟時會自動退讓。"
+        value={smartCamera}
+        onChange={setSmartCamera}
         disabled={disabled}
       />
     </div>
@@ -652,6 +663,8 @@ interface EditSettingsBlockProps {
   setTransitionsOn: (v: boolean) => void;
   autoReframe: boolean;
   setAutoReframe: (v: boolean) => void;
+  smartCamera: boolean;
+  setSmartCamera: (v: boolean) => void;
   triggering: boolean;
   validProjectId: number;
   project: ProjectDetail | null;
@@ -705,6 +718,8 @@ function EditSettingsBlock(props: EditSettingsBlockProps) {
           setTransitionsOn={props.setTransitionsOn}
           autoReframe={props.autoReframe}
           setAutoReframe={props.setAutoReframe}
+          smartCamera={props.smartCamera}
+          setSmartCamera={props.setSmartCamera}
           disabled={props.triggering}
         />
       </SettingsGroup>
@@ -851,6 +866,11 @@ export default function ProjectEdit() {
   // without tracking_json, so leaving this on is safe even on a half-
   // analyzed project.
   const [autoReframe, setAutoReframe] = useState<boolean>(true);
+  // v0.30.0 — opt-in AI Smart Camera. Default off; we sync to the
+  // persistent ``Project.smart_camera_enabled`` once the project
+  // detail loads (see effect below). Toggling the checkbox PATCHes
+  // the project so the value persists across page reloads.
+  const [smartCamera, setSmartCamera] = useState<boolean>(false);
   // v0.18 — clip-style preset (fast / slow / commercial / artistic /
   // custom). ``custom`` is the legacy free-form default.
   const [stylePreset, setStylePreset] = useState<ClipStylePreset>("custom");
@@ -944,7 +964,13 @@ export default function ProjectEdit() {
     (async () => {
       try {
         const p = await apiClient.fetchProject(validProjectId);
-        if (!cancelled) setProject(p);
+        if (!cancelled) {
+          setProject(p);
+          // v0.30.0 — seed the AI Smart Camera checkbox from the
+          // persistent project toggle. Renders unchecked by default
+          // for legacy projects whose backend pre-dates the column.
+          setSmartCamera(Boolean(p.smart_camera_enabled));
+        }
       } catch {
         // tolerate
       }
@@ -1107,6 +1133,30 @@ export default function ProjectEdit() {
     return () => window.clearInterval(handle);
   }, [selectedSummary, refreshDrafts]);
 
+  // v0.30.0 — wrap setSmartCamera so flipping the experimental
+  // checkbox also PATCHes the persistent ``Project.smart_camera_enabled``
+  // toggle. We update the local state optimistically so the
+  // checkbox doesn't lag, and revert + surface a console error if
+  // the PATCH fails (the operator can re-toggle to retry).
+  const handleSmartCameraChange = useCallback(
+    (next: boolean) => {
+      setSmartCamera(next);
+      void apiClient
+        .patchProjectSmartCamera(validProjectId, { enabled: next })
+        .then((updated) => setProject(updated))
+        .catch((err) => {
+          // Roll back the local checkbox so the UI doesn't lie about
+          // what the backend has — and surface so the operator
+          // notices the failure rather than silently re-trying on
+          // the next render.
+          setSmartCamera(!next);
+          // eslint-disable-next-line no-console
+          console.warn("patchProjectSmartCamera failed", err);
+        });
+    },
+    [validProjectId],
+  );
+
   const handleStartEdit = useCallback(
     async (force: boolean) => {
       setTriggering(true);
@@ -1123,6 +1173,7 @@ export default function ProjectEdit() {
           subtitles: subtitlesOn,
           transitions: transitionsOn,
           auto_reframe: autoReframe,
+          smart_camera: smartCamera,
           style_preset: stylePreset,
         });
         // The API now creates the Draft row synchronously, so resp.draft_id
@@ -1155,6 +1206,7 @@ export default function ProjectEdit() {
       subtitlesOn,
       transitionsOn,
       autoReframe,
+      smartCamera,
       stylePreset,
       refreshDrafts,
     ],
@@ -1176,6 +1228,7 @@ export default function ProjectEdit() {
           stabilize,
           subtitles: subtitlesOn,
           auto_reframe: autoReframe,
+          smart_camera: smartCamera,
         },
       });
       // The endpoint resets status to pending + reset progress and
@@ -1197,6 +1250,7 @@ export default function ProjectEdit() {
     stabilize,
     subtitlesOn,
     autoReframe,
+    smartCamera,
     polling,
     refreshDrafts,
   ]);
@@ -1381,6 +1435,8 @@ export default function ProjectEdit() {
             setTransitionsOn={setTransitionsOn}
             autoReframe={autoReframe}
             setAutoReframe={setAutoReframe}
+            smartCamera={smartCamera}
+            setSmartCamera={handleSmartCameraChange}
             triggering={triggering}
             validProjectId={validProjectId}
             project={project}
@@ -1618,6 +1674,8 @@ export default function ProjectEdit() {
                 setTransitionsOn={setTransitionsOn}
                 autoReframe={autoReframe}
                 setAutoReframe={setAutoReframe}
+                smartCamera={smartCamera}
+                setSmartCamera={handleSmartCameraChange}
                 triggering={triggering}
                 validProjectId={validProjectId}
                 project={project}

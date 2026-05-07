@@ -119,11 +119,13 @@ def _draft_render_flags(
     over = override.model_dump(exclude_none=True) if override is not None else {}
     # v0.24.0 — per-flag legacy default (mirrors EditTriggerRequest).
     # Only used when neither override nor snapshot has a value.
+    # v0.30.0 — added ``smart_camera`` (default False, opt-in).
     legacy_defaults = {
         "transitions": False,
         "stabilize": True,
         "subtitles": True,
         "auto_reframe": True,
+        "smart_camera": False,
     }
 
     def _pick(key: str) -> bool:
@@ -138,6 +140,7 @@ def _draft_render_flags(
         "stabilize": _pick("stabilize"),
         "subtitles": _pick("subtitles"),
         "auto_reframe": _pick("auto_reframe"),
+        "smart_camera": _pick("smart_camera"),
     }
 
 
@@ -648,6 +651,7 @@ async def reorder_draft_segments(
             stabilize=flags["stabilize"],
             subtitles=flags["subtitles"],
             auto_reframe=flags["auto_reframe"],
+            smart_camera=flags["smart_camera"],
         )
     except Exception as exc:  # noqa: BLE001 — do not leave pending without RQ job.
         await _mark_draft_enqueue_failed(session, draft, exc)
@@ -1033,6 +1037,7 @@ async def re_render_draft(
             stabilize=flags["stabilize"],
             subtitles=flags["subtitles"],
             auto_reframe=flags["auto_reframe"],
+            smart_camera=flags["smart_camera"],
         )
     except Exception as exc:  # noqa: BLE001 — do not leave pending without RQ job.
         await _mark_draft_enqueue_failed(session, draft, exc)
@@ -1089,6 +1094,7 @@ async def rebuild_subtitles(
             stabilize=flags["stabilize"],
             subtitles=flags["subtitles"],
             auto_reframe=flags["auto_reframe"],
+            smart_camera=flags["smart_camera"],
         )
     except Exception as exc:  # noqa: BLE001 — do not leave pending without RQ job.
         await _mark_draft_enqueue_failed(session, draft, exc)

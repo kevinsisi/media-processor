@@ -503,6 +503,8 @@ def test_reorder_body_override_beats_legacy_null_snapshot(
         "stabilize": False,
         "subtitles": True,
         "auto_reframe": True,
+        # v0.30.0 — smart camera defaults False on legacy rows.
+        "smart_camera": False,
     }
 
 

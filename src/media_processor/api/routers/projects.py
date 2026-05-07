@@ -42,6 +42,7 @@ from media_processor.api.schemas import (
     ScriptOut,
     ScriptUpsert,
     SecondarySubtitleSummaryOut,
+    SmartCameraPatch,
     SubjectClassPatch,
     SubtitleStylePatch,
     TrackingSummaryOut,
@@ -186,6 +187,7 @@ def _project_detail(
         subtitle_outline_width=project.subtitle_outline_width,  # type: ignore[arg-type]
         subject_class=project.subject_class,
         crop_region=_crop_region_out(project),
+        smart_camera_enabled=bool(getattr(project, "smart_camera_enabled", False)),
     )
 
 
@@ -335,6 +337,16 @@ async def trigger_project_edit(
     # Mirror the worker's initial-progress shape (services.edit_orchestrator
     # uses the same map). Inlined here so the api container doesn't have to
     # import the orchestrator module.
+    # v0.30.0 — resolve the smart-camera flag for the snapshot. Body
+    # ``None`` ≡ inherit the project toggle; explicit ``True``/
+    # ``False`` overrides for this run. Use ``is not None`` rather
+    # than ``or`` because ``False`` is a meaningful explicit value
+    # (v0.24.0 voice_volume=0 silent-drop lesson).
+    effective_smart_camera = (
+        payload.smart_camera
+        if payload.smart_camera is not None
+        else bool(getattr(project, "smart_camera_enabled", False))
+    )
     new_draft = Draft(
         project_id=project_id,
         profile_name=project.profile_name,
@@ -351,6 +363,9 @@ async def trigger_project_edit(
             "stabilize": payload.stabilize,
             "subtitles": payload.subtitles,
             "auto_reframe": payload.auto_reframe,
+            # v0.30.0 — snapshot the resolved smart-camera flag so a
+            # later skip-plan re-render replays the same choice.
+            "smart_camera": effective_smart_camera,
         },
     )
     session.add(new_draft)
@@ -372,6 +387,7 @@ async def trigger_project_edit(
             subtitles=payload.subtitles,
             transitions=payload.transitions,
             auto_reframe=payload.auto_reframe,
+            smart_camera=effective_smart_camera,
             style_preset=payload.style_preset,
         )
     except Exception as exc:  # noqa: BLE001 — keep durable state truthful.
@@ -757,6 +773,38 @@ async def patch_project_crop_region(
         )
     else:
         project.crop_region_json = {"x_norm": float(x), "y_norm": float(y)}
+    await session.commit()
+    await session.refresh(project)
+    asset_count = await session.scalar(
+        select(func.count(Asset.id)).where(Asset.project_id == project_id)
+    )
+    draft_count = await session.scalar(
+        select(func.count(Draft.id)).where(Draft.project_id == project_id)
+    )
+    return _project_detail(
+        project,
+        asset_count=int(asset_count or 0),
+        draft_count=int(draft_count or 0),
+    )
+
+
+# v0.30.0 — opt-in AI Smart Camera toggle. Single-field PATCH, body
+# is ``{"enabled": bool}``. Default ``False`` (we ship the feature
+# off so existing operators don't suddenly burn extra Gemini quota
+# without asking). Renderer reads ``Project.smart_camera_enabled``
+# on every render through the orchestrator's
+# ``_resolve_smart_camera_flag`` resolver, which also honours an
+# ``EditTriggerRequest.smart_camera`` per-run override.
+@router.patch("/{project_id}/smart-camera", response_model=ProjectDetail)
+async def patch_project_smart_camera(
+    project_id: int,
+    payload: SmartCameraPatch,
+    session: SessionDep,
+) -> ProjectDetail:
+    project = await session.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
+    project.smart_camera_enabled = bool(payload.enabled)
     await session.commit()
     await session.refresh(project)
     asset_count = await session.scalar(

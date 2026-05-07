@@ -168,6 +168,23 @@ class Project(Base):
     # custom-drag UI can grow extra fields without another
     # migration.
     crop_region_json: Mapped[Any] = mapped_column(JSON, nullable=True)
+    # v0.30.0 — opt-in AI Smart Camera. When ``True`` the orchestrator
+    # runs ``services.smart_camera_planner`` against each cut after
+    # plan generation, sends 4–6 keyframes to Gemini Vision per cut to
+    # derive ``focus_regions``, and writes a ``smart_camera_json``
+    # directive (zoom_in / zoom_out / pan / None) onto the
+    # corresponding ``CutPlanSegment``. The renderer reads the
+    # directive in ``_cut_segment`` and applies a per-segment crop
+    # expression. Default ``False`` because the per-cut Vision call
+    # spends extra Gemini quota and the resulting camera moves can
+    # surprise operators who explicitly want a static camera. Mutex
+    # rules at render time: vidstab > auto-reframe / point tracking >
+    # smart camera > emotion zoompan. See ``v030_ai_smart_camera``.
+    smart_camera_enabled: Mapped[bool] = mapped_column(
+        nullable=False,
+        default=False,
+        server_default="0",
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

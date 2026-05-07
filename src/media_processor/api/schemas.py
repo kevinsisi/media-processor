@@ -137,6 +137,25 @@ class ProjectDetail(BaseModel):
     # centre. The renderer clamps to keep the window inside the
     # source so an out-of-range value can't blow up ffmpeg.
     crop_region: CropRegionOut | None = None
+    # v0.30.0 — opt-in AI Smart Camera (project-level toggle). The
+    # FE renders an experimental-feature checkbox on ProjectEdit
+    # that PATCHes this to flip back and forth. Defaults False —
+    # operator must opt in explicitly.
+    smart_camera_enabled: bool = False
+
+
+class SmartCameraPatch(BaseModel):
+    """v0.30.0 — body for ``PATCH /projects/{id}/smart-camera``.
+
+    Single-field toggle; the FE sends ``{enabled: true}`` /
+    ``{enabled: false}`` from the experimental-feature checkbox in
+    ProjectEdit's advanced section. Cleared via explicit
+    ``{enabled: false}`` rather than null so the contract stays
+    boolean-only — there is no third "inherit" state at the
+    project level.
+    """
+
+    enabled: bool
 
 
 class WatermarkSettingsPatch(BaseModel):
@@ -494,6 +513,12 @@ class EditTriggerRequest(BaseModel):
     # output aspect. Assets without tracking data quietly fall back
     # to the static centered crop.
     auto_reframe: bool = True
+    # v0.30.0 — opt-in AI Smart Camera. ``None`` (default) means "use
+    # the persistent project toggle" so an operator who turned on
+    # smart camera in ProjectEdit doesn't have to re-flip it on every
+    # render. Explicit ``True``/``False`` overrides for this single
+    # run (mirrors the v0.21.1 render-flag-snapshot pattern).
+    smart_camera: bool | None = None
     # v0.18 — clip-style preset that biases planner span / transition /
     # BGM hint. ``custom`` keeps the legacy free-form behaviour; the
     # four named presets steer the model toward a coherent rhythm.
@@ -552,6 +577,11 @@ class RenderFlagsOverride(BaseModel):
     stabilize: bool | None = None
     subtitles: bool | None = None
     auto_reframe: bool | None = None
+    # v0.30.0 — render-flag override for the AI Smart Camera stage.
+    # Same semantics as the others: ``None`` = inherit (snapshot or
+    # legacy default = ``False``); ``True``/``False`` = explicit
+    # override for this re-render.
+    smart_camera: bool | None = None
 
 
 class DraftReorderRequest(BaseModel):

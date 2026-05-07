@@ -354,6 +354,125 @@ def _should_zoompan(cut: CutPlanSegment) -> bool:
     return motion in ZOOMPAN_DYNAMIC_MOTIONS or has_face
 
 
+# v0.30.0 — opt-in AI Smart Camera filter. When the planner stored a
+# directive on ``CutPlanSegment.smart_camera_json`` AND no higher-
+# priority crop chain claimed the cut (vidstab on / auto-reframe on),
+# the renderer drives a per-cut ``crop=W:H:x:y`` expression that
+# interpolates between ``from_rect`` and ``to_rect`` across the cut's
+# duration. The expression is pure ffmpeg ``-vf`` syntax — no
+# sendcmd file needed for zoom_in / zoom_out, and pan re-uses the
+# same expression form (just different from/to rectangles).
+SMART_CAMERA_KINDS: frozenset[str] = frozenset({"zoom_in", "zoom_out", "pan"})
+
+
+def _smart_camera_filter(
+    directive_blob: dict[str, Any],
+    target_aspect: str,
+    duration_s: float,
+) -> str | None:
+    """Build a ``zoompan`` filter chain for a smart-camera cut.
+
+    Returns ``None`` when the directive is malformed (missing kind /
+    out-of-bounds rects / non-finite duration). Caller falls back to
+    the static aspect crop in that case so a single bad directive
+    doesn't kill the render.
+
+    Implementation note: we drive zoompan instead of a time-varying
+    ``crop=W:H:x:y`` because ffmpeg's crop demands a constant output
+    size across the stream — zoompan was designed exactly for this
+    "moving window with optional zoom" use case (and we already use
+    it for the M8.1 emotion zoom path, so the per-frame d=1 quirk is
+    a known-good pattern here).
+
+    For all three kinds we map the directive's normalised
+    ``from_rect`` / ``to_rect`` to the zoompan parameters as:
+
+      * Zoom value ``z(t)`` — interpolated between the two rects'
+        scale (= 1 / max(w_norm, h_norm)). zoom_in / zoom_out get a
+        changing value; pan keeps it constant at ``PAN_SCALE``.
+      * Window centre ``(cx(t), cy(t))`` — interpolated between the
+        rects' centres. Drives zoompan's ``x``/``y`` (top-left) via
+        ``cx*iw - (iw/zoom)/2`` so the focus point lands centred in
+        the output frame.
+
+    The output frame is sized to the project target aspect so the
+    surrounding stage doesn't have to fix-up dimensions afterwards.
+    """
+    if target_aspect not in ASPECT_DIMENSIONS:
+        return None
+    width, height = ASPECT_DIMENSIONS[target_aspect]
+    duration_s = max(0.001, float(duration_s))
+    total_frames = max(1, int(round(duration_s * VIDEO_FPS)))
+
+    kind = str(directive_blob.get("kind", ""))
+    if kind not in SMART_CAMERA_KINDS:
+        return None
+    try:
+        from_rect = tuple(float(v) for v in directive_blob["from_rect"])
+        to_rect = tuple(float(v) for v in directive_blob["to_rect"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if len(from_rect) != 4 or len(to_rect) != 4:
+        return None
+    fx, fy, fw, fh = from_rect
+    tx, ty, tw, th = to_rect
+    for v in (fx, fy, fw, fh, tx, ty, tw, th):
+        if not (-0.001 <= v <= 1.001):
+            return None
+    # Convert each rect to (centre_x, centre_y, scale) where scale =
+    # 1 / max(w_norm, h_norm) so the smaller window = bigger zoom.
+    fw = max(0.05, min(1.0, fw))
+    fh = max(0.05, min(1.0, fh))
+    tw = max(0.05, min(1.0, tw))
+    th = max(0.05, min(1.0, th))
+    f_cx = fx + fw / 2.0
+    f_cy = fy + fh / 2.0
+    t_cx = tx + tw / 2.0
+    t_cy = ty + th / 2.0
+    f_zoom = 1.0 / max(fw, fh)
+    t_zoom = 1.0 / max(tw, th)
+
+    ease = str(directive_blob.get("ease", "linear"))
+    if ease not in ("linear", "exp"):
+        ease = "linear"
+
+    # Normalised time progress in [0, 1] across the cut. With d=1 and
+    # output fps = VIDEO_FPS, ``on`` (= zoompan's "current output
+    # frame number") runs 0..total_frames-1.
+    t_lin = f"on/{max(1, total_frames - 1)}"
+    # Smooth exp-ease for energetic-motion cuts (linear ramp reads as
+    # mechanical there); otherwise the linear progress is what we want.
+    t_progress = f"(1-exp(-3*{t_lin}))/(1-exp(-3))" if ease == "exp" else t_lin
+
+    # Zoom + position lerp.
+    if abs(f_zoom - t_zoom) < 1e-6:
+        z_expr = f"{f_zoom:.6f}"
+    else:
+        z_expr = f"({f_zoom:.6f}+({t_zoom - f_zoom:.6f})*({t_progress}))"
+    cx_expr = f"({f_cx:.6f}+({t_cx - f_cx:.6f})*({t_progress}))"
+    cy_expr = f"({f_cy:.6f}+({t_cy - f_cy:.6f})*({t_progress}))"
+
+    # Top-left of the source window so the centre lands at (cx*iw,
+    # cy*ih). Clamp into [0, iw - iw/zoom] / [0, ih - ih/zoom] so a
+    # focus near the source edge doesn't request a window that
+    # extends beyond the source bounds (zoompan would silently
+    # letterbox in that case).
+    x_top_left = f"({cx_expr}*iw - (iw/zoom)/2)"
+    y_top_left = f"({cy_expr}*ih - (ih/zoom)/2)"
+    x_clamped = f"max(0\\,min(iw - iw/zoom\\,{x_top_left}))"
+    y_clamped = f"max(0\\,min(ih - ih/zoom\\,{y_top_left}))"
+
+    return (
+        f"zoompan="
+        f"z='{z_expr}'"
+        f":d=1"
+        f":x='{x_clamped}'"
+        f":y='{y_clamped}'"
+        f":s={width}x{height}"
+        f":fps={VIDEO_FPS}"
+    )
+
+
 def _zoompan_filter(target_aspect: str, duration_s: float) -> str:
     """Build a ``zoompan`` filter chain that smoothly zooms 1.0 → 1.15.
 
@@ -433,6 +552,8 @@ def _cut_segment(
     custom_roi: dict[str, Any] | None = None,
     point_track: dict[str, Any] | None = None,
     crop_region: tuple[float, float] | None = None,
+    smart_camera_enabled: bool = False,
+    stabilize_enabled: bool = False,
 ) -> bool:
     """Cut + scale-and-crop one segment to a uniform intermediate mp4.
 
@@ -500,7 +621,55 @@ def _cut_segment(
             target_w, target_h = ASPECT_DIMENSIONS[target_aspect]
             vf_chain = auto_reframe.build_filter_chain(crop_path, sendcmd_path, target_w, target_h)
 
-    if _should_zoompan(cut):
+    # v0.30.0 — opt-in smart camera. Mutex priority (top wins):
+    #   1. vidstab on    → smart camera skipped (vidstab rewrites in_w/
+    #      in_h, layering crop on top blows up — see v0.23.4 root cause).
+    #   2. dynamic crop chain already applied (point / custom_roi /
+    #      YOLO) → smart camera skipped (subject-following wins; the
+    #      tracker already knows where the subject is).
+    #   3. Smart camera directive present + enabled → smart camera
+    #      OVERRIDES emotion zoompan. Reason: focus_regions is real
+    #      visual saliency from Vision; emotion is a guessed proxy
+    #      for energy. The Vision call is more authoritative.
+    #   4. Otherwise → emotion zoompan keeps working as in M8.1.
+    smart_blob = getattr(cut, "smart_camera_json", None)
+    smart_chain: str | None = None
+    if (
+        smart_camera_enabled
+        and not stabilize_enabled
+        and crop_path is None
+        and isinstance(smart_blob, dict)
+    ):
+        try:
+            smart_chain = _smart_camera_filter(smart_blob, target_aspect, duration_s)
+        except Exception:  # noqa: BLE001 — never let a single bad directive fail render.
+            logger.exception(
+                "smart-camera filter build failed for cut %d; falling back to static",
+                cut.order,
+            )
+            smart_chain = None
+        if smart_chain is None and smart_blob.get("kind") in SMART_CAMERA_KINDS:
+            logger.info(
+                "smart-camera: cut %d directive present but filter rejected; static fallback",
+                cut.order,
+            )
+    if smart_camera_enabled and stabilize_enabled and isinstance(smart_blob, dict):
+        logger.warning(
+            "smart-camera: cut %d skipped — vidstab is enabled and they are mutually exclusive",
+            cut.order,
+        )
+    if smart_camera_enabled and crop_path is not None and isinstance(smart_blob, dict):
+        logger.info(
+            "smart-camera: cut %d skipped — auto-reframe / point tracking already active",
+            cut.order,
+        )
+
+    if smart_chain is not None:
+        # The smart-camera filter renders directly to the target
+        # canvas, so the static aspect step is redundant. Replace
+        # the chain entirely with the zoompan-driven crop.
+        vf_chain = smart_chain
+    elif _should_zoompan(cut):
         # zoompan operates on its own canvas, so we run it AFTER the
         # aspect crop so the zoom centre is the cropped frame's centre
         # rather than the original asset's.
@@ -555,6 +724,8 @@ def cut_segments(
     custom_roi_by_asset: dict[int, dict[str, Any]] | None = None,
     point_track_by_asset: dict[int, dict[str, Any]] | None = None,
     crop_region: tuple[float, float] | None = None,
+    smart_camera_enabled: bool = False,
+    stabilize_enabled: bool = False,
 ) -> tuple[list[Path], list[bool]]:
     """Cut every segment in the plan; return ``(paths, reframed_flags)``.
 
@@ -619,6 +790,8 @@ def cut_segments(
             custom_roi=custom_roi if target_idx == -1 else None,
             point_track=point_track if target_idx == -4 else None,
             crop_region=crop_region,
+            smart_camera_enabled=smart_camera_enabled,
+            stabilize_enabled=stabilize_enabled,
         )
         out_paths.append(out)
         reframed_flags.append(bool(reframed))
@@ -1165,6 +1338,7 @@ def render(
     custom_roi_by_asset: dict[int, dict[str, Any]] | None = None,
     point_track_by_asset: dict[int, dict[str, Any]] | None = None,
     crop_region: tuple[float, float] | None = None,
+    smart_camera_enabled: bool = False,
     subtitle_style: SubtitleStyle | None = None,
     on_progress: Callable[[str, int, int], None] | None = None,
 ) -> RenderResult:
@@ -1212,6 +1386,8 @@ def render(
         custom_roi_by_asset=custom_roi_by_asset,
         point_track_by_asset=point_track_by_asset,
         crop_region=crop_region,
+        smart_camera_enabled=smart_camera_enabled,
+        stabilize_enabled=stabilize,
     )
 
     # Stage 1.5 — optional digital stabilization. Replaces each
