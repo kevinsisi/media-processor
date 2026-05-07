@@ -824,6 +824,25 @@ async def run_render(
         size=getattr(project, "subtitle_size", None) or "medium",
         outline_width=getattr(project, "subtitle_outline_width", None) or "thin",
     )
+
+    # v0.29.0 — static-crop anchor. Resolved off ``Project.crop_region_json``
+    # (shape ``{x_norm, y_norm}`` both 0..1). ``None`` / malformed
+    # entries fall back to centre, which the renderer's
+    # ``aspect_filter`` short-circuits to the default ``crop=W:H``
+    # (no x/y expression). The anchor is consulted by the static
+    # aspect-crop path only — auto-reframe tracking paths ignore it
+    # because they already centre on a tracked subject.
+    crop_region_payload = getattr(project, "crop_region_json", None)
+    crop_region_tuple: tuple[float, float] | None = None
+    if isinstance(crop_region_payload, dict):
+        try:
+            x_raw = crop_region_payload.get("x_norm")
+            y_raw = crop_region_payload.get("y_norm")
+            if x_raw is not None and y_raw is not None:
+                crop_region_tuple = (float(x_raw), float(y_raw))
+        except (TypeError, ValueError):
+            crop_region_tuple = None
+
     try:
         result = await asyncio.to_thread(
             video_renderer.render,
@@ -841,6 +860,7 @@ async def run_render(
             tracking_target_by_asset=tracking_target_by_asset if auto_reframe_enabled else None,
             custom_roi_by_asset=custom_roi_by_asset if auto_reframe_enabled else None,
             point_track_by_asset=point_track_by_asset if auto_reframe_enabled else None,
+            crop_region=crop_region_tuple,
             subtitle_style=subtitle_style if subtitles_enabled else None,
             on_progress=_sync_progress,
         )

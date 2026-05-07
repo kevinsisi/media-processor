@@ -25,6 +25,8 @@ from media_processor.api.schemas import (
     AssetBatchDeleteResultItem,
     BgmFadeOutPatch,
     CoverageSummaryOut,
+    CropRegionOut,
+    CropRegionPatch,
     DetectedClassOut,
     DraftSummary,
     EditTriggerRequest,
@@ -119,6 +121,27 @@ def _draft_summary_with_urls(draft: Draft) -> DraftSummary:
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 
+def _crop_region_out(project: Project) -> CropRegionOut | None:
+    """Project the JSON crop_region column into the API response shape.
+
+    Tolerant — ``None``, malformed entries, or out-of-range floats
+    return ``None`` (== centre). Renderer applies its own clamping
+    too, but surfacing a sane shape here keeps the FE round-trip
+    deterministic.
+    """
+    payload = getattr(project, "crop_region_json", None)
+    if not isinstance(payload, dict):
+        return None
+    try:
+        x = float(payload.get("x_norm"))  # type: ignore[arg-type]
+        y = float(payload.get("y_norm"))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    if not (0.0 <= x <= 1.0 and 0.0 <= y <= 1.0):
+        return None
+    return CropRegionOut(x_norm=x, y_norm=y)
+
+
 def _project_detail(
     project: Project,
     *,
@@ -162,6 +185,7 @@ def _project_detail(
         subtitle_size=project.subtitle_size,  # type: ignore[arg-type]
         subtitle_outline_width=project.subtitle_outline_width,  # type: ignore[arg-type]
         subject_class=project.subject_class,
+        crop_region=_crop_region_out(project),
     )
 
 
@@ -686,6 +710,55 @@ async def patch_project_subject_class(
     await session.commit()
     await session.refresh(project)
 
+    asset_count = await session.scalar(
+        select(func.count(Asset.id)).where(Asset.project_id == project_id)
+    )
+    draft_count = await session.scalar(
+        select(func.count(Draft.id)).where(Draft.project_id == project_id)
+    )
+    return _project_detail(
+        project,
+        asset_count=int(asset_count or 0),
+        draft_count=int(draft_count or 0),
+    )
+
+
+# v0.29.0 — static-crop anchor PATCH. Body shape:
+#   ``{x_norm: float | null, y_norm: float | null}``
+# When BOTH fields are null (or omitted) the override is cleared
+# and the renderer falls back to centre. When BOTH are present they
+# must each be in [0, 1]; mixed (one null, one not) returns 400 to
+# avoid silently writing an undefined-anchor row.
+#
+# The crop is applied at render time inside ``aspect_filter`` and
+# only kicks in for the static aspect-crop path — auto-reframe
+# tracking paths (YOLO / point / custom_roi) keep doing their
+# subject-centred crop because they already know better than the
+# operator-picked anchor where the action is.
+@router.patch("/{project_id}/crop-region", response_model=ProjectDetail)
+async def patch_project_crop_region(
+    project_id: int,
+    payload: CropRegionPatch,
+    session: SessionDep,
+) -> ProjectDetail:
+    project = await session.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
+    x = payload.x_norm
+    y = payload.y_norm
+    if x is None and y is None:
+        # Explicit clear → revert to centre. Storing NULL keeps the
+        # column compact + the renderer's "is None" branch fast.
+        project.crop_region_json = None
+    elif x is None or y is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="crop_region: both x_norm and y_norm must be provided (or both null to clear)",
+        )
+    else:
+        project.crop_region_json = {"x_norm": float(x), "y_norm": float(y)}
+    await session.commit()
+    await session.refresh(project)
     asset_count = await session.scalar(
         select(func.count(Asset.id)).where(Asset.project_id == project_id)
     )

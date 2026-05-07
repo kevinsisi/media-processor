@@ -15,10 +15,13 @@ interface ExportSheetProps {
   ready: boolean;
 }
 
+// v0.29.0 — narrowed to 9:16 + 16:9. The 4:5 / 1:1 IG-feed presets
+// were retired with the project-level aspect change; legacy export
+// artifacts at those aspects remain downloadable through the
+// artifacts list but new exports are limited to these two.
 const ASPECTS: { value: ExportAspect; label: string; sub: string }[] = [
   { value: "9:16", label: "9:16", sub: "直式短影音" },
-  { value: "4:5", label: "4:5", sub: "IG / FB 直式貼文" },
-  { value: "1:1", label: "1:1", sub: "方形貼文" },
+  { value: "16:9", label: "16:9", sub: "YouTube · 橫向" },
 ];
 
 const HEIGHTS = [720, 1080, 1440] as const;
@@ -43,19 +46,11 @@ const SOCIAL_EXPORT_PRESETS: SocialExportPreset[] = [
     height: 1080,
   },
   {
-    id: "feed-portrait",
-    platform: "IG / FB",
-    title: "直式貼文版",
-    hint: "保留更多畫面，適合貼文牆瀏覽。",
-    aspect: "4:5",
-    height: 1080,
-  },
-  {
-    id: "square-post",
-    platform: "IG / FB",
-    title: "方形貼文版",
-    hint: "適合商品、活動或需要整齊版面的貼文。",
-    aspect: "1:1",
+    id: "yt-landscape",
+    platform: "YouTube / Web",
+    title: "橫向影片版",
+    hint: "適合 YouTube、桌機 Feed 或網頁嵌入。",
+    aspect: "16:9",
     height: 1080,
   },
 ];

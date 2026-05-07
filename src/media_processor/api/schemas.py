@@ -11,7 +11,10 @@ from media_processor.models.enums import REVIEW_ACTION_VALUES
 from media_processor.services.object_tracking import COCO80_CLASSES
 
 ReviewActionLiteral = Literal["approve", "reject", "repatch", "download"]
-TargetAspectRatioLiteral = Literal["9:16", "4:5", "1:1"]
+# v0.29.0 — dropped 4:5 / 1:1; added 16:9. Old projects whose stored
+# value was 4:5 / 1:1 are migrated to 9:16 by alembic 0026 so a stale
+# row can't slip through this Literal at load time.
+TargetAspectRatioLiteral = Literal["9:16", "16:9"]
 UploadKindLiteral = Literal["video", "script"]
 # v0.18 — 9-grid watermark anchor. Mirrors video_renderer._WATERMARK_POSITIONS.
 WatermarkPositionLiteral = Literal[
@@ -46,6 +49,28 @@ SUBTITLE_COLOR_PATTERN = r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$"
 # v0.18 — clip-style preset that biases planner span / transition / BGM hint.
 ClipStylePresetLiteral = Literal["fast", "slow", "commercial", "artistic", "custom"]
 DraftExportStatusLiteral = Literal["queued", "running", "done", "failed"]
+
+
+# v0.29.0 — static-crop anchor for source-orientation-mismatch renders.
+# x_norm / y_norm are the fraction of the source where the crop
+# window's top-left anchor lands; (0.5, 0.5) is centre. Both clamped
+# 0..1; the renderer further clamps so the window stays inside the
+# source.
+class CropRegionOut(BaseModel):
+    x_norm: float = Field(..., ge=0.0, le=1.0)
+    y_norm: float = Field(..., ge=0.0, le=1.0)
+
+
+class CropRegionPatch(BaseModel):
+    """v0.29.0 — body for PATCH /projects/{id}/crop-region.
+
+    A body of ``{x_norm: null, y_norm: null}`` — or omitting both
+    fields — clears the override (renderer falls back to centre).
+    Otherwise both must be present and 0..1 inclusive.
+    """
+
+    x_norm: float | None = Field(default=None, ge=0.0, le=1.0)
+    y_norm: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
 class ProjectSummary(BaseModel):
@@ -102,6 +127,16 @@ class ProjectDetail(BaseModel):
     # ``None`` means "no filter, use every asset at full duration"
     # (historical default). Otherwise one of the 80 COCO class names.
     subject_class: str | None = None
+    # v0.29.0 — static-crop anchor used when source orientation
+    # differs from target orientation (9:16 → 16:9 or 16:9 → 9:16)
+    # AND auto-reframe doesn't kick in (asset has no
+    # tracking_json / custom_roi / point_track, OR auto_reframe
+    # toggle is off). ``x_norm`` / ``y_norm`` are 0..1 and represent
+    # the fraction of the source where the crop window's
+    # top-left anchor lands; (0.5, 0.5) is centre. ``None`` ≡
+    # centre. The renderer clamps to keep the window inside the
+    # source so an out-of-range value can't blow up ffmpeg.
+    crop_region: CropRegionOut | None = None
 
 
 class WatermarkSettingsPatch(BaseModel):
@@ -583,9 +618,17 @@ class SubtitleCuePatch(BaseModel):
 
 
 class DraftExportRequest(BaseModel):
-    """Body for POST /drafts/{id}/export."""
+    """Body for POST /drafts/{id}/export.
 
-    aspect: Literal["9:16", "4:5", "1:1"]
+    v0.29.0 — narrowed to 9:16 + 16:9. The 4:5 / 1:1 variants were
+    removed from the renderer / exporter because operators stopped
+    shipping IG feed posts a year ago. Existing
+    ``v{N}-4x5-*.mp4`` / ``v{N}-1x1-*.mp4`` files on disk remain
+    downloadable through the artifacts list — only NEW exports are
+    constrained.
+    """
+
+    aspect: Literal["9:16", "16:9"]
     height: int = Field(..., ge=480, le=2160)
 
 

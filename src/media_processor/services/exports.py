@@ -1,8 +1,13 @@
 """M7.3 — derivative-aspect / resolution exports.
 
-Given an existing 16:9 deliverable mp4, produces a same-content variant
-in 9:16 / 4:5 / 1:1 at the user-chosen height. Pure ffmpeg — no
-re-planning, no Gemini. The original mp4 stays untouched.
+Given an existing draft mp4, produces a same-content variant in
+9:16 (Reels) or 16:9 (landscape) at the user-chosen height. Pure
+ffmpeg — no re-planning, no Gemini. The original mp4 stays
+untouched.
+
+v0.29.0 — narrowed VALID_ASPECTS to 9:16 + 16:9; legacy 4:5 / 1:1
+files on disk remain downloadable through the artifacts list, but
+NEW exports are gated by VALID_ASPECTS.
 
 Storage convention: ``${DRAFTS_DIR}/{project_id}/v{N}-{aspect}-{height}p.mp4``
 sits next to the original ``v{N}.mp4``. Multiple aspect / height combos
@@ -21,7 +26,12 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
-VALID_ASPECTS: tuple[str, ...] = ("9:16", "4:5", "1:1")
+# v0.29.0 — dropped 4:5 / 1:1 (operators stopped shipping IG-feed
+# posts) and added 16:9 (YouTube / desktop-feed / web-embed). Files
+# already on disk under ``v{N}-4x5-*.mp4`` / ``v{N}-1x1-*.mp4``
+# stay downloadable through the artifacts list — only NEW exports
+# are gated by this tuple.
+VALID_ASPECTS: tuple[str, ...] = ("9:16", "16:9")
 MIN_HEIGHT = 480
 MAX_HEIGHT_CAP = 2160  # 4K — clamp regardless of source so we don't generate impossible files
 
