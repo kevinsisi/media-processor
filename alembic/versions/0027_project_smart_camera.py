@@ -1,9 +1,11 @@
 """v0.30.0 — projects.smart_camera_enabled (opt-in AI Smart Camera).
 
-Adds a single non-null Boolean column with a server default of ``0``
-(``False``) so existing rows pick up the safe default — the whole
-feature is opt-in by design (Gemini quota cost + camera-move
-surprise factor for operators who wanted a static look).
+Adds a single non-null Boolean column with a server default of ``false``
+so existing rows pick up the safe default — the whole feature is opt-in
+by design (Gemini quota cost + camera-move surprise factor for operators
+who wanted a static look). Postgres rejects ``DEFAULT 0`` on a BOOLEAN
+column (``DatatypeMismatch``); SQLite accepts either, so the literal
+``"false"`` works on both backends.
 
 SQLite test backend gets ``batch_alter_table`` because in-place
 ``ALTER TABLE ... ADD COLUMN ... NOT NULL`` is not supported there;
@@ -36,7 +38,7 @@ def upgrade() -> None:
         "smart_camera_enabled",
         sa.Boolean(),
         nullable=False,
-        server_default=sa.text("0"),
+        server_default=sa.text("false"),
     )
     if _is_sqlite():
         with op.batch_alter_table("projects") as batch:
