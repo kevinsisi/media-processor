@@ -2,7 +2,11 @@
 // Hand-maintained for now — there's no OpenAPI codegen step yet.
 
 export type ReviewAction = "approve" | "reject" | "repatch" | "download";
-export type TargetAspectRatio = "9:16" | "4:5" | "1:1";
+// v0.29.0 — narrowed from {9:16, 4:5, 1:1} to {9:16, 16:9}. Operators
+// shipped only Reels and asked for a horizontal landscape variant
+// for YouTube / desktop-feed. Legacy 4:5 / 1:1 projects are migrated
+// to 9:16 by alembic 0026 so a stale row never reaches the FE.
+export type TargetAspectRatio = "9:16" | "16:9";
 export type UploadKind = "video" | "script";
 export type UploadStatus = "pending" | "complete" | "aborted";
 
@@ -89,6 +93,28 @@ export interface ProjectDetail {
   // the time range where that class is detected in tracking_json,
   // padded ±0.5 s. ``null`` = no filter (historical default).
   subject_class?: string | null;
+  // v0.29.0 — static-crop anchor used when source orientation differs
+  // from target orientation (9:16 ↔ 16:9). ``null`` ≡ centre. The FE
+  // mounts a CropRegionPicker only when the project has at least one
+  // analysed asset whose orientation disagrees with target_aspect_ratio.
+  crop_region?: CropRegion | null;
+}
+
+// v0.29.0 — fraction-of-source crop anchor. (0.5, 0.5) is centre;
+// (0.5, 0.0) anchors at the top of the source; (0.5, 1.0) anchors at
+// the bottom. Renderer clamps so the crop window stays inside the
+// source.
+export interface CropRegion {
+  x_norm: number;
+  y_norm: number;
+}
+
+// v0.29.0 — body for PATCH /projects/{id}/crop-region. Both fields
+// null clears the override (revert to centre); both populated saves
+// a custom anchor. Mixed (one null, one not) is rejected with 400.
+export interface CropRegionPatch {
+  x_norm: number | null;
+  y_norm: number | null;
 }
 
 // v0.21 — PATCH /projects/{id}/subject-class body. ``null`` clears the
@@ -389,7 +415,10 @@ export interface SubtitleCuePatch {
   text: string;
 }
 
-export type ExportAspect = "9:16" | "4:5" | "1:1";
+// v0.29.0 — same shrink as TargetAspectRatio. Pre-v0.29 export
+// artifacts at 4:5 / 1:1 stay downloadable through the artifacts
+// list, but new exports are limited to these two.
+export type ExportAspect = "9:16" | "16:9";
 
 export interface DraftExportRequest {
   aspect: ExportAspect;

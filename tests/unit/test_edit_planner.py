@@ -515,7 +515,9 @@ def test_serialise_plan_roundtrip() -> None:
     plan = edit_planner.CutPlan(
         schema_version=SCHEMA_VERSION,
         target_duration_ms=5_000,
-        target_aspect_ratio="1:1",
+        # v0.29.0 — 1:1 was retired with the aspect-ratio shrink;
+        # 16:9 is the surviving non-portrait variant.
+        target_aspect_ratio="16:9",
         profile_name="universal",
         segments=(
             edit_planner.CutPlanSegment(

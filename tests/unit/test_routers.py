@@ -202,6 +202,61 @@ def test_export_draft_creates_listable_artifact(app: FastAPI) -> None:
     assert exports[0]["output_filename"] == "v1-9x16-1080p.mp4"
 
 
+def test_export_draft_accepts_landscape(app: FastAPI) -> None:
+    """v0.29.0 — 16:9 is the new horizontal export aspect; the
+    artifact filename uses the slash-replaced ``16x9`` token."""
+    client = TestClient(app)
+    resp = client.post("/drafts/1/export", json={"aspect": "16:9", "height": 1080})
+    assert resp.status_code == 200, resp.text
+    body: dict[str, Any] = resp.json()
+    assert body["aspect"] == "16:9"
+    assert body["output_filename"] == "v1-16x9-1080p.mp4"
+
+
+def test_export_draft_rejects_dropped_4_5(app: FastAPI) -> None:
+    """v0.29.0 — 4:5 was dropped from the literal; pydantic 422s before
+    we even hit the endpoint body."""
+    client = TestClient(app)
+    resp = client.post("/drafts/1/export", json={"aspect": "4:5", "height": 1080})
+    assert resp.status_code == 422
+
+
+def test_patch_project_crop_region_round_trip(app: FastAPI) -> None:
+    """v0.29.0 — set + clear the static-crop anchor."""
+    client = TestClient(app)
+    # Default: no override.
+    detail = client.get("/projects/1").json()
+    assert detail.get("crop_region") in (None, {"x_norm": 0.5, "y_norm": 0.5})
+
+    # Set a top-anchor (vertical crop, source above-target case).
+    set_resp = client.patch(
+        "/projects/1/crop-region",
+        json={"x_norm": 0.5, "y_norm": 0.0},
+    )
+    assert set_resp.status_code == 200, set_resp.text
+    body = set_resp.json()
+    assert body["crop_region"] == {"x_norm": 0.5, "y_norm": 0.0}
+
+    # Clear with both null.
+    clear_resp = client.patch(
+        "/projects/1/crop-region",
+        json={"x_norm": None, "y_norm": None},
+    )
+    assert clear_resp.status_code == 200, clear_resp.text
+    assert clear_resp.json()["crop_region"] is None
+
+
+def test_patch_project_crop_region_rejects_partial_payload(app: FastAPI) -> None:
+    """v0.29.0 — mixed null + value must 400; storing a half-anchor
+    would leave the renderer guessing."""
+    client = TestClient(app)
+    resp = client.patch(
+        "/projects/1/crop-region",
+        json={"x_norm": 0.5, "y_norm": None},
+    )
+    assert resp.status_code == 400
+
+
 def test_get_asset_with_tags_sorted(app: FastAPI) -> None:
     client = TestClient(app)
     resp = client.get("/assets/1")

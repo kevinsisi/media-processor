@@ -28,12 +28,18 @@ logger = logging.getLogger(__name__)
 
 
 # Output dimensions per target aspect ratio. 1080-wide for the portrait
-# variants is the IG / TikTok native upload size; using a fixed width
-# keeps the per-segment scale + crop deterministic.
+# variant is the IG / TikTok native upload size; 1920×1080 for the
+# landscape variant matches YouTube / web-embed deliverables. Fixed
+# canvas dims keep the per-segment scale + crop deterministic.
+#
+# v0.29.0 — dropped 4:5 (1080×1350) and 1:1 (1080×1080); added 16:9
+# (1920×1080). Operators stopped shipping IG-feed posts and asked
+# for a horizontal landscape variant. Migration 0026 rewrites legacy
+# 4:5/1:1 projects to 9:16 so a stale Project row never feeds a key
+# the renderer no longer knows.
 ASPECT_DIMENSIONS: dict[str, tuple[int, int]] = {
     "9:16": (1080, 1920),
-    "4:5": (1080, 1350),
-    "1:1": (1080, 1080),
+    "16:9": (1920, 1080),
 }
 
 # Per-segment encoding knobs. CRF 20 + libx264 + faststart matches the
@@ -56,20 +62,24 @@ def subtitle_force_style(target_aspect: str) -> str:
     """Aspect-aware ASS V4+ Style overrides for the subtitle burn-in.
 
     Tighter Fontsize and explicit horizontal margins keep CJK text inside
-    the frame on 9:16; the same numbers tracked the visible width on the
-    landscape variants too. Returns a comma-separated string suitable for
-    ffmpeg's ``force_style=`` value.
+    the frame on portrait; the landscape variant gets a slightly larger
+    Fontsize and a smaller bottom margin because the canvas is shorter.
+    Returns a comma-separated string suitable for ffmpeg's
+    ``force_style=`` value.
+
+    v0.29.0 — replaced 4:5 / 1:1 branches with a single 16:9 branch.
+    The active subtitle pipeline is drawtext (libass force_style is
+    legacy plumbing kept for back-compat tests), so the practical
+    effect of these numbers is small — drawtext sizing comes from
+    SUBTITLE_*_CHOICES.
     """
     width, _ = ASPECT_DIMENSIONS[target_aspect]
     if target_aspect == "9:16":
         font_size = 28
         margin_v = 180
-    elif target_aspect == "4:5":
-        font_size = 26
-        margin_v = 120
-    else:  # "1:1"
-        font_size = 24
-        margin_v = 80
+    else:  # "16:9"
+        font_size = 32
+        margin_v = 60
     margin_lr = 60
     return (
         "FontName=Noto Sans CJK TC,"
@@ -127,7 +137,7 @@ SUBTITLE_OUTLINE_WIDTH_CHOICES: dict[str, int] = {
     "thick": 5,
 }
 # Position is computed at filter-build time off the canvas height so the
-# y-expression stays correct across 9:16 / 4:5 / 1:1. ``middle`` centres
+# y-expression stays correct across 9:16 / 16:9 (v0.29.0). ``middle`` centres
 # vertically; ``top`` / ``bottom`` anchor with a small inset so the text
 # doesn't kiss the frame edge.
 SUBTITLE_POSITION_CHOICES: tuple[str, ...] = ("top", "middle", "bottom")
@@ -262,16 +272,48 @@ def _require_ffmpeg() -> None:
         raise FFmpegMissingError("ffmpeg not on PATH")
 
 
-def aspect_filter(target_aspect: str) -> str:
-    """Return the ``scale=…,crop=…,setsar=1`` filter chain for the target."""
+def aspect_filter(
+    target_aspect: str,
+    *,
+    crop_region: tuple[float, float] | None = None,
+) -> str:
+    """Return the ``scale=…,crop=…,setsar=1`` filter chain for the target.
+
+    ``crop_region`` (v0.29.0) is the optional ``(x_norm, y_norm)`` static-
+    crop anchor used when source orientation differs from target
+    orientation (e.g. 9:16 source → 16:9 target). Each value is 0..1 and
+    represents the fraction of the source where the crop window's
+    top-left anchor lands; (0.5, 0.5) is centre, which is exactly what
+    the default ffmpeg ``crop=W:H`` already does, so we omit explicit
+    x/y in that case.
+
+    For non-centre anchors we expand the chain to
+    ``crop=W:H:x_expr:y_expr`` where the expressions reference ffmpeg's
+    ``in_w``/``in_h`` variables (the post-scale dimensions). The
+    expressions also clamp to ``[0, in_w-W]`` / ``[0, in_h-H]`` so an
+    operator who picked the extreme edge gets a window that snaps
+    cleanly inside the source instead of black bars (or worse, a
+    negative-coordinate ffmpeg error).
+    """
     if target_aspect not in ASPECT_DIMENSIONS:
         raise VideoRenderError(f"unsupported target aspect ratio: {target_aspect!r}")
     width, height = ASPECT_DIMENSIONS[target_aspect]
-    return (
-        f"scale={width}:{height}:force_original_aspect_ratio=increase,"
-        f"crop={width}:{height},"
-        "setsar=1"
-    )
+    crop = f"crop={width}:{height}"
+    if crop_region is not None:
+        x_norm, y_norm = crop_region
+        # Clamp inputs defensively; the API layer also clamps but
+        # this keeps the renderer self-contained.
+        x_norm = max(0.0, min(1.0, float(x_norm)))
+        y_norm = max(0.0, min(1.0, float(y_norm)))
+        # Only emit the longer crop expression when the anchor is
+        # actually off-centre; centre is a tight equality check
+        # because that's the only value where the default crop
+        # already does the right thing.
+        if not (abs(x_norm - 0.5) < 1e-6 and abs(y_norm - 0.5) < 1e-6):
+            x_expr = f"max(0\\,min(in_w-{width}\\,{x_norm:.4f}*(in_w-{width})))"
+            y_expr = f"max(0\\,min(in_h-{height}\\,{y_norm:.4f}*(in_h-{height})))"
+            crop = f"crop={width}:{height}:{x_expr}:{y_expr}"
+    return f"scale={width}:{height}:force_original_aspect_ratio=increase,{crop},setsar=1"
 
 
 # Phase 8.1 — emotion-driven zoompan. Excited / surprised cuts get a slow
@@ -390,6 +432,7 @@ def _cut_segment(
     tracking_object_index: int | None = None,
     custom_roi: dict[str, Any] | None = None,
     point_track: dict[str, Any] | None = None,
+    crop_region: tuple[float, float] | None = None,
 ) -> bool:
     """Cut + scale-and-crop one segment to a uniform intermediate mp4.
 
@@ -418,7 +461,7 @@ def _cut_segment(
     start_s = cut.asset_start_ms / 1000.0
     duration_s = max(0.001, (cut.asset_end_ms - cut.asset_start_ms) / 1000.0)
 
-    vf_chain = aspect_filter(target_aspect)
+    vf_chain = aspect_filter(target_aspect, crop_region=crop_region)
     # v0.17 — auto-reframe input picks between three sources:
     #   custom_roi  → user-drawn ROI tracked through CSRT
     #   tracking + tracking_object_index  → user-picked YOLO track
@@ -511,6 +554,7 @@ def cut_segments(
     tracking_target_by_asset: dict[int, int | None] | None = None,
     custom_roi_by_asset: dict[int, dict[str, Any]] | None = None,
     point_track_by_asset: dict[int, dict[str, Any]] | None = None,
+    crop_region: tuple[float, float] | None = None,
 ) -> tuple[list[Path], list[bool]]:
     """Cut every segment in the plan; return ``(paths, reframed_flags)``.
 
@@ -574,6 +618,7 @@ def cut_segments(
             else None,
             custom_roi=custom_roi if target_idx == -1 else None,
             point_track=point_track if target_idx == -4 else None,
+            crop_region=crop_region,
         )
         out_paths.append(out)
         reframed_flags.append(bool(reframed))
@@ -1119,6 +1164,7 @@ def render(
     tracking_target_by_asset: dict[int, int | None] | None = None,
     custom_roi_by_asset: dict[int, dict[str, Any]] | None = None,
     point_track_by_asset: dict[int, dict[str, Any]] | None = None,
+    crop_region: tuple[float, float] | None = None,
     subtitle_style: SubtitleStyle | None = None,
     on_progress: Callable[[str, int, int], None] | None = None,
 ) -> RenderResult:
@@ -1165,6 +1211,7 @@ def render(
         tracking_target_by_asset=tracking_target_by_asset,
         custom_roi_by_asset=custom_roi_by_asset,
         point_track_by_asset=point_track_by_asset,
+        crop_region=crop_region,
     )
 
     # Stage 1.5 — optional digital stabilization. Replaces each

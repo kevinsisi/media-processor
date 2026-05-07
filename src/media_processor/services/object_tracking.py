@@ -13,7 +13,7 @@ track so older data + the auto-reframe default behaviour keep working.
 
 The renderer's auto-reframe stage reads the same JSON and uses Kalman-
 smoothed centers to drive a dynamic crop, keeping the subject centered
-in the 9:16 / 4:5 / 1:1 output regardless of where it sits in the
+in the 9:16 / 16:9 output (v0.29.0) regardless of where it sits in the
 source frame.
 
 Pure subprocess-free: ultralytics handles its own torch + CUDA. Lazy

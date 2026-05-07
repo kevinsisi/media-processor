@@ -9,6 +9,10 @@ const PROFILE_OPTIONS = [
   { value: "carsmeet-luxury", label: "Carsmeet 豪車" },
 ];
 
+// v0.29.0 — narrowed to 9:16 (Reels) + 16:9 (landscape). The 4:5 / 1:1
+// IG-feed sizes were removed because operators stopped shipping
+// them; horizontal landscape now serves YouTube / desktop-feed /
+// web-embed deliverables.
 const RATIO_OPTIONS: Array<{
   value: TargetAspectRatio;
   label: string;
@@ -16,8 +20,7 @@ const RATIO_OPTIONS: Array<{
   ratio: number; // width / height
 }> = [
   { value: "9:16", label: "9 : 16", hint: "Reels · 直式短片", ratio: 9 / 16 },
-  { value: "4:5", label: "4 : 5", hint: "Feed · 直式貼文", ratio: 4 / 5 },
-  { value: "1:1", label: "1 : 1", hint: "Feed · 方形貼文", ratio: 1 },
+  { value: "16:9", label: "16 : 9", hint: "YouTube · 橫向影片", ratio: 16 / 9 },
 ];
 
 export default function NewProject() {

@@ -157,6 +157,17 @@ class Project(Base):
     # are dropped from the plan. ``None`` (default) preserves the
     # historical behaviour: every asset is eligible at full duration.
     subject_class: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # v0.29.0 — static-crop anchor for source-vs-target orientation
+    # mismatch renders (9:16 source → 16:9 target, or 16:9 → 9:16).
+    # Shape: ``{"x_norm": float, "y_norm": float}`` both 0..1 — the
+    # fraction of the source where the crop window's top-left
+    # anchor lands. ``None`` ≡ centre (0.5, 0.5). Only consulted by
+    # the renderer's static aspect-crop path; the auto-reframe
+    # tracking paths (YOLO / point / custom_roi) ignore it because
+    # they already track a subject. Stored as JSON so a future
+    # custom-drag UI can grow extra fields without another
+    # migration.
+    crop_region_json: Mapped[Any] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

@@ -3,7 +3,7 @@
 Reads ``Asset.tracking_json`` (YOLOv8 per-frame bboxes from
 ``services.object_tracking``) and produces a per-output-frame crop
 window so the renderer keeps the dominant subject centered in the
-target aspect (9:16 / 4:5 / 1:1). Two pieces:
+target aspect (v0.29.0: 9:16 / 16:9). Two pieces:
 
   1. ``compute_crop_path(...)``: Kalman-smooth the bbox centers across
      time, then for every output frame interpolate a ``(crop_x,
@@ -34,10 +34,15 @@ logger = logging.getLogger(__name__)
 # Target aspect → (w, h) integer ratio. Mirrors
 # ``video_renderer.ASPECT_DIMENSIONS`` but at integer-ratio level so
 # the crop math stays exact regardless of source resolution.
+#
+# v0.29.0 — dropped 4:5 / 1:1; added 16:9. ``_crop_dimensions``'s
+# "pick the limiting axis" branch handles 16:9 against landscape
+# sources (height-limited) AND against portrait sources
+# (width-limited) without code change — the axis math is symmetric
+# in (aw, ah).
 ASPECT_RATIOS: dict[str, tuple[int, int]] = {
     "9:16": (9, 16),
-    "4:5": (4, 5),
-    "1:1": (1, 1),
+    "16:9": (16, 9),
 }
 
 # Render fps the sendcmd file emits at. Matches

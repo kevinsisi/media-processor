@@ -31,9 +31,17 @@ class ReviewAction(StrEnum):
 
 
 class TargetAspectRatio(StrEnum):
+    """v0.29.0 — supported output aspect ratios.
+
+    Pre-0.29 the enum carried four IG-feed-friendly variants; in
+    practice operators only shipped 9:16. The 4:5 / 1:1 IG-feed
+    sizes were dropped and a horizontal 16:9 added for YouTube /
+    desktop-feed / web-embed deliverables. Legacy 4:5 / 1:1 rows
+    are migrated to 9:16 by alembic 0026.
+    """
+
     REELS = "9:16"
-    FEED_PORTRAIT = "4:5"
-    FEED_SQUARE = "1:1"
+    LANDSCAPE = "16:9"
 
 
 class UploadKind(StrEnum):

@@ -4,6 +4,9 @@ import { ApiError, apiClient } from "../api/client";
 import BgmFadeOutSlider from "../components/BgmFadeOutSlider";
 import BgmSourcePicker from "../components/BgmSourcePicker";
 import type { BgmSource } from "../components/BgmSourcePicker";
+import CropRegionPicker, {
+  type CropDirection,
+} from "../components/CropRegionPicker";
 import DraggableTimeline from "../components/DraggableTimeline";
 import ExportSheet from "../components/ExportSheet";
 import QueueStatusModal from "../components/QueueStatusModal";
@@ -655,6 +658,10 @@ interface EditSettingsBlockProps {
   setProject: (p: ProjectDetail) => void;
   currentBgmSource: BgmSource;
   setCurrentBgmSource: (s: BgmSource) => void;
+  // v0.29.0 — null when source orientation matches target (no crop
+  // needed); otherwise the axis being cropped. Drives whether
+  // CropRegionPicker mounts.
+  cropDirection: CropDirection | null;
 }
 
 // v0.20.2 — single source of the settings UI, used by both the
@@ -724,6 +731,14 @@ function EditSettingsBlock(props: EditSettingsBlockProps) {
           onProjectUpdated={props.setProject}
           disabled={props.triggering}
         />
+        {props.cropDirection !== null && (
+          <CropRegionPicker
+            project={props.project}
+            direction={props.cropDirection}
+            onProjectUpdated={props.setProject}
+            disabled={props.triggering}
+          />
+        )}
         <WatermarkPicker
           projectId={props.validProjectId}
           project={props.project}
@@ -877,6 +892,15 @@ export default function ProjectEdit() {
   const [assetThumbs, setAssetThumbs] = useState<
     Map<number, { duration_ms: number; thumbnail_urls: string[] }>
   >(new Map());
+  // v0.29.0 — aggregate source-asset orientation. ``"portrait"`` =
+  // every analysed asset has h > w; ``"landscape"`` = every asset
+  // has w >= h; ``"mixed"`` = both kinds present (rare; we still
+  // surface the picker because the static crop has to pick a
+  // direction); ``null`` = nothing analysed yet (picker stays
+  // hidden — operator can re-open the page after analysis lands).
+  const [sourceOrientation, setSourceOrientation] = useState<
+    "portrait" | "landscape" | "mixed" | null
+  >(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
@@ -951,12 +975,31 @@ export default function ProjectEdit() {
         let inFlight = 0;
         let failed = 0;
         let total = 0;
+        let portraitCount = 0;
+        let landscapeCount = 0;
         for (const a of data.assets) {
           if (a.thumbnail_urls && a.thumbnail_urls.length > 0) {
             map.set(a.id, {
               duration_ms: a.duration_ms,
               thumbnail_urls: a.thumbnail_urls,
             });
+          }
+          // v0.29.0 — parse "1080x1920" / "1920x1080" into orientation
+          // counts so the CropRegionPicker only mounts when source ≠
+          // target orientation. Tolerant: missing / malformed values
+          // (e.g. ``null`` resolution after ffprobe failure) are
+          // ignored rather than skewing the count.
+          const res = a.resolution;
+          if (typeof res === "string") {
+            const match = res.match(/^(\d+)x(\d+)$/i);
+            if (match) {
+              const w = Number(match[1]);
+              const h = Number(match[2]);
+              if (Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0) {
+                if (h > w) portraitCount += 1;
+                else landscapeCount += 1;
+              }
+            }
           }
           const steps = a.analysis_steps ?? {};
           for (const step of ANALYSIS_STEP_ORDER) {
@@ -968,6 +1011,15 @@ export default function ProjectEdit() {
           }
         }
         setAssetThumbs(map);
+        if (portraitCount === 0 && landscapeCount === 0) {
+          setSourceOrientation(null);
+        } else if (portraitCount > 0 && landscapeCount === 0) {
+          setSourceOrientation("portrait");
+        } else if (landscapeCount > 0 && portraitCount === 0) {
+          setSourceOrientation("landscape");
+        } else {
+          setSourceOrientation("mixed");
+        }
         const next = {
           allDone: data.assets.length > 0 && total > 0 && inFlight === 0,
           inFlight,
@@ -1012,6 +1064,30 @@ export default function ProjectEdit() {
     [drafts, selectedDraftId],
   );
   const isLatestSelected = drafts.length > 0 && drafts[0].id === selectedDraftId;
+
+  // v0.29.0 — show CropRegionPicker only when at least one analysed
+  // asset has an orientation that disagrees with the project's
+  // target_aspect_ratio. Same-orientation projects don't need a
+  // static crop anchor — the renderer's centre crop is correct by
+  // construction.
+  const cropDirection: CropDirection | null = useMemo(() => {
+    if (!project || sourceOrientation === null) return null;
+    const target = project.target_aspect_ratio;
+    if (target === "9:16") {
+      // Target is portrait. Picker only matters for landscape
+      // (or mixed — pick the offending direction; the user gets
+      // left/center/right which controls cropping the wide axis).
+      if (sourceOrientation === "landscape") return "horizontal";
+      if (sourceOrientation === "mixed") return "horizontal";
+      return null;
+    }
+    if (target === "16:9") {
+      if (sourceOrientation === "portrait") return "vertical";
+      if (sourceOrientation === "mixed") return "vertical";
+      return null;
+    }
+    return null;
+  }, [project, sourceOrientation]);
 
   const polling = useDraftPolling(selectedDraftId);
   const draft = polling.data;
@@ -1311,6 +1387,7 @@ export default function ProjectEdit() {
             setProject={setProject}
             currentBgmSource={currentBgmSource}
             setCurrentBgmSource={setCurrentBgmSource}
+            cropDirection={cropDirection}
           />
           <div className="edit-card__actions">
             <button
@@ -1547,6 +1624,7 @@ export default function ProjectEdit() {
               setProject={setProject}
               currentBgmSource={currentBgmSource}
               setCurrentBgmSource={setCurrentBgmSource}
+              cropDirection={cropDirection}
             />
             <div className="edit-card__advanced-row">
               <Link

@@ -23,9 +23,46 @@ def test_aspect_filter_known_ratios() -> None:
     assert "setsar=1" in out
 
 
+def test_aspect_filter_landscape() -> None:
+    """v0.29.0 — 16:9 is the new horizontal output aspect."""
+    out = video_renderer.aspect_filter("16:9")
+    assert "scale=1920:1080" in out
+    assert "crop=1920:1080" in out
+    assert "setsar=1" in out
+
+
+def test_aspect_filter_drops_4_5_and_1_1() -> None:
+    """v0.29.0 — 4:5 and 1:1 are removed; renderer rejects them."""
+    with pytest.raises(video_renderer.VideoRenderError):
+        video_renderer.aspect_filter("4:5")
+    with pytest.raises(video_renderer.VideoRenderError):
+        video_renderer.aspect_filter("1:1")
+
+
 def test_aspect_filter_rejects_unknown_ratio() -> None:
     with pytest.raises(video_renderer.VideoRenderError):
         video_renderer.aspect_filter("21:9")
+
+
+def test_aspect_filter_centre_crop_omits_xy() -> None:
+    """v0.29.0 — when crop_region is None or centre we skip the explicit
+    x/y expression so the chain stays close to the pre-0.29 form."""
+    none_chain = video_renderer.aspect_filter("16:9")
+    centre_chain = video_renderer.aspect_filter("16:9", crop_region=(0.5, 0.5))
+    assert "crop=1920:1080," in none_chain
+    assert "crop=1920:1080," in centre_chain
+    # Neither emits the expression form.
+    assert "max(0" not in none_chain
+    assert "max(0" not in centre_chain
+
+
+def test_aspect_filter_off_centre_emits_clamped_expressions() -> None:
+    """v0.29.0 — off-centre anchors emit a clamped x/y expression."""
+    chain = video_renderer.aspect_filter("16:9", crop_region=(0.5, 0.0))
+    # The y-expression is the one that moved.
+    assert "crop=1920:1080:" in chain
+    assert "max(0" in chain
+    assert "in_h-1080" in chain
 
 
 def test_cut_segments_writes_one_file_per_segment(tmp_path: Path) -> None:

@@ -1,0 +1,156 @@
+/* v0.29.0 — static-crop anchor picker. Renders 3 preset cards each
+   with a tiny visual rectangle showing where the crop window
+   sits inside the source. Visual is built from CSS gradients on
+   a 16:9-ish wireframe so it scales cleanly down to the small
+   advanced-card column on mobile. */
+
+.crop-region-picker {
+  border: 1px solid var(--border, #ddd);
+  border-radius: 0.5rem;
+  padding: 0.75rem 0.85rem 0.85rem;
+  margin: 0 0 var(--space-4) 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.crop-region-picker__legend {
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
+  letter-spacing: 0.14em;
+  color: var(--text-secondary);
+  padding: 0 0.4rem;
+}
+
+.crop-region-picker__hint {
+  margin: 0;
+  font-size: var(--t-xs);
+  color: var(--text-muted, #777);
+}
+
+.crop-region-picker__grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+
+.crop-region-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.55rem 0.5rem 0.65rem;
+  border: 1.5px solid var(--border, #ddd);
+  border-radius: 0.45rem;
+  background: var(--surface, #fff);
+  cursor: pointer;
+  text-align: center;
+  font: inherit;
+  transition: border-color 0.12s, background 0.12s;
+}
+
+.crop-region-card:hover:not(:disabled) {
+  border-color: var(--accent, #3a7afe);
+}
+
+.crop-region-card:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.crop-region-card--selected {
+  border-color: var(--accent, #3a7afe);
+  background: var(--accent-soft, rgba(58, 122, 254, 0.08));
+}
+
+.crop-region-card__label {
+  font-size: var(--t-sm);
+  font-weight: 500;
+}
+
+.crop-region-card__hint {
+  font-size: 11px;
+  color: var(--text-muted, #888);
+  line-height: 1.25;
+}
+
+/* Wireframe of the source frame; the inner rectangle marks the
+   surviving crop window. */
+.crop-region-card__viz {
+  position: relative;
+  width: 100%;
+  max-width: 4.5rem;
+  aspect-ratio: 4 / 3;
+  border: 1.5px solid var(--text-muted, #999);
+  border-radius: 0.2rem;
+  background: linear-gradient(
+    135deg,
+    rgba(0, 0, 0, 0.04) 0%,
+    rgba(0, 0, 0, 0.02) 100%
+  );
+}
+
+.crop-region-card__viz::after {
+  content: "";
+  position: absolute;
+  background: var(--accent, #3a7afe);
+  opacity: 0.78;
+  border-radius: 0.12rem;
+}
+
+/* vertical = portrait source → landscape target. The viz shows a
+   short horizontal slice; preset moves that slice to top / middle /
+   bottom of the source rectangle. */
+.crop-region-card__viz--vertical::after {
+  left: 8%;
+  right: 8%;
+  height: 28%;
+}
+
+.crop-region-card__viz--vertical.crop-region-card__viz--top::after {
+  top: 8%;
+}
+
+.crop-region-card__viz--vertical.crop-region-card__viz--middle::after {
+  top: 36%;
+}
+
+.crop-region-card__viz--vertical.crop-region-card__viz--bottom::after {
+  bottom: 8%;
+}
+
+/* horizontal = landscape source → portrait target. The viz shows a
+   tall narrow slice anchored left / center / right. */
+.crop-region-card__viz--horizontal::after {
+  top: 8%;
+  bottom: 8%;
+  width: 28%;
+}
+
+.crop-region-card__viz--horizontal.crop-region-card__viz--left::after {
+  left: 8%;
+}
+
+.crop-region-card__viz--horizontal.crop-region-card__viz--center::after {
+  left: 36%;
+}
+
+.crop-region-card__viz--horizontal.crop-region-card__viz--right::after {
+  right: 8%;
+}
+
+.crop-region-picker__error {
+  color: var(--danger, #c0392b);
+  font-size: var(--t-xs);
+  margin: 0;
+}
+
+@media (max-width: 480px) {
+  .crop-region-picker__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .crop-region-card__viz {
+    max-width: 5rem;
+  }
+}

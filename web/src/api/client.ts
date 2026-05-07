@@ -14,6 +14,7 @@ import type {
   AssetDetail,
   AssetThumbnailsOut,
   BgmGenerationStatus,
+  CropRegionPatch,
   DetectedClassOut,
   DraftComment,
   DraftCommentCreate,
@@ -160,6 +161,24 @@ export class ApiClient {
   ): Promise<ProjectDetail> {
     return this.request<ProjectDetail>(
       `/projects/${projectId}/subject-class`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  // v0.29.0 — set / clear the static-crop anchor used when source
+  // orientation differs from target orientation. Body
+  // ``{x_norm: null, y_norm: null}`` clears the override (revert to
+  // centre); both populated stores a custom anchor 0..1.
+  patchProjectCropRegion(
+    projectId: number,
+    payload: CropRegionPatch,
+  ): Promise<ProjectDetail> {
+    return this.request<ProjectDetail>(
+      `/projects/${projectId}/crop-region`,
       {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
