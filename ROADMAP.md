@@ -2,7 +2,7 @@
 
 > **單一定位**：沒有剪輯背景的小白也能「拍完就上傳，AI 直接給大量 IG / FB 短影音」的工具。
 > 目標 UX：手機優先、繁體中文、高級感、最少手動編輯。
-> 目前版本：**0.30.1**（M9.15.1 — 設定再產生 UX 修正：配樂 snapshot、點選追蹤防呆、套用提示）
+> 目前版本：**0.30.2**（M9.15.2 — CI/CD Docker build context 修正，確保 production deploy 可建置 web image）
 > 下一個 milestone：M10 — 多專案批次 + 社群直接發布 + AI 自動縮圖。
 
 ## Phase 進度速覽
@@ -42,6 +42,7 @@
 | **M9.14** | **比例縮減（9:16 + 16:9）+ 來源↔輸出方向不同時的靜態裁切錨點選擇器** | ✅ done | **0.29.0** |
 | **M9.15** | **AI Smart Camera（AI 智慧運鏡）— Gemini Vision 重點區域 + 動態縮放/平移 + 節拍同步，預設關閉** | ✅ done | **0.30.0** |
 | **M9.15.1** | **設定再產生 UX 修正：配樂 snapshot、點選追蹤防呆、調整後套用提示** | ✅ done | **0.30.1** |
+| **M9.15.2** | **CI/CD Docker build context 修正：web image 由 repo root 建置，與 compose/workflow 一致** | ✅ done | **0.30.2** |
 | M10 | 多專案批次 + 社群直接發布 + AI 自動縮圖 | 🔮 future | 0.31.x+ |
 
 ---

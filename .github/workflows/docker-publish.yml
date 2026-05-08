@@ -31,8 +31,8 @@ jobs:
             file: docker/worker.Dockerfile
           - service: web
             image: media-processor-web
-            context: ./web
-            file: ../docker/web.Dockerfile
+            context: .
+            file: docker/web.Dockerfile
 
     steps:
       - name: Checkout code

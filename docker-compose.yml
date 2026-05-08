@@ -47,8 +47,8 @@ services:
   web:
     image: ${DOCKERHUB_USERNAME:-kevin950805}/media-processor-web:${IMAGE_TAG:-latest}
     build:
-      context: ./web
-      dockerfile: ../docker/web.Dockerfile
+      context: .
+      dockerfile: docker/web.Dockerfile
     restart: unless-stopped
     depends_on:
       - api

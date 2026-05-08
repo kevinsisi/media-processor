@@ -2,7 +2,7 @@
 
 Content factory pipeline for novice-friendly Instagram and Facebook short-video production.
 
-**Status:** v0.30.1 / M9.15.1 — settings re-render UX fixes for BGM, tracking, and apply guidance.
+**Status:** v0.30.2 / M9.15.2 — CI/CD Docker build context fix for production deployment.
 
 ## Spec
 
