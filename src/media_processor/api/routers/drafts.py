@@ -167,9 +167,7 @@ async def _prepare_draft_for_settings_rerender(
     asset_ids = {s.asset_id for s in draft.segments if s.asset_id is not None}
     if asset_ids:
         assets = (
-            (await session.execute(select(Asset).where(Asset.id.in_(asset_ids))))
-            .scalars()
-            .all()
+            (await session.execute(select(Asset).where(Asset.id.in_(asset_ids)))).scalars().all()
         )
         not_ready: list[str] = []
         for asset in assets:
