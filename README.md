@@ -2,7 +2,7 @@
 
 Content factory pipeline for novice-friendly Instagram and Facebook short-video production.
 
-**Status:** v0.28.4 / M9.13.4 — beginner-facing Traditional Chinese copy cleanup.
+**Status:** v0.30.0 / M9.15 — AI Smart Camera implemented, opt-in and off by default.
 
 ## Spec
 
@@ -87,6 +87,22 @@ The React/Vite app is API-backed. Main routes:
 | `/health` | Developer-facing status dashboard |
 
 `/projects/:id/review` is a legacy route and redirects to `/projects/:id/edit`.
+
+## v0.30.0 AI Smart Camera Notes
+
+- AI Smart Camera is implemented as an opt-in project/render flag and remains off
+  by default to protect Gemini quota and preserve static-camera user preference.
+- The planner samples each cut, asks Gemini Vision for focus regions, and derives
+  `zoom_in`, `zoom_out`, or `pan` directives when the visual evidence is strong.
+- Rendering uses a zoompan-driven crop path and falls back to the existing static
+  crop when a directive fails, so a single bad camera move should not fail the
+  full render.
+
+## v0.29.0 Aspect Ratio Notes
+
+- Output ratios are narrowed to `9:16` and `16:9`.
+- Static crop-region anchors are available when source and output orientation
+  differ; dynamic subject/point tracking still takes priority.
 
 ## v0.28.4 Beginner Copy Notes
 

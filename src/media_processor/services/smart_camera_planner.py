@@ -611,13 +611,15 @@ def deserialise_directive(blob: dict[str, Any] | None) -> Directive | None:
         return None
     if len(from_rect) != 4 or len(to_rect) != 4:
         return None
+    from_rect4 = (from_rect[0], from_rect[1], from_rect[2], from_rect[3])
+    to_rect4 = (to_rect[0], to_rect[1], to_rect[2], to_rect[3])
     ease = str(blob.get("ease", "linear"))
     if ease not in ("linear", "exp"):
         ease = "linear"
     return Directive(
         kind=str(kind),
-        from_rect=from_rect,  # type: ignore[arg-type]
-        to_rect=to_rect,  # type: ignore[arg-type]
+        from_rect=from_rect4,
+        to_rect=to_rect4,
         ease=ease,
         notes=str(blob.get("notes", "")),
     )
