@@ -2,7 +2,7 @@
 
 Content factory pipeline for novice-friendly Instagram and Facebook short-video production.
 
-**Status:** v0.30.5 / M9.15.5 — Taipei timezone config + draft preview cache busting.
+**Status:** v0.30.6 / M9.15.6 — frontend shell cache control for fresh progress UI.
 
 ## Spec
 
@@ -110,6 +110,10 @@ Production containers run with `TZ=Asia/Taipei` so logs and filesystem times
 match the operator's GMT+8 context. Draft preview URLs include the rendered
 file mtime as a cache-busting query because `vN.mp4` paths are overwritten by
 settings re-renders.
+
+The web nginx config serves the SPA shell and route fallbacks with `no-store`
+so operators do not keep using old JS/CSS after deployment; Vite hashed assets
+under `/assets/` remain long-cacheable with `immutable`.
 
 ## Web App
 

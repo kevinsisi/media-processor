@@ -77,7 +77,7 @@ Mirror locations (`.claude/skills/`, `.gemini/skills/`, `.opencode/skills/`, `.g
 ## Project Architecture Pointers
 
 CLAUDE.md is meta-rules; concrete project state lives elsewhere. When you need to understand what's currently in the codebase, prefer in this order:
-- `ROADMAP.md` — Phase 6–10 全程路線圖（已完成/規劃中），含每個 sub-task 驗收標準。新對話開頭先讀這個就能對齊大方向。**目前版本：0.30.5。**
+- `ROADMAP.md` — Phase 6–10 全程路線圖（已完成/規劃中），含每個 sub-task 驗收標準。新對話開頭先讀這個就能對齊大方向。**目前版本：0.30.6。**
 - `openspec/changes/` — current in-flight proposals + tasks. Completed milestones live under `openspec/changes/archive/YYYY-MM-DD-<name>/`. Archived through 0.28.x: M6 0.12.0 / M7 0.13.0 / M8 0.14.0 / M8.1 0.14.x / **v0.18 watermark / v0.19 subtitle-style + i18n + presets / v0.20 timeline + UX / v0.21 transitions + BGM + subject_class / v0.22 UI/UX 收斂 / v0.23 pixel-precise point tracking / v0.24 BGM fade + transitions default + voice_volume bug / v0.25 RQ queue inspector / v0.26 asset delete + meta / v0.27 multi-worker fan-out / v0.27.1 asset force-delete / v0.27.2 queue-modal CSS overflow fix / v0.27.3 point-tracking 30 s budget / v0.28.0 async point-tracking on worker-analysis / v0.29.0 aspect-ratio redux (9:16 + 16:9) + crop-region anchor / v0.30.0 AI Smart Camera (opt-in)**.
 - The auto-memory index at `~/.claude/projects/D--GitClone--HomeProject-media-processor/memory/MEMORY.md` — non-obvious deploy / runtime quirks (Tailscale routing, GPU runtime, drafts/BGM storage, key pools, MusicGen, vidstab, YOLO tracking, alembic parallel-branch hazard, render flag persistence).
 - `skills/gemini-prompts/` — 5 個 reusable Gemini prompt skill（asset-score / scene-tag / script-coverage / llm-patcher / smart-camera-focus），改 prompt 前先看這裡。
@@ -114,6 +114,7 @@ CLAUDE.md is meta-rules; concrete project state lives elsewhere. When you need t
 - `worker-bgm` sets `HF_HOME=/app/media/model_cache/huggingface` so MusicGen cache persists on `G:/MediaStorage`; without this, every recreated worker container can pay a multi-minute model download before GPU inference starts.
 - Production compose sets `TZ=Asia/Taipei` for all services. Keep this explicit; otherwise container logs and file times appear in UTC while the operator expects GMT+8.
 - Draft preview paths (`vN.mp4`) are overwritten by settings re-renders, so API draft URLs include file mtime cache-busting query strings. Do not remove this unless draft output filenames become immutable.
+- Web nginx must serve the SPA shell and route fallbacks with `Cache-Control: no-store`; only Vite content-hashed `/assets/` files should be immutable. Otherwise operators can keep using an old frontend after deploy and see stale queue/progress UI.
 - Runtime health for CI/CD should check the frontend proxy at `http://100.83.112.20:8523/api/health`; the API port `8623` is intentionally bound to localhost only.
 
 ## When To Remove Or Replace Skills
