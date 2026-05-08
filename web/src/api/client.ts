@@ -308,6 +308,15 @@ export class ApiClient {
     });
   }
 
+  async deleteProjectBgm(projectId: number): Promise<void> {
+    const url = `${this.baseUrl}/projects/${projectId}/bgm`;
+    const response = await this.fetchImpl(url, { method: "DELETE" });
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      throw new ApiError(response.status, url, text || response.statusText);
+    }
+  }
+
   // v0.18 — brand watermark / logo overlay. PNG only, ≤5 MB. Returns
   // the refreshed ProjectDetail so the picker can re-render against
   // the new watermark_url (carries a cache-bust query).

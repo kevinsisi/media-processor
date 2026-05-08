@@ -671,6 +671,8 @@ interface EditSettingsBlockProps {
   setProject: (p: ProjectDetail) => void;
   currentBgmSource: BgmSource;
   setCurrentBgmSource: (s: BgmSource) => void;
+  pendingSettingsNotice: string | null;
+  settingsApplyHint: string;
   // v0.29.0 — null when source orientation matches target (no crop
   // needed); otherwise the axis being cropped. Drives whether
   // CropRegionPicker mounts.
@@ -698,6 +700,13 @@ function EditSettingsBlock(props: EditSettingsBlockProps) {
 
   return (
     <div className="edit-settings">
+      {props.pendingSettingsNotice && (
+        <div className="settings-apply-notice" role="status">
+          <strong>{props.pendingSettingsNotice}</strong>
+          <span>{props.settingsApplyHint}</span>
+        </div>
+      )}
+
       <SettingsGroup title="短影音設定" summary={basicSummary}>
         <DurationPicker
           value={props.durationSec}
@@ -884,6 +893,7 @@ export default function ProjectEdit() {
   // button can show "目前：filename.mp3"). Fetched once on mount and
   // refreshed after a successful BGM upload.
   const [project, setProject] = useState<ProjectDetail | null>(null);
+  const [pendingSettingsNotice, setPendingSettingsNotice] = useState<string | null>(null);
   // v0.21.6 — analysis status gate: the trigger buttons are disabled
   // while any per-asset analysis step is still running / pending so
   // the operator doesn't kick off a render against half-analysed
@@ -1118,6 +1128,66 @@ export default function ProjectEdit() {
   const polling = useDraftPolling(selectedDraftId);
   const draft = polling.data;
 
+  const markSettingsChanged = useCallback((message: string) => {
+    setPendingSettingsNotice(message);
+  }, []);
+
+  const handleProjectSettingsUpdated = useCallback(
+    (updated: ProjectDetail) => {
+      setProject(updated);
+      markSettingsChanged("設定已更新");
+    },
+    [markSettingsChanged],
+  );
+
+  const handleDurationChange = useCallback(
+    (next: number) => {
+      setDurationSec(next);
+      markSettingsChanged("影片長度已更新");
+    },
+    [markSettingsChanged],
+  );
+
+  const handleStylePresetChange = useCallback(
+    (next: ClipStylePreset) => {
+      setStylePreset(next);
+      markSettingsChanged("影片風格已更新");
+    },
+    [markSettingsChanged],
+  );
+
+  const handleStabilizeChange = useCallback(
+    (next: boolean) => {
+      setStabilize(next);
+      markSettingsChanged("畫面防手震設定已更新");
+    },
+    [markSettingsChanged],
+  );
+
+  const handleSubtitlesChange = useCallback(
+    (next: boolean) => {
+      setSubtitlesOn(next);
+      markSettingsChanged("字幕設定已更新");
+    },
+    [markSettingsChanged],
+  );
+
+  const handleTransitionsChange = useCallback(
+    (next: boolean) => {
+      setTransitionsOn(next);
+      markSettingsChanged("轉場設定已更新");
+    },
+    [markSettingsChanged],
+  );
+
+  const handleAutoReframeChange = useCallback(
+    (next: boolean) => {
+      setAutoReframe(next);
+      markSettingsChanged("自動跟住主角設定已更新");
+    },
+    [markSettingsChanged],
+  );
+
   // While the selected version is in flight (pending/processing), poll the
   // drafts list too so the chip status updates live as it transitions to
   // ready_for_review / failed. Cheap — list endpoint is one query.
@@ -1143,7 +1213,10 @@ export default function ProjectEdit() {
       setSmartCamera(next);
       void apiClient
         .patchProjectSmartCamera(validProjectId, { enabled: next })
-        .then((updated) => setProject(updated))
+        .then((updated) => {
+          setProject(updated);
+          markSettingsChanged("AI 智慧運鏡設定已更新");
+        })
         .catch((err) => {
           // Roll back the local checkbox so the UI doesn't lie about
           // what the backend has — and surface so the operator
@@ -1154,7 +1227,7 @@ export default function ProjectEdit() {
           console.warn("patchProjectSmartCamera failed", err);
         });
     },
-    [validProjectId],
+    [validProjectId, markSettingsChanged],
   );
 
   const handleStartEdit = useCallback(
@@ -1181,6 +1254,7 @@ export default function ProjectEdit() {
         // — this kicks useDraftPolling into fetching the new row before the
         // list refresh comes back, so the UI never falls back to 開始剪輯.
         setSelectedDraftId(resp.draft_id);
+        setPendingSettingsNotice(null);
         // Refresh the chips list in the background so the new version
         // shows up. Old versions stay in the list — clicking a chip
         // switches back.
@@ -1236,11 +1310,22 @@ export default function ProjectEdit() {
       // into the polling hook so the status pill flips to 剪輯中
       // immediately, and refresh the draft list so the chip mirrors.
       polling.applyDraft(fresh);
+      setPendingSettingsNotice(null);
       void refreshDrafts().catch(() => {});
     } catch (err) {
-      setTriggerError(
-        err instanceof Error ? err.message : String(err ?? "unknown error"),
-      );
+      if (
+        err instanceof ApiError
+        && err.status === 409
+        && err.message.includes("point tracking")
+      ) {
+        setTriggerError(
+          "跟住主角還沒準備好或追蹤失敗。請回素材檢查頁等待追蹤完成，或改選其他焦點追蹤模式後再產生。",
+        );
+      } else {
+        setTriggerError(
+          err instanceof Error ? err.message : String(err ?? "unknown error"),
+        );
+      }
     } finally {
       setTriggering(false);
     }
@@ -1437,25 +1522,27 @@ export default function ProjectEdit() {
           </p>
           <EditSettingsBlock
             durationSec={durationSec}
-            setDurationSec={setDurationSec}
+            setDurationSec={handleDurationChange}
             stylePreset={stylePreset}
-            setStylePreset={setStylePreset}
+            setStylePreset={handleStylePresetChange}
             stabilize={stabilize}
-            setStabilize={setStabilize}
+            setStabilize={handleStabilizeChange}
             subtitlesOn={subtitlesOn}
-            setSubtitlesOn={setSubtitlesOn}
+            setSubtitlesOn={handleSubtitlesChange}
             transitionsOn={transitionsOn}
-            setTransitionsOn={setTransitionsOn}
+            setTransitionsOn={handleTransitionsChange}
             autoReframe={autoReframe}
-            setAutoReframe={setAutoReframe}
+            setAutoReframe={handleAutoReframeChange}
             smartCamera={smartCamera}
             setSmartCamera={handleSmartCameraChange}
             triggering={triggering}
             validProjectId={validProjectId}
             project={project}
-            setProject={setProject}
+            setProject={handleProjectSettingsUpdated}
             currentBgmSource={currentBgmSource}
             setCurrentBgmSource={setCurrentBgmSource}
+            pendingSettingsNotice={pendingSettingsNotice}
+            settingsApplyHint={`按下方「產生 ${durationSec} 秒短影音」才會依照目前設定建立成品。`}
             cropDirection={cropDirection}
           />
           <div className="edit-card__actions">
@@ -1651,9 +1738,9 @@ export default function ProjectEdit() {
                     className="cta cta--secondary"
                     onClick={() => void handleReRender()}
                     disabled={triggering}
-                    title="保留目前片段順序，只用最新的配樂、字幕、品牌標誌與轉場設定重新產生成品"
+                    title="保留目前片段順序，套用目前的焦點追蹤、裁切、配樂、字幕、品牌標誌與轉場設定重新產生成品"
                   >
-                    {triggering ? "送出中…" : "套用設定再產生"}
+                    {triggering ? "送出中…" : "保留片段套用設定"}
                   </button>
                   <button
                     type="button"
@@ -1676,25 +1763,27 @@ export default function ProjectEdit() {
               </div>
               <EditSettingsBlock
                 durationSec={durationSec}
-                setDurationSec={setDurationSec}
+                setDurationSec={handleDurationChange}
                 stylePreset={stylePreset}
-                setStylePreset={setStylePreset}
+                setStylePreset={handleStylePresetChange}
                 stabilize={stabilize}
-                setStabilize={setStabilize}
+                setStabilize={handleStabilizeChange}
                 subtitlesOn={subtitlesOn}
-                setSubtitlesOn={setSubtitlesOn}
+                setSubtitlesOn={handleSubtitlesChange}
                 transitionsOn={transitionsOn}
-                setTransitionsOn={setTransitionsOn}
+                setTransitionsOn={handleTransitionsChange}
                 autoReframe={autoReframe}
-                setAutoReframe={setAutoReframe}
+                setAutoReframe={handleAutoReframeChange}
                 smartCamera={smartCamera}
                 setSmartCamera={handleSmartCameraChange}
                 triggering={triggering}
                 validProjectId={validProjectId}
                 project={project}
-                setProject={setProject}
+                setProject={handleProjectSettingsUpdated}
                 currentBgmSource={currentBgmSource}
                 setCurrentBgmSource={setCurrentBgmSource}
+                pendingSettingsNotice={pendingSettingsNotice}
+                settingsApplyHint="只想套用目前配樂、字幕、品牌、裁切或跟住主角設定，請按上方「保留片段套用設定」；如果想重新挑片段，按「重新選片段」。"
                 cropDirection={cropDirection}
               />
               <div className="edit-card__advanced-row">
@@ -1720,6 +1809,7 @@ export default function ProjectEdit() {
                   // → 剪輯中 immediately. Also nudge the drafts list so
                   // the version chip mirrors the new state.
                   polling.applyDraft(fresh);
+                  setPendingSettingsNotice(null);
                   void refreshDrafts().catch(() => {});
                 }}
                 onReorderError={(msg) => setTriggerError(msg)}
@@ -1728,6 +1818,7 @@ export default function ProjectEdit() {
                   stabilize,
                   subtitles: subtitlesOn,
                   autoReframe,
+                  smartCamera,
                 }}
               />
             {draft.cut_plan?.notes && (
@@ -1750,6 +1841,7 @@ export default function ProjectEdit() {
                 stabilize,
                 subtitles: subtitlesOn,
                 autoReframe,
+                smartCamera,
               }}
             />
           </details>
@@ -1814,25 +1906,27 @@ export default function ProjectEdit() {
           </p>
           <EditSettingsBlock
             durationSec={durationSec}
-            setDurationSec={setDurationSec}
+            setDurationSec={handleDurationChange}
             stylePreset={stylePreset}
-            setStylePreset={setStylePreset}
+            setStylePreset={handleStylePresetChange}
             stabilize={stabilize}
-            setStabilize={setStabilize}
+            setStabilize={handleStabilizeChange}
             subtitlesOn={subtitlesOn}
-            setSubtitlesOn={setSubtitlesOn}
+            setSubtitlesOn={handleSubtitlesChange}
             transitionsOn={transitionsOn}
-            setTransitionsOn={setTransitionsOn}
+            setTransitionsOn={handleTransitionsChange}
             autoReframe={autoReframe}
-            setAutoReframe={setAutoReframe}
+            setAutoReframe={handleAutoReframeChange}
             smartCamera={smartCamera}
             setSmartCamera={handleSmartCameraChange}
             triggering={triggering}
             validProjectId={validProjectId}
             project={project}
-            setProject={setProject}
+            setProject={handleProjectSettingsUpdated}
             currentBgmSource={currentBgmSource}
             setCurrentBgmSource={setCurrentBgmSource}
+            pendingSettingsNotice={pendingSettingsNotice}
+            settingsApplyHint={`按下方「產生 ${durationSec} 秒短影音」才會依照目前設定建立新版成品。`}
             cropDirection={cropDirection}
           />
           <div className="edit-card__actions">

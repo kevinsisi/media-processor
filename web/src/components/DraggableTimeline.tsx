@@ -62,6 +62,7 @@ interface DraggableTimelineProps {
     stabilize: boolean;
     subtitles: boolean;
     autoReframe: boolean;
+    smartCamera: boolean;
   };
 }
 
@@ -513,6 +514,7 @@ export default function DraggableTimeline({
               stabilize: renderFlags.stabilize,
               subtitles: renderFlags.subtitles,
               auto_reframe: renderFlags.autoReframe,
+              smart_camera: renderFlags.smartCamera,
             }
           : undefined,
       });

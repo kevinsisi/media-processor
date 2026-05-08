@@ -2,7 +2,7 @@
 
 Content factory pipeline for novice-friendly Instagram and Facebook short-video production.
 
-**Status:** v0.30.0 / M9.15 — AI Smart Camera implemented, opt-in and off by default.
+**Status:** v0.30.1 / M9.15.1 — settings re-render UX fixes for BGM, tracking, and apply guidance.
 
 ## Spec
 
@@ -70,6 +70,36 @@ curl http://127.0.0.1:8523/api/health
 The health response includes `status`, `version`, and dependency status. `status`
 is `ok` only when Postgres and Redis are both reachable; otherwise it is
 `degraded`.
+
+## Production CI/CD
+
+Pushes to `main` build and publish three Docker Hub images:
+
+- `kevin950805/media-processor-api:latest`
+- `kevin950805/media-processor-worker:latest`
+- `kevin950805/media-processor-web:latest`
+
+After image publishing succeeds, `Deploy Production` connects to the `kevinhome`
+desktop over Tailscale (`100.83.112.20`), copies `docker-compose.yml` to
+`D:/GitClone/_HomeProject/media-processor`, validates the existing production
+`.env`, then runs:
+
+```bash
+docker compose pull api web worker-analysis worker-editing worker-bgm
+docker compose up -d --scale worker-editing=3 postgres redis api web worker-analysis worker-editing worker-bgm
+```
+
+The deploy workflow intentionally refuses to proceed unless the desktop `.env`
+keeps the live data mounts on the existing G drive:
+
+```env
+MEDIA_STORAGE_DIR=G:/MediaStorage
+PGDATA_DIR=G:/MediaStorage/pgdata
+```
+
+This guard prevents CD from accidentally falling back to repo-local `.local/`
+media storage or the `postgres_data` named volume and losing the currently live
+data mapping.
 
 ## Web App
 

@@ -147,6 +147,8 @@ export default function BgmSourcePicker({
     bgmPath ? "upload" : "none",
   );
   const filename = useMemo(() => bgmFilename(bgmPath), [bgmPath]);
+  const [clearInProgress, setClearInProgress] = useState(false);
+  const [clearError, setClearError] = useState<string | null>(null);
 
   // Sticky once-set: any explicit user click on a radio flips this so
   // the auto-switch effect leaves manual choices alone, even on later
@@ -155,8 +157,29 @@ export default function BgmSourcePicker({
 
   const updateSource = useCallback((next: Source, fromUser: boolean) => {
     if (fromUser) userChoseSourceRef.current = true;
+    setClearError(null);
     setSource(next);
   }, []);
+
+  const handleClearBgm = useCallback(async () => {
+    setClearInProgress(true);
+    setClearError(null);
+    try {
+      await apiClient.deleteProjectBgm(projectId);
+      const proj = await apiClient.fetchProject(projectId);
+      onProjectUpdated(proj);
+    } catch (err) {
+      setClearError(
+        err instanceof ApiError
+          ? `${err.status}: ${err.message}`
+          : err instanceof Error
+            ? err.message
+            : String(err),
+      );
+    } finally {
+      setClearInProgress(false);
+    }
+  }, [projectId, onProjectUpdated]);
 
   // Notify parent on every source change so ProjectEdit's section
   // header summary stays in sync.
@@ -525,9 +548,32 @@ export default function BgmSourcePicker({
       </div>
 
       {source === "none" && (
-        <p className="bgm-picker__hint mono">
-          產生成品時不加入背景音樂，只保留原聲與人聲。
-        </p>
+        <div className="bgm-picker__panel">
+          {filename ? (
+            <>
+              <p className="bgm-picker__hint mono">
+                目前專案仍有配樂：{filename}。要讓下一次產生成品不加入背景音樂，請先移除它。
+              </p>
+              <button
+                type="button"
+                className="cta cta--quiet"
+                onClick={() => void handleClearBgm()}
+                disabled={disabled || clearInProgress}
+              >
+                {clearInProgress ? "移除中…" : "移除目前配樂"}
+              </button>
+            </>
+          ) : (
+            <p className="bgm-picker__hint mono">
+              產生成品時不加入背景音樂，只保留原聲與人聲。
+            </p>
+          )}
+          {clearError && (
+            <p className="bgm-picker__err mono" role="alert">
+              移除配樂失敗：{clearError}
+            </p>
+          )}
+        </div>
       )}
 
       {source === "preset" && presetKey && (() => {

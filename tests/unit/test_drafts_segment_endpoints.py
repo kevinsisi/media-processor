@@ -550,3 +550,68 @@ def test_rebuild_subtitles_body_override_beats_snapshot(
     assert call["subtitles"] is False
     assert call["stabilize"] is True
     assert call["auto_reframe"] is True
+
+
+def test_re_render_clears_stale_bgm_snapshot(
+    app: tuple[FastAPI, _FakeQueue],
+) -> None:
+    """The settings re-render path must use the current Project.bgm_path.
+
+    Draft.bgm_path is a render-time snapshot. If it is left populated,
+    the worker intentionally keeps the old soundtrack and the operator's
+    newly generated / selected BGM appears to do nothing.
+    """
+    import asyncio
+
+    fastapi_app, fake_q = app
+    overrides = fastapi_app.dependency_overrides[get_session]
+
+    async def _stamp_bgm() -> None:
+        async for s in overrides():
+            draft = (await s.execute(select(Draft).where(Draft.id == 1))).scalar_one()
+            project = (await s.execute(select(Project).where(Project.id == 1))).scalar_one()
+            draft.bgm_path = "/app/media/bgm/old.wav"
+            project.bgm_path = "/app/media/bgm/new.wav"
+            await s.commit()
+            return
+
+    async def _read_draft_bgm() -> str | None:
+        async for s in overrides():
+            draft = (await s.execute(select(Draft).where(Draft.id == 1))).scalar_one()
+            return draft.bgm_path
+        raise AssertionError("session generator did not yield")
+
+    asyncio.run(_stamp_bgm())
+
+    client = TestClient(fastapi_app)
+    resp = client.post("/drafts/1/re-render")
+    assert resp.status_code == 200, resp.text
+    assert fake_q.calls[0]["skip_plan"] is True
+    assert asyncio.run(_read_draft_bgm()) is None
+
+
+def test_re_render_rejects_unfinished_point_tracking(
+    app: tuple[FastAPI, _FakeQueue],
+) -> None:
+    """Do not silently render static crop when the selected point track is not ready."""
+    import asyncio
+
+    fastapi_app, fake_q = app
+    overrides = fastapi_app.dependency_overrides[get_session]
+
+    async def _mark_point_pending() -> None:
+        async for s in overrides():
+            asset = (await s.execute(select(Asset).where(Asset.id == 1))).scalar_one()
+            asset.tracked_object_index = -4
+            asset.point_tracking_status = "pending"
+            asset.point_tracking_json = None
+            await s.commit()
+            return
+
+    asyncio.run(_mark_point_pending())
+
+    client = TestClient(fastapi_app)
+    resp = client.post("/drafts/1/re-render")
+    assert resp.status_code == 409
+    assert "point tracking pending" in resp.text
+    assert fake_q.calls == []

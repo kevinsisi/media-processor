@@ -852,6 +852,25 @@
   margin: var(--space-4) 0;
 }
 
+.settings-apply-notice {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid rgba(217, 158, 90, 0.42);
+  border-left: 3px solid var(--gold);
+  border-radius: 10px;
+  background: rgba(217, 158, 90, 0.1);
+  color: rgba(255, 230, 200, 0.9);
+  font-size: var(--t-sm);
+  line-height: 1.55;
+}
+
+.settings-apply-notice strong {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
 .settings-group {
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.02);

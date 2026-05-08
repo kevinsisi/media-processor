@@ -154,6 +154,46 @@ async def _mark_draft_enqueue_failed(
     await session.commit()
 
 
+async def _prepare_draft_for_settings_rerender(
+    session: AsyncSession,
+    draft: Draft,
+) -> None:
+    """Validate render-time asset settings and clear stale draft snapshots.
+
+    Re-render is the operator-facing "apply current settings" path. Keep
+    the existing timeline, but do not silently reuse snapshots that are meant
+    to be refreshed from Project / Asset rows at render time.
+    """
+    asset_ids = {s.asset_id for s in draft.segments if s.asset_id is not None}
+    if asset_ids:
+        assets = (
+            (await session.execute(select(Asset).where(Asset.id.in_(asset_ids))))
+            .scalars()
+            .all()
+        )
+        not_ready: list[str] = []
+        for asset in assets:
+            if getattr(asset, "tracked_object_index", None) != -4:
+                continue
+            point_blob = getattr(asset, "point_tracking_json", None)
+            has_frames = isinstance(point_blob, dict) and bool(point_blob.get("frames"))
+            point_status = getattr(asset, "point_tracking_status", None)
+            if point_status == "pending":
+                not_ready.append(f"asset {asset.id}: point tracking pending")
+            elif point_status == "failed" or not has_frames:
+                not_ready.append(f"asset {asset.id}: point tracking not available")
+        if not_ready:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="; ".join(not_ready),
+            )
+
+    # Force the render worker to snapshot the current Project.bgm_path. This
+    # lets "apply settings and re-render" actually pick up newly generated,
+    # selected, uploaded, or removed BGM instead of keeping the old draft track.
+    draft.bgm_path = None
+
+
 def _resolve_draft_url(draft: Draft, *, suffix: str, stored_path: str | None) -> str | None:
     """Pick a public URL for the mp4 or srt sidecar.
 
@@ -625,6 +665,7 @@ async def reorder_draft_segments(
     # rows. Shared helper — the v0.20 segment-level endpoints
     # (split / patch / delete) call this same routine.
     await _reflow_segments_and_cut_plan(draft)
+    await _prepare_draft_for_settings_rerender(session, draft)
 
     draft.status = DraftStatus.PENDING.value
     draft.progress_steps_json = {}
@@ -1016,6 +1057,7 @@ async def re_render_draft(
             status_code=status.HTTP_409_CONFLICT,
             detail="draft has no plan to re-render against",
         )
+    await _prepare_draft_for_settings_rerender(session, draft)
     draft.status = DraftStatus.PENDING.value
     draft.progress_steps_json = {}
     draft.prompt_feedback = None
@@ -1073,6 +1115,7 @@ async def rebuild_subtitles(
             status_code=status.HTTP_409_CONFLICT,
             detail="draft has no plan to re-render against",
         )
+    await _prepare_draft_for_settings_rerender(session, draft)
     draft.status = DraftStatus.PENDING.value
     draft.progress_steps_json = {}
     draft.prompt_feedback = None

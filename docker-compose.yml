@@ -28,6 +28,7 @@ services:
       retries: 10
 
   api:
+    image: ${DOCKERHUB_USERNAME:-kevin950805}/media-processor-api:${IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: docker/api.Dockerfile
@@ -41,11 +42,10 @@ services:
     ports:
       - "127.0.0.1:8623:8000"
     volumes:
-      - ./src:/app/src:ro
-      - ./profiles:/app/profiles:ro
       - "${MEDIA_STORAGE_DIR:-./.local/media}:/app/media"
 
   web:
+    image: ${DOCKERHUB_USERNAME:-kevin950805}/media-processor-web:${IMAGE_TAG:-latest}
     build:
       context: ./web
       dockerfile: ../docker/web.Dockerfile
@@ -83,6 +83,7 @@ services:
   # detect. Single instance — model load + GPU memory are the
   # bottleneck, not concurrency.
   worker-analysis:
+    image: ${DOCKERHUB_USERNAME:-kevin950805}/media-processor-worker:${IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: docker/worker.Dockerfile
@@ -102,8 +103,6 @@ services:
               count: 1
               capabilities: [gpu]
     volumes:
-      - ./src:/app/src:ro
-      - ./profiles:/app/profiles:ro
       - "${MEDIA_STORAGE_DIR:-./.local/media}:/app/media"
 
   # CPU workers for the editing queue: ffmpeg cut + concat +
@@ -125,6 +124,7 @@ services:
   # is load-bearing. Documented in CLAUDE.md so the next deploy
   # remembers it.
   worker-editing:
+    image: ${DOCKERHUB_USERNAME:-kevin950805}/media-processor-worker:${IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: docker/worker.Dockerfile
@@ -139,8 +139,6 @@ services:
     deploy:
       replicas: 3
     volumes:
-      - ./src:/app/src:ro
-      - ./profiles:/app/profiles:ro
       - "${MEDIA_STORAGE_DIR:-./.local/media}:/app/media"
 
   # GPU worker for the bgm queue: MusicGen-small (text → 30 s
@@ -152,6 +150,7 @@ services:
   # between jobs and would otherwise block Whisper loads on the
   # same process.
   worker-bgm:
+    image: ${DOCKERHUB_USERNAME:-kevin950805}/media-processor-worker:${IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: docker/worker.Dockerfile
@@ -171,8 +170,6 @@ services:
               count: 1
               capabilities: [gpu]
     volumes:
-      - ./src:/app/src:ro
-      - ./profiles:/app/profiles:ro
       - "${MEDIA_STORAGE_DIR:-./.local/media}:/app/media"
 
 volumes:
