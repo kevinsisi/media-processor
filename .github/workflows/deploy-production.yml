@@ -17,106 +17,86 @@ env:
 
 jobs:
   deploy-production:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Windows, X64, media-processor-prod]
     if: >
       (github.event_name == 'workflow_dispatch') ||
       (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
-      - name: Connect to Tailscale
-        uses: tailscale/github-action@v2
-        with:
-          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
-          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
-          tags: tag:github-actions
-
-      - name: Setup SSH
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H "${DEPLOY_SERVER_IP}" >> ~/.ssh/known_hosts
-
       - name: Ensure deploy directory exists
-        env:
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         run: |
-          ssh -i ~/.ssh/deploy_key "${DEPLOY_USER}@${DEPLOY_SERVER_IP}" \
-            "powershell -NoProfile -Command \"New-Item -ItemType Directory -Force -Path '${DEPLOY_PATH}' | Out-Null\""
+          New-Item -ItemType Directory -Force -Path "${env:DEPLOY_PATH}" | Out-Null
 
       - name: Sync docker-compose.yml to desktop
-        env:
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         run: |
-          scp -i ~/.ssh/deploy_key docker-compose.yml "${DEPLOY_USER}@${DEPLOY_SERVER_IP}:${DEPLOY_PATH}/docker-compose.yml"
+          Copy-Item -LiteralPath "docker-compose.yml" -Destination (Join-Path "${env:DEPLOY_PATH}" "docker-compose.yml") -Force
 
       - name: Validate production volume mapping
-        env:
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         run: |
-          ssh -i ~/.ssh/deploy_key "${DEPLOY_USER}@${DEPLOY_SERVER_IP}" \
-            "powershell -NoProfile -Command \"
-              \$ErrorActionPreference = 'Stop'
-              \$deployPath = '${DEPLOY_PATH}'
-              \$envPath = Join-Path \$deployPath '.env'
-              if (!(Test-Path -LiteralPath \$envPath)) { throw 'Missing .env on deploy host; refusing to deploy because compose would fall back to local or named volumes.' }
+          $ErrorActionPreference = 'Stop'
+          $envPath = Join-Path "${env:DEPLOY_PATH}" ".env"
+          if (!(Test-Path -LiteralPath $envPath)) { throw 'Missing .env on deploy host; refusing to deploy because compose would fall back to local or named volumes.' }
 
-              function Read-EnvValue([string]\$Name) {
-                \$line = Get-Content -LiteralPath \$envPath | Where-Object { \$_ -match ('^' + [regex]::Escape(\$Name) + '=') } | Select-Object -Last 1
-                if (-not \$line) { return \$null }
-                return (\$line -replace ('^' + [regex]::Escape(\$Name) + '='), '').Trim().Trim('\"')
-              }
+          function Read-EnvValue([string]$Name) {
+            $line = Get-Content -LiteralPath $envPath | Where-Object { $_ -match ('^' + [regex]::Escape($Name) + '=') } | Select-Object -Last 1
+            if (-not $line) { return $null }
+            return ($line -replace ('^' + [regex]::Escape($Name) + '='), '').Trim().Trim('"')
+          }
 
-              function Normalize-PathValue([string]\$Value) {
-                if (-not \$Value) { return \$null }
-                return \$Value.Replace('\', '/').TrimEnd('/')
-              }
+          function Normalize-PathValue([string]$Value) {
+            if (-not $Value) { return $null }
+            return $Value.Replace('\', '/').TrimEnd('/')
+          }
 
-              \$media = Normalize-PathValue (Read-EnvValue 'MEDIA_STORAGE_DIR')
-              \$pgdata = Normalize-PathValue (Read-EnvValue 'PGDATA_DIR')
-              if (\$media -ne '${EXPECTED_MEDIA_STORAGE_DIR}') { throw \"MEDIA_STORAGE_DIR must be ${EXPECTED_MEDIA_STORAGE_DIR}, got '\$media'\" }
-              if (\$pgdata -ne '${EXPECTED_PGDATA_DIR}') { throw \"PGDATA_DIR must be ${EXPECTED_PGDATA_DIR}, got '\$pgdata'\" }
-              if (!(Test-Path -LiteralPath '${EXPECTED_MEDIA_STORAGE_DIR}')) { throw 'Missing ${EXPECTED_MEDIA_STORAGE_DIR} on deploy host.' }
-              if (!(Test-Path -LiteralPath '${EXPECTED_PGDATA_DIR}')) { throw 'Missing ${EXPECTED_PGDATA_DIR} on deploy host.' }
-            \""
+          $media = Normalize-PathValue (Read-EnvValue 'MEDIA_STORAGE_DIR')
+          $pgdata = Normalize-PathValue (Read-EnvValue 'PGDATA_DIR')
+          if ($media -ne "${env:EXPECTED_MEDIA_STORAGE_DIR}") { throw "MEDIA_STORAGE_DIR must be ${env:EXPECTED_MEDIA_STORAGE_DIR}, got '$media'" }
+          if ($pgdata -ne "${env:EXPECTED_PGDATA_DIR}") { throw "PGDATA_DIR must be ${env:EXPECTED_PGDATA_DIR}, got '$pgdata'" }
+          if (!(Test-Path -LiteralPath "${env:EXPECTED_MEDIA_STORAGE_DIR}")) { throw "Missing ${env:EXPECTED_MEDIA_STORAGE_DIR} on deploy host." }
+          if (!(Test-Path -LiteralPath "${env:EXPECTED_PGDATA_DIR}")) { throw "Missing ${env:EXPECTED_PGDATA_DIR} on deploy host." }
 
       - name: Deploy via Docker Compose
-        env:
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         run: |
-          ssh -i ~/.ssh/deploy_key "${DEPLOY_USER}@${DEPLOY_SERVER_IP}" \
-            "powershell -NoProfile -Command \"
-              \$ErrorActionPreference = 'Stop'
-              Set-Location -LiteralPath '${DEPLOY_PATH}'
-              \$env:DOCKERHUB_USERNAME = '${DOCKERHUB_USERNAME}'
-              \$env:IMAGE_TAG = '${IMAGE_TAG}'
-              docker compose pull api web worker-analysis worker-editing worker-bgm
-              docker compose up -d --scale worker-editing=3 postgres redis api web worker-analysis worker-editing worker-bgm
-              docker compose ps
-            \""
+          $ErrorActionPreference = 'Stop'
+          Set-Location -LiteralPath "${env:DEPLOY_PATH}"
+          $env:DOCKERHUB_USERNAME = "${env:DOCKERHUB_USERNAME}"
+          $env:IMAGE_TAG = "${env:IMAGE_TAG}"
+
+          docker compose pull api web worker-analysis worker-editing worker-bgm
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          docker compose up -d --scale worker-editing=3 postgres redis api web worker-analysis worker-editing worker-bgm
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          docker compose ps
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Health check through web proxy
         run: |
-          for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
-            if curl -fsS "http://${DEPLOY_SERVER_IP}:8523/api/health"; then
-              exit 0
-            fi
-            sleep 10
-          done
+          $expected = (Select-String -Path "pyproject.toml" -Pattern '^version = "([^"]+)"').Matches[0].Groups[1].Value
+          for ($i = 1; $i -le 12; $i++) {
+            $body = curl.exe -fsS "http://${env:DEPLOY_SERVER_IP}:8523/api/health"
+            if ($LASTEXITCODE -eq 0) {
+              $health = $body | ConvertFrom-Json
+              if ($health.version -eq $expected) { exit 0 }
+              Write-Host "Health version $($health.version), expected $expected"
+            }
+            Start-Sleep -Seconds 10
+          }
           exit 1
 
       - name: Deployment Summary
         if: always()
         run: |
-          echo "## Production Deployment Summary" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Status: ${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Server: ${DEPLOY_SERVER_IP}" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Deploy path: ${DEPLOY_PATH}" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Media volume: ${EXPECTED_MEDIA_STORAGE_DIR}" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Postgres volume: ${EXPECTED_PGDATA_DIR}" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Web health: http://${DEPLOY_SERVER_IP}:8523/api/health" >> "$GITHUB_STEP_SUMMARY"
+          "## Production Deployment Summary" >> $env:GITHUB_STEP_SUMMARY
+          "- Status: ${{ job.status }}" >> $env:GITHUB_STEP_SUMMARY
+          "- Server: ${env:DEPLOY_SERVER_IP}" >> $env:GITHUB_STEP_SUMMARY
+          "- Deploy path: ${env:DEPLOY_PATH}" >> $env:GITHUB_STEP_SUMMARY
+          "- Media volume: ${env:EXPECTED_MEDIA_STORAGE_DIR}" >> $env:GITHUB_STEP_SUMMARY
+          "- Postgres volume: ${env:EXPECTED_PGDATA_DIR}" >> $env:GITHUB_STEP_SUMMARY
+          "- Web health: http://${env:DEPLOY_SERVER_IP}:8523/api/health" >> $env:GITHUB_STEP_SUMMARY

@@ -77,7 +77,7 @@ Mirror locations (`.claude/skills/`, `.gemini/skills/`, `.opencode/skills/`, `.g
 ## Project Architecture Pointers
 
 CLAUDE.md is meta-rules; concrete project state lives elsewhere. When you need to understand what's currently in the codebase, prefer in this order:
-- `ROADMAP.md` — Phase 6–10 全程路線圖（已完成/規劃中），含每個 sub-task 驗收標準。新對話開頭先讀這個就能對齊大方向。**目前版本：0.30.2。**
+- `ROADMAP.md` — Phase 6–10 全程路線圖（已完成/規劃中），含每個 sub-task 驗收標準。新對話開頭先讀這個就能對齊大方向。**目前版本：0.30.3。**
 - `openspec/changes/` — current in-flight proposals + tasks. Completed milestones live under `openspec/changes/archive/YYYY-MM-DD-<name>/`. Archived through 0.28.x: M6 0.12.0 / M7 0.13.0 / M8 0.14.0 / M8.1 0.14.x / **v0.18 watermark / v0.19 subtitle-style + i18n + presets / v0.20 timeline + UX / v0.21 transitions + BGM + subject_class / v0.22 UI/UX 收斂 / v0.23 pixel-precise point tracking / v0.24 BGM fade + transitions default + voice_volume bug / v0.25 RQ queue inspector / v0.26 asset delete + meta / v0.27 multi-worker fan-out / v0.27.1 asset force-delete / v0.27.2 queue-modal CSS overflow fix / v0.27.3 point-tracking 30 s budget / v0.28.0 async point-tracking on worker-analysis / v0.29.0 aspect-ratio redux (9:16 + 16:9) + crop-region anchor / v0.30.0 AI Smart Camera (opt-in)**.
 - The auto-memory index at `~/.claude/projects/D--GitClone--HomeProject-media-processor/memory/MEMORY.md` — non-obvious deploy / runtime quirks (Tailscale routing, GPU runtime, drafts/BGM storage, key pools, MusicGen, vidstab, YOLO tracking, alembic parallel-branch hazard, render flag persistence).
 - `skills/gemini-prompts/` — 5 個 reusable Gemini prompt skill（asset-score / scene-tag / script-coverage / llm-patcher / smart-camera-focus），改 prompt 前先看這裡。
@@ -107,8 +107,8 @@ CLAUDE.md is meta-rules; concrete project state lives elsewhere. When you need t
 ## Production Deployment Notes
 
 - Production runtime is the `kevinhome` desktop over Tailscale (`100.83.112.20`), with deploy path `D:/GitClone/_HomeProject/media-processor`.
-- GitHub Actions CI/CD now follows the HomeProject two-workflow pattern: `.github/workflows/docker-publish.yml` builds/pushes `kevin950805/media-processor-api:latest`, `kevin950805/media-processor-worker:latest`, and `kevin950805/media-processor-web:latest`; `.github/workflows/deploy-production.yml` deploys them to the desktop.
-- The deploy workflow copies the repo `docker-compose.yml` to the desktop before running `docker compose pull` and `docker compose up`.
+- GitHub Actions CI/CD now follows the HomeProject two-workflow pattern: `.github/workflows/docker-publish.yml` builds/pushes `kevin950805/media-processor-api:latest`, `kevin950805/media-processor-worker:latest`, and `kevin950805/media-processor-web:latest`; `.github/workflows/deploy-production.yml` runs on the `kevinhome` self-hosted runner so production deploy does not depend on Windows SSH.
+- The deploy workflow copies the repo `docker-compose.yml` into `D:/GitClone/_HomeProject/media-processor` before running local `docker compose pull` and `docker compose up`.
 - The desktop `.env` is the source of truth for data volumes. CD must fail if `MEDIA_STORAGE_DIR` is not `G:/MediaStorage` or `PGDATA_DIR` is not `G:/MediaStorage/pgdata`; falling back to `.local/media` or the `postgres_data` named volume would detach the already-live data.
 - Deployment must keep `--scale worker-editing=3`; `deploy.replicas` alone is ignored by plain Docker Compose.
 - Runtime health for CI/CD should check the frontend proxy at `http://100.83.112.20:8523/api/health`; the API port `8623` is intentionally bound to localhost only.

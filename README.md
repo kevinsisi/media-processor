@@ -2,7 +2,7 @@
 
 Content factory pipeline for novice-friendly Instagram and Facebook short-video production.
 
-**Status:** v0.30.2 / M9.15.2 — CI/CD Docker build context fix for production deployment.
+**Status:** v0.30.3 / M9.15.3 — production deploy now runs on the kevinhome self-hosted runner.
 
 ## Spec
 
@@ -79,10 +79,10 @@ Pushes to `main` build and publish three Docker Hub images:
 - `kevin950805/media-processor-worker:latest`
 - `kevin950805/media-processor-web:latest`
 
-After image publishing succeeds, `Deploy Production` connects to the `kevinhome`
-desktop over Tailscale (`100.83.112.20`), copies `docker-compose.yml` to
+After image publishing succeeds, `Deploy Production` runs on the `kevinhome`
+self-hosted runner (`100.83.112.20`), copies `docker-compose.yml` to
 `D:/GitClone/_HomeProject/media-processor`, validates the existing production
-`.env`, then runs:
+`.env`, then runs Docker Compose locally:
 
 ```bash
 docker compose pull api web worker-analysis worker-editing worker-bgm
