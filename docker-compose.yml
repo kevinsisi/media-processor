@@ -6,6 +6,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
+      TZ: ${TZ:-Asia/Taipei}
     volumes:
       - "${PGDATA_DIR:-postgres_data}:/var/lib/postgresql/data"
     ports:
@@ -19,6 +20,8 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Asia/Taipei}
     ports:
       - "127.0.0.1:6379:6379"
     healthcheck:
@@ -34,6 +37,8 @@ services:
       dockerfile: docker/api.Dockerfile
     restart: unless-stopped
     env_file: .env
+    environment:
+      TZ: ${TZ:-Asia/Taipei}
     depends_on:
       postgres:
         condition: service_healthy
@@ -50,6 +55,8 @@ services:
       context: .
       dockerfile: docker/web.Dockerfile
     restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Asia/Taipei}
     depends_on:
       - api
     ports:
@@ -95,6 +102,8 @@ services:
       redis:
         condition: service_healthy
     command: ["python", "-m", "media_processor.workers", "analysis"]
+    environment:
+      TZ: ${TZ:-Asia/Taipei}
     deploy:
       resources:
         reservations:
@@ -136,6 +145,8 @@ services:
       redis:
         condition: service_healthy
     command: ["python", "-m", "media_processor.workers", "editing"]
+    environment:
+      TZ: ${TZ:-Asia/Taipei}
     deploy:
       replicas: 3
     volumes:
@@ -163,6 +174,7 @@ services:
         condition: service_healthy
     command: ["python", "-m", "media_processor.workers", "bgm"]
     environment:
+      TZ: ${TZ:-Asia/Taipei}
       HF_HOME: /app/media/model_cache/huggingface
       TRANSFORMERS_CACHE: /app/media/model_cache/huggingface/transformers
     deploy:

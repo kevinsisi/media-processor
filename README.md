@@ -2,7 +2,7 @@
 
 Content factory pipeline for novice-friendly Instagram and Facebook short-video production.
 
-**Status:** v0.30.4 / M9.15.4 — queue modal context + persistent MusicGen model cache.
+**Status:** v0.30.5 / M9.15.5 — Taipei timezone config + draft preview cache busting.
 
 ## Spec
 
@@ -105,6 +105,11 @@ data mapping.
 `G:/MediaStorage/model_cache/huggingface` via the `/app/media` mount. The first
 generation after enabling this cache can still download the model once; later
 deploys should reuse it instead of re-downloading.
+
+Production containers run with `TZ=Asia/Taipei` so logs and filesystem times
+match the operator's GMT+8 context. Draft preview URLs include the rendered
+file mtime as a cache-busting query because `vN.mp4` paths are overwritten by
+settings re-renders.
 
 ## Web App
 

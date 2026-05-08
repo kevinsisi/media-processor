@@ -42,6 +42,31 @@ from media_processor.models import (
 )
 
 
+def test_draft_url_includes_file_mtime_cache_buster(
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(drafts_router.settings, "drafts_dir", str(tmp_path))
+    draft_dir = tmp_path / "9"
+    draft_dir.mkdir()
+    video_path = draft_dir / "v1.mp4"
+    video_path.write_bytes(b"fake mp4")
+
+    url = drafts_router._draft_url(9, 1, "mp4")
+
+    assert url.startswith("/api/media/drafts/9/v1.mp4?v=")
+    assert url.endswith(str(video_path.stat().st_mtime_ns))
+
+
+def test_draft_url_without_existing_file_omits_cache_buster(
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(drafts_router.settings, "drafts_dir", str(tmp_path))
+
+    assert drafts_router._draft_url(9, 1, "mp4") == "/api/media/drafts/9/v1.mp4"
+
+
 def _make_engine_and_session() -> tuple[Any, async_sessionmaker[AsyncSession]]:
     engine = create_async_engine(
         "sqlite+aiosqlite:///:memory:",

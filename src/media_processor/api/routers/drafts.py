@@ -81,7 +81,12 @@ def _draft_filename(version: int, suffix: str) -> str:
 
 
 def _draft_url(project_id: int, version: int, suffix: str) -> str:
-    return f"{DRAFT_URL_PREFIX}/{project_id}/{_draft_filename(version, suffix)}"
+    url = f"{DRAFT_URL_PREFIX}/{project_id}/{_draft_filename(version, suffix)}"
+    path = _expected_draft_path(project_id, version, suffix)
+    try:
+        return f"{url}?v={path.stat().st_mtime_ns}"
+    except OSError:
+        return url
 
 
 def _draft_export_url(project_id: int, output_filename: str) -> str:

@@ -29,6 +29,7 @@ Thumbs.db
 # Project
 .env
 .env.local
+.ai-review/
 .local/
 .claude/worktrees/
 samples/capcut_draft/
