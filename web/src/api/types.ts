@@ -891,6 +891,7 @@ export interface QueueJobItem {
   project_name: string | null;
   asset_id: number | null;
   draft_id: number | null;
+  bgm_job_id: number | null;
 }
 
 export interface QueueStatusOut {

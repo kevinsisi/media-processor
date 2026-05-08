@@ -64,6 +64,21 @@ function jobLabel(item: QueueJobItem): string {
   return kindZh;
 }
 
+function queueLabel(queue: QueueJobItem["queue"]): string {
+  if (queue === "analysis") return "分析佇列";
+  if (queue === "editing") return "剪輯佇列";
+  return "配樂佇列";
+}
+
+function jobDetail(item: QueueJobItem): string {
+  const parts = [queueLabel(item.queue)];
+  if (item.bgm_job_id != null) parts.push(`配樂任務 #${item.bgm_job_id}`);
+  if (item.draft_id != null) parts.push(`草稿 #${item.draft_id}`);
+  if (item.asset_id != null) parts.push(`素材 #${item.asset_id}`);
+  parts.push(`RQ ${item.job_id.slice(0, 8)}`);
+  return parts.join(" · ");
+}
+
 export default function QueueStatusModal({
   open,
   onClose,
@@ -183,8 +198,13 @@ export default function QueueStatusModal({
                   >
                     <div className="queue-modal__row-main">
                       <span className="queue-modal__pulse" aria-hidden="true" />
-                      <span className="queue-modal__row-label">
-                        {jobLabel(job)}
+                      <span className="queue-modal__row-text">
+                        <span className="queue-modal__row-label">
+                          {jobLabel(job)}
+                        </span>
+                        <span className="queue-modal__row-detail">
+                          {jobDetail(job)}
+                        </span>
                       </span>
                       {isMine && (
                         <span className="queue-modal__row-mine-tag">
@@ -228,8 +248,13 @@ export default function QueueStatusModal({
                       <span className="queue-modal__row-pos">
                         #{(job.position ?? 0) + 1}
                       </span>
-                      <span className="queue-modal__row-label">
-                        {jobLabel(job)}
+                      <span className="queue-modal__row-text">
+                        <span className="queue-modal__row-label">
+                          {jobLabel(job)}
+                        </span>
+                        <span className="queue-modal__row-detail">
+                          {jobDetail(job)}
+                        </span>
                       </span>
                       {isMine && (
                         <span className="queue-modal__row-mine-tag">你的項目</span>

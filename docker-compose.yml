@@ -162,6 +162,9 @@ services:
       redis:
         condition: service_healthy
     command: ["python", "-m", "media_processor.workers", "bgm"]
+    environment:
+      HF_HOME: /app/media/model_cache/huggingface
+      TRANSFORMERS_CACHE: /app/media/model_cache/huggingface/transformers
     deploy:
       resources:
         reservations:

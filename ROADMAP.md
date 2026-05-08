@@ -2,7 +2,7 @@
 
 > **單一定位**：沒有剪輯背景的小白也能「拍完就上傳，AI 直接給大量 IG / FB 短影音」的工具。
 > 目標 UX：手機優先、繁體中文、高級感、最少手動編輯。
-> 目前版本：**0.30.3**（M9.15.3 — production deploy 改走 kevinhome self-hosted runner，避免 Windows SSH 依賴）
+> 目前版本：**0.30.4**（M9.15.4 — queue modal 顯示處理中上下文，MusicGen 模型 cache 持久化）
 > 下一個 milestone：M10 — 多專案批次 + 社群直接發布 + AI 自動縮圖。
 
 ## Phase 進度速覽
@@ -44,6 +44,7 @@
 | **M9.15.1** | **設定再產生 UX 修正：配樂 snapshot、點選追蹤防呆、調整後套用提示** | ✅ done | **0.30.1** |
 | **M9.15.2** | **CI/CD Docker build context 修正：web image 由 repo root 建置，與 compose/workflow 一致** | ✅ done | **0.30.2** |
 | **M9.15.3** | **Production CD 改走 kevinhome self-hosted runner：本機同步 compose、驗證 G 槽 volume、保留 worker-editing=3** | ✅ done | **0.30.3** |
+| **M9.15.4** | **處理狀態 modal 顯示 BGM / RQ 上下文 + MusicGen HuggingFace cache 持久化，避免 deploy 後重抓模型** | ✅ done | **0.30.4** |
 | M10 | 多專案批次 + 社群直接發布 + AI 自動縮圖 | 🔮 future | 0.31.x+ |
 
 ---

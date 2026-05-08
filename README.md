@@ -2,7 +2,7 @@
 
 Content factory pipeline for novice-friendly Instagram and Facebook short-video production.
 
-**Status:** v0.30.3 / M9.15.3 — production deploy now runs on the kevinhome self-hosted runner.
+**Status:** v0.30.4 / M9.15.4 — queue modal context + persistent MusicGen model cache.
 
 ## Spec
 
@@ -100,6 +100,11 @@ PGDATA_DIR=G:/MediaStorage/pgdata
 This guard prevents CD from accidentally falling back to repo-local `.local/`
 media storage or the `postgres_data` named volume and losing the currently live
 data mapping.
+
+`worker-bgm` stores HuggingFace / MusicGen cache under
+`G:/MediaStorage/model_cache/huggingface` via the `/app/media` mount. The first
+generation after enabling this cache can still download the model once; later
+deploys should reuse it instead of re-downloading.
 
 ## Web App
 

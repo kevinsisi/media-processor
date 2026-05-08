@@ -98,6 +98,7 @@ class QueueJobItem(BaseModel):
     project_name: str | None = None
     asset_id: int | None = None
     draft_id: int | None = None
+    bgm_job_id: int | None = None
 
 
 class QueueStatusOut(BaseModel):
@@ -158,6 +159,7 @@ def _job_to_item(
 
     asset_id: int | None = None
     draft_id: int | None = None
+    bgm_job_id: int | None = None
     project_id: int | None = None
 
     if kind in ("analyze", "translate", "point_track"):
@@ -170,6 +172,8 @@ def _job_to_item(
             draft_id = int(kwargs["draft_id"])
     elif kind == "export" and args:
         draft_id = int(args[0])
+    elif kind == "bgm" and args:
+        bgm_job_id = int(args[0])
 
     elapsed_s: float | None = None
     if state == "running" and job.started_at is not None:
@@ -191,6 +195,7 @@ def _job_to_item(
         project_id=project_id,
         asset_id=asset_id,
         draft_id=draft_id,
+        bgm_job_id=bgm_job_id,
     )
 
 
@@ -209,6 +214,7 @@ async def _resolve_project_links(
     """
     asset_ids = {it.asset_id for it in items if it.asset_id is not None}
     draft_ids = {it.draft_id for it in items if it.draft_id is not None}
+    bgm_job_ids = {it.bgm_job_id for it in items if it.bgm_job_id is not None}
 
     asset_to_project: dict[int, int] = {}
     if asset_ids:
@@ -224,6 +230,15 @@ async def _resolve_project_links(
         )
         draft_to_project = {row[0]: row[1] for row in rows.all()}
 
+    bgm_job_to_project: dict[int, int] = {}
+    if bgm_job_ids:
+        rows = await session.execute(
+            select(BgmGenerationJob.id, BgmGenerationJob.project_id).where(
+                BgmGenerationJob.id.in_(bgm_job_ids)
+            )
+        )
+        bgm_job_to_project = {row[0]: row[1] for row in rows.all()}
+
     # Backfill project_id from asset / draft links.
     for it in items:
         if it.project_id is None:
@@ -231,6 +246,8 @@ async def _resolve_project_links(
                 it.project_id = asset_to_project.get(it.asset_id)
             elif it.draft_id is not None:
                 it.project_id = draft_to_project.get(it.draft_id)
+            elif it.bgm_job_id is not None:
+                it.project_id = bgm_job_to_project.get(it.bgm_job_id)
 
     project_ids = {it.project_id for it in items if it.project_id is not None}
     if project_ids:
