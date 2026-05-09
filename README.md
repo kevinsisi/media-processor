@@ -2,7 +2,7 @@
 
 Content factory pipeline for novice-friendly Instagram and Facebook short-video production.
 
-**Status:** v0.30.7 / M9.15.7 — AI Smart Camera applies on skip-plan renders and with vidstab enabled.
+**Status:** v0.30.8 / M9.15.8 — production compose avoids Windows-reserved API port 8623.
 
 ## Spec
 
@@ -63,7 +63,7 @@ cd web && npm ci && npm run build
 Runtime smoke checks after Docker boot:
 
 ```bash
-curl http://127.0.0.1:8623/health
+curl http://127.0.0.1:19023/health
 curl http://127.0.0.1:8523/api/health
 ```
 

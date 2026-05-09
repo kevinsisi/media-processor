@@ -45,7 +45,10 @@ services:
       redis:
         condition: service_healthy
     ports:
-      - "127.0.0.1:8623:8000"
+      # 8623 can fall inside Windows/Hyper-V excluded port ranges on kevinhome.
+      # Keep the direct host API on a stable localhost-only port; public traffic
+      # still enters through the web proxy on 8523.
+      - "127.0.0.1:19023:8000"
     volumes:
       - "${MEDIA_STORAGE_DIR:-./.local/media}:/app/media"
 
