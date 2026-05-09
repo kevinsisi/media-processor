@@ -31,11 +31,14 @@ def _segment(*, smart_camera_json: dict[str, object] | None = None) -> CutPlanSe
 def test_smart_camera_runs_for_skip_plan_without_directives() -> None:
     plan = _plan(_segment())
 
-    assert _should_run_smart_camera_stage(
-        smart_camera_active=True,
-        skip_plan=True,
-        plan=plan,
-    ) is True
+    assert (
+        _should_run_smart_camera_stage(
+            smart_camera_active=True,
+            skip_plan=True,
+            plan=plan,
+        )
+        is True
+    )
 
 
 def test_smart_camera_skip_plan_reuses_existing_directives() -> None:
@@ -49,18 +52,24 @@ def test_smart_camera_skip_plan_reuses_existing_directives() -> None:
         )
     )
 
-    assert _should_run_smart_camera_stage(
-        smart_camera_active=True,
-        skip_plan=True,
-        plan=plan,
-    ) is False
+    assert (
+        _should_run_smart_camera_stage(
+            smart_camera_active=True,
+            skip_plan=True,
+            plan=plan,
+        )
+        is False
+    )
 
 
 def test_smart_camera_inactive_never_runs() -> None:
     plan = _plan(_segment())
 
-    assert _should_run_smart_camera_stage(
-        smart_camera_active=False,
-        skip_plan=False,
-        plan=plan,
-    ) is False
+    assert (
+        _should_run_smart_camera_stage(
+            smart_camera_active=False,
+            skip_plan=False,
+            plan=plan,
+        )
+        is False
+    )

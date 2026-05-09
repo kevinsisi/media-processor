@@ -635,11 +635,7 @@ def _cut_segment(
     # vidstab stage skips only those cuts instead of suppressing the camera move.
     smart_blob = getattr(cut, "smart_camera_json", None)
     smart_chain: str | None = None
-    if (
-        smart_camera_enabled
-        and crop_path is None
-        and isinstance(smart_blob, dict)
-    ):
+    if smart_camera_enabled and crop_path is None and isinstance(smart_blob, dict):
         try:
             smart_chain = _smart_camera_filter(smart_blob, target_aspect, duration_s)
         except Exception:  # noqa: BLE001 — never let a single bad directive fail render.
