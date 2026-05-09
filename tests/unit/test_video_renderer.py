@@ -380,6 +380,74 @@ def test_smart_camera_marks_cut_reframed_when_stabilize_active(tmp_path: Path) -
     assert reframed == [True]
 
 
+def test_smart_camera_overrides_automatic_auto_reframe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Smart Camera should not be silently masked by default YOLO auto-reframe."""
+    src = tmp_path / "asset.mp4"
+    src.write_bytes(b"fake")
+    plan = CutPlan(
+        schema_version="m5.cut-plan.v1",
+        target_duration_ms=1_000,
+        target_aspect_ratio="9:16",
+        profile_name="universal",
+        segments=(
+            CutPlanSegment(
+                0,
+                1,
+                0,
+                1_000,
+                "improv",
+                "",
+                smart_camera_json={
+                    "kind": "pan",
+                    "from_rect": [0.0, 0.0, 1.0, 1.0],
+                    "to_rect": [0.20, 0.20, 0.60, 0.60],
+                    "ease": "linear",
+                },
+            ),
+        ),
+    )
+    captured_filters: list[str] = []
+
+    monkeypatch.setattr(
+        video_renderer.auto_reframe,
+        "compute_crop_path",
+        lambda *args, **kwargs: [(0, 0, 1080, 1920)],
+    )
+    monkeypatch.setattr(video_renderer.auto_reframe, "write_sendcmd_file", lambda *args: None)
+    monkeypatch.setattr(
+        video_renderer.auto_reframe,
+        "build_filter_chain",
+        lambda *args, **kwargs: "AUTO_REFRAME_CHAIN",
+    )
+    monkeypatch.setattr(
+        video_renderer,
+        "_smart_camera_filter",
+        lambda *args, **kwargs: "SMART_CAMERA_CHAIN",
+    )
+
+    def fake_run(cmd: list[str], *, timeout_s: float, stage: str) -> None:
+        captured_filters.append(cmd[cmd.index("-vf") + 1])
+        Path(cmd[-1]).parent.mkdir(parents=True, exist_ok=True)
+        Path(cmd[-1]).write_bytes(b"")
+
+    monkeypatch.setattr(video_renderer, "_run", fake_run)
+
+    paths, reframed = video_renderer.cut_segments(
+        plan,
+        asset_paths={1: src},
+        intermediate_dir=tmp_path / "out",
+        target_aspect="9:16",
+        tracking_by_asset={1: {"frames": []}},
+        smart_camera_enabled=True,
+    )
+
+    assert len(paths) == 1
+    assert reframed == [True]
+    assert captured_filters == ["SMART_CAMERA_CHAIN"]
+
+
 def test_circlecrop_in_transition_whitelist() -> None:
     """Phase 8.1 — emotion-shift transitions resolve to circlecrop, not the default."""
     assert "circlecrop" in video_renderer.VALID_TRANSITIONS

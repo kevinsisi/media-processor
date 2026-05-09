@@ -2,7 +2,7 @@
 
 Content factory pipeline for novice-friendly Instagram and Facebook short-video production.
 
-**Status:** v0.30.8 / M9.15.8 — production compose avoids Windows-reserved API port 8623.
+**Status:** v0.30.9 / M9.15.9 — Smart Camera overrides automatic auto-reframe when both are enabled.
 
 ## Spec
 
@@ -141,6 +141,8 @@ The React/Vite app is API-backed. Main routes:
 - Rendering uses a zoompan-driven crop path and falls back to the existing static
   crop when a directive fails, so a single bad camera move should not fail the
   full render.
+- If Smart Camera and automatic auto-reframe are both enabled, Smart Camera wins;
+  explicit point/custom/user-picked object tracking still has priority.
 
 ## v0.29.0 Aspect Ratio Notes
 

@@ -2,7 +2,7 @@
 
 > **單一定位**：沒有剪輯背景的小白也能「拍完就上傳，AI 直接給大量 IG / FB 短影音」的工具。
 > 目標 UX：手機優先、繁體中文、高級感、最少手動編輯。
-> 目前版本：**0.30.8**（M9.15.8 — production compose 避開 Windows excluded port，API localhost 改用 19023）
+> 目前版本：**0.30.9**（M9.15.9 — Smart Camera 啟用時覆蓋自動 YOLO auto-reframe，但保留手動追蹤優先）
 > 下一個 milestone：M10 — 多專案批次 + 社群直接發布 + AI 自動縮圖。
 
 ## Phase 進度速覽
@@ -49,6 +49,7 @@
 | **M9.15.6** | **Web SPA shell / route fallback 加 `no-store`，Vite hashed assets 才 immutable cache，避免進度 UI 顯示舊版** | ✅ done | **0.30.6** |
 | **M9.15.7** | **AI Smart Camera skip-plan 補產生 directives，且 smart-camera cut 只跳過該段 vidstab，不再被穩定器整體壓掉** | ✅ done | **0.30.7** |
 | **M9.15.8** | **Production compose 將 direct API port 從 8623 改為 19023，避開 kevinhome Windows/Hyper-V excluded port range** | ✅ done | **0.30.8** |
+| **M9.15.9** | **AI Smart Camera 覆蓋自動 YOLO auto-reframe，避免同時開啟時智慧運鏡被靜默遮蔽；手動 point/custom/object tracking 仍優先** | ✅ done | **0.30.9** |
 | M10 | 多專案批次 + 社群直接發布 + AI 自動縮圖 | 🔮 future | 0.31.x+ |
 
 ---
@@ -592,8 +593,9 @@ OpenSpec：`openspec/changes/ai-smart-camera/proposal.md` + `tasks.md`。
 - 在 v0.30.0 不要加第 4 種策略，先把這三跑穩。
 
 ### 9.15.2 互斥邏輯
-- vidstab on → smart camera 跳過 + warning log（vidstab 改 in_w/in_h，疊 crop 會炸 — v0.23.4 根因）
-- auto-reframe on（`tracked_object_index ≠ -3` 或 point tracking）→ smart camera 跳過 + info log（subject following 路徑勝）
+- vidstab on → smart-camera cut 回報 `reframed=True`，後續 vidstab 只跳過該 cut，不再整體壓掉智慧運鏡（v0.30.7）
+- explicit tracking（point / custom ROI / user-picked YOLO object）→ smart camera 跳過 + info log（使用者指定主體鎖定勝）
+- automatic YOLO auto-reframe + smart camera 同時觸發 → smart camera 勝，避免「AI 智慧運鏡」被預設自動跟主角路徑靜默遮蔽（v0.30.9）
 - emotion zoompan（M8.1） + smart camera 同時觸發 → smart camera 勝（focus_regions 是真正的視覺 saliency，比情緒推測準）
 - 單一 cut 的 smart camera filter 失敗 → catch + 退回原 cut，**不**讓單一 cut 把整個 render fail
 
