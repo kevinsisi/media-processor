@@ -622,21 +622,21 @@ def _cut_segment(
             vf_chain = auto_reframe.build_filter_chain(crop_path, sendcmd_path, target_w, target_h)
 
     # v0.30.0 — opt-in smart camera. Mutex priority (top wins):
-    #   1. vidstab on    → smart camera skipped (vidstab rewrites in_w/
-    #      in_h, layering crop on top blows up — see v0.23.4 root cause).
-    #   2. dynamic crop chain already applied (point / custom_roi /
+    #   1. dynamic crop chain already applied (point / custom_roi /
     #      YOLO) → smart camera skipped (subject-following wins; the
     #      tracker already knows where the subject is).
-    #   3. Smart camera directive present + enabled → smart camera
+    #   2. Smart camera directive present + enabled → smart camera
     #      OVERRIDES emotion zoompan. Reason: focus_regions is real
     #      visual saliency from Vision; emotion is a guessed proxy
     #      for energy. The Vision call is more authoritative.
-    #   4. Otherwise → emotion zoompan keeps working as in M8.1.
+    #   3. Otherwise → emotion zoompan keeps working as in M8.1.
+    #
+    # Smart-camera cuts are reported as dynamically reframed so the later
+    # vidstab stage skips only those cuts instead of suppressing the camera move.
     smart_blob = getattr(cut, "smart_camera_json", None)
     smart_chain: str | None = None
     if (
         smart_camera_enabled
-        and not stabilize_enabled
         and crop_path is None
         and isinstance(smart_blob, dict)
     ):
@@ -653,11 +653,6 @@ def _cut_segment(
                 "smart-camera: cut %d directive present but filter rejected; static fallback",
                 cut.order,
             )
-    if smart_camera_enabled and stabilize_enabled and isinstance(smart_blob, dict):
-        logger.warning(
-            "smart-camera: cut %d skipped — vidstab is enabled and they are mutually exclusive",
-            cut.order,
-        )
     if smart_camera_enabled and crop_path is not None and isinstance(smart_blob, dict):
         logger.info(
             "smart-camera: cut %d skipped — auto-reframe / point tracking already active",
@@ -709,7 +704,7 @@ def _cut_segment(
         str(out_path),
     ]
     _run(cmd, timeout_s=PER_SEGMENT_TIMEOUT_S, stage=f"cut(seg={cut.order})")
-    return crop_path is not None
+    return crop_path is not None or smart_chain is not None
 
 
 def cut_segments(
@@ -730,13 +725,13 @@ def cut_segments(
     """Cut every segment in the plan; return ``(paths, reframed_flags)``.
 
     ``reframed_flags[i]`` is ``True`` when segment i was rendered with a
-    dynamic ``sendcmd → crop@reframe`` chain (point / custom_roi / YOLO
-    tracking) and ``False`` when it fell through to the static aspect
-    crop. Callers thread this into ``stabilize_segments`` so a segment
-    that's already subject-stabilised by the dynamic crop doesn't get
-    a second vidstab pass — vidstab on top of a subject-centred frame
-    re-introduces the very translation that the dynamic crop was
-    cancelling out (v0.23.4 fix).
+    dynamic camera path (point / custom_roi / YOLO tracking, or AI Smart
+    Camera) and ``False`` when it fell through to the static aspect crop.
+    Callers thread this into ``stabilize_segments`` so a segment that's
+    already subject-stabilised by a dynamic crop doesn't get a second
+    vidstab pass — vidstab on top of a subject-centred frame re-introduces
+    the very translation that the dynamic crop was cancelling out (v0.23.4
+    fix, extended to smart camera in v0.30.7).
 
     ``tracking_by_asset`` (when supplied) maps ``asset_id`` to its
     ``Asset.tracking_json`` dict; segments backed by an asset present in

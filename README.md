@@ -2,7 +2,7 @@
 
 Content factory pipeline for novice-friendly Instagram and Facebook short-video production.
 
-**Status:** v0.30.6 / M9.15.6 — frontend shell cache control for fresh progress UI.
+**Status:** v0.30.7 / M9.15.7 — AI Smart Camera applies on skip-plan renders and with vidstab enabled.
 
 ## Spec
 

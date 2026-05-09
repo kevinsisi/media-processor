@@ -318,6 +318,29 @@ async def _restore_plan_blob(handle: _DraftHandle, plan: CutPlan) -> None:
         await session.commit()
 
 
+def _plan_needs_smart_camera(plan: CutPlan) -> bool:
+    """True when at least one cut lacks a stored smart-camera directive."""
+    return any(not isinstance(getattr(seg, "smart_camera_json", None), dict) for seg in plan.segments)
+
+
+def _should_run_smart_camera_stage(
+    *,
+    smart_camera_active: bool,
+    skip_plan: bool,
+    plan: CutPlan,
+) -> bool:
+    """Decide whether this render should call Gemini Vision for camera moves.
+
+    Fresh renders always need the stage when the feature is active. Skip-plan
+    re-renders also need it when the stored plan predates Smart Camera or was
+    regenerated from timeline rows, because those blobs have no directives for
+    the renderer to apply.
+    """
+    if not smart_camera_active or not plan.segments:
+        return False
+    return not skip_plan or _plan_needs_smart_camera(plan)
+
+
 async def _persist_plan(handle: _DraftHandle, plan: CutPlan) -> None:
     """Write ``Draft.cut_plan_json`` plus a row per CutPlanSegment."""
     # Pull per-asset secondary translations once so each cut can be
@@ -759,7 +782,11 @@ async def run_render(
     # contract) — a Gemini error on cut N just means cut N renders
     # without a camera move.
     smart_camera_active = _resolve_smart_camera_flag(project, smart_camera_enabled)
-    if smart_camera_active and not skip_plan and plan.segments:
+    if _should_run_smart_camera_stage(
+        smart_camera_active=smart_camera_active,
+        skip_plan=skip_plan,
+        plan=plan,
+    ):
         try:
             async with async_session_maker() as session:
                 api_keys = await get_llm_api_keys(session)
@@ -797,6 +824,11 @@ async def run_render(
                 "draft %d: smart-camera stage failed; rendering without camera moves",
                 handle.draft_id,
             )
+    elif smart_camera_active and skip_plan:
+        logger.info(
+            "draft %d: smart-camera skip-plan render reused existing directives",
+            handle.draft_id,
+        )
 
     if not subtitles_enabled:
         srt_text = ""

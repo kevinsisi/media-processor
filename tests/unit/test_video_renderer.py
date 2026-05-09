@@ -336,15 +336,13 @@ def test_smart_camera_overrides_emotion_zoompan(tmp_path: Path) -> None:
     )
     assert len(paths) == 1
     assert paths[0].is_file()
-    # Smart camera does NOT route through the auto-reframe sendcmd
-    # path, so reframed_flags stays False.
-    assert reframed == [False]
+    # Smart camera is a dynamic camera path, so later vidstab skips this cut.
+    assert reframed == [True]
 
 
-def test_smart_camera_skipped_when_stabilize_active(tmp_path: Path) -> None:
-    """vidstab > smart camera mutex: when stabilize is on, the smart-
-    camera filter must be skipped (vidstab rewrites in_w/in_h, layering
-    crop on top blows up — v0.23.4 root cause)."""
+def test_smart_camera_marks_cut_reframed_when_stabilize_active(tmp_path: Path) -> None:
+    """When stabilize is on, smart-camera still applies and marks only
+    that cut as reframed so the later vidstab stage skips it."""
     src = tmp_path / "asset.mp4"
     src.write_bytes(b"fake")
     plan = CutPlan(
@@ -370,7 +368,6 @@ def test_smart_camera_skipped_when_stabilize_active(tmp_path: Path) -> None:
         ),
     )
     out_dir = tmp_path / "out"
-    # Both flags on → mutex picks vidstab, smart camera filter is suppressed.
     paths, reframed = video_renderer.cut_segments(
         plan,
         asset_paths={1: src},
@@ -380,7 +377,7 @@ def test_smart_camera_skipped_when_stabilize_active(tmp_path: Path) -> None:
         stabilize_enabled=True,
     )
     assert len(paths) == 1
-    assert reframed == [False]
+    assert reframed == [True]
 
 
 def test_circlecrop_in_transition_whitelist() -> None:
