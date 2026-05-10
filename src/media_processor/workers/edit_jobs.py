@@ -36,6 +36,7 @@ def render_draft(
     subtitles: bool = True,
     transitions: bool = False,
     auto_reframe: bool = True,
+    initial_voice_volume: float = 1.0,
     smart_camera: bool | None = None,
     style_preset: str = "custom",
 ) -> dict[str, Any]:
@@ -64,7 +65,7 @@ def render_draft(
     logger.info(
         "render_draft: project_id=%d draft_id=%s force=%s target_duration_ms=%s "
         "skip_plan=%s subtitles_from_db=%s stabilize=%s subtitles=%s transitions=%s "
-        "auto_reframe=%s smart_camera=%s style_preset=%s",
+        "auto_reframe=%s initial_voice_volume=%s smart_camera=%s style_preset=%s",
         project_id,
         draft_id,
         force,
@@ -75,6 +76,7 @@ def render_draft(
         subtitles,
         transitions,
         auto_reframe,
+        initial_voice_volume,
         smart_camera,
         style_preset,
     )
@@ -95,6 +97,7 @@ def render_draft(
             subtitles_enabled=subtitles,
             transitions_enabled=transitions,
             auto_reframe_enabled=auto_reframe,
+            initial_voice_volume=initial_voice_volume,
             smart_camera_enabled=smart_camera,
             style_preset=style_preset,
         )

@@ -2,7 +2,7 @@
 
 Content factory pipeline for novice-friendly Instagram and Facebook short-video production.
 
-**Status:** v0.30.10 / M9.15.10 — tracking focus custom box selection now gives visible saved feedback.
+**Status:** v0.30.11 / M9.15.11 — first-render source audio can be muted before generating a draft.
 
 ## Spec
 

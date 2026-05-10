@@ -513,6 +513,12 @@ class EditTriggerRequest(BaseModel):
     # output aspect. Assets without tracking data quietly fall back
     # to the static centered crop.
     auto_reframe: bool = True
+    # v0.30.11 — default source/original-audio gain for the segments
+    # created by this render. This is a first-render UX affordance: the
+    # operator can choose "no original audio" before DraftSegment rows
+    # exist. Existing per-segment sliders still override after the draft
+    # is created. 1.0 = keep original audio, 0.0 = mute source audio.
+    initial_voice_volume: float = Field(default=1.0, ge=0.0, le=1.5)
     # v0.30.0 — opt-in AI Smart Camera. ``None`` (default) means "use
     # the persistent project toggle" so an operator who turned on
     # smart camera in ProjectEdit doesn't have to re-flip it on every

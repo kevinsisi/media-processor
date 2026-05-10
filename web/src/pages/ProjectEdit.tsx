@@ -56,6 +56,10 @@ const DURATION_PRESETS_S = [30, 60, 90, 120] as const;
 const DEFAULT_DURATION_S = 60;
 const DURATION_MIN_S = 10;
 const DURATION_MAX_S = 300;
+const DEFAULT_SOURCE_AUDIO_VOLUME = 1.0;
+const SOURCE_AUDIO_VOLUME_MIN = 0;
+const SOURCE_AUDIO_VOLUME_MAX = 1.5;
+const SOURCE_AUDIO_VOLUME_STEP = 0.05;
 
 function classifyStepState(value: string | undefined): string {
   if (!value) return "pending";
@@ -529,6 +533,59 @@ function RenderOptions({
   );
 }
 
+interface SourceAudioVolumeControlProps {
+  value: number;
+  onChange: (next: number) => void;
+  disabled?: boolean;
+}
+
+function SourceAudioVolumeControl({
+  value,
+  onChange,
+  disabled,
+}: SourceAudioVolumeControlProps) {
+  const pct = Math.round(value * 100);
+  return (
+    <div className="source-audio-volume">
+      <div className="source-audio-volume__head">
+        <span className="source-audio-volume__label">原始影片聲音</span>
+        <span className="source-audio-volume__value mono">{pct}%</span>
+      </div>
+      <input
+        type="range"
+        min={SOURCE_AUDIO_VOLUME_MIN}
+        max={SOURCE_AUDIO_VOLUME_MAX}
+        step={SOURCE_AUDIO_VOLUME_STEP}
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(Number(e.currentTarget.value))}
+        aria-label="原始影片聲音音量"
+      />
+      <div className="source-audio-volume__actions">
+        <button
+          type="button"
+          className="cta cta--quiet source-audio-volume__button"
+          disabled={disabled || value === 0}
+          onClick={() => onChange(0)}
+        >
+          靜音原聲
+        </button>
+        <button
+          type="button"
+          className="cta cta--quiet source-audio-volume__button"
+          disabled={disabled || value === DEFAULT_SOURCE_AUDIO_VOLUME}
+          onClick={() => onChange(DEFAULT_SOURCE_AUDIO_VOLUME)}
+        >
+          重設 100%
+        </button>
+      </div>
+      <p className="source-audio-volume__hint">
+        產生新片段時套用到每一段；之後仍可在進階時間軸逐段微調。
+      </p>
+    </div>
+  );
+}
+
 // v0.20.2 — small text helpers for the sub-card status summaries.
 // Each setting group's heading shows a one-line digest of its current
 // state so the user can audit the configuration at a glance without
@@ -562,27 +619,36 @@ function formatBasicSummary(opts: {
 function formatBgmSummary(opts: {
   source: BgmSource;
   bgmFilename: string | null;
+  sourceAudioVolume: number;
 }): string {
+  const source = `原聲 ${Math.round(opts.sourceAudioVolume * 100)}%`;
+  let bgm = "配樂設定";
   switch (opts.source) {
     case "none":
-      return "不使用配樂";
+      bgm = "不使用配樂";
+      break;
     case "preset":
-      return opts.bgmFilename
+      bgm = opts.bgmFilename
         ? `風格預設配樂：${opts.bgmFilename}`
         : "依風格自動配樂（待產生）";
+      break;
     case "library":
-      return opts.bgmFilename
+      bgm = opts.bgmFilename
         ? `音樂庫：${opts.bgmFilename}`
         : "從音樂庫選擇（待挑選）";
+      break;
     case "ai":
-      return opts.bgmFilename
+      bgm = opts.bgmFilename
         ? `自訂配樂：${opts.bgmFilename}`
         : "自訂配樂（待產生）";
+      break;
     case "upload":
-      return opts.bgmFilename
+      bgm = opts.bgmFilename
         ? `已上傳：${opts.bgmFilename}`
         : "自行上傳（待選檔）";
+      break;
   }
+  return `${source} · ${bgm}`;
 }
 
 function formatVisualSummary(project: ProjectDetail | null): string {
@@ -665,6 +731,8 @@ interface EditSettingsBlockProps {
   setAutoReframe: (v: boolean) => void;
   smartCamera: boolean;
   setSmartCamera: (v: boolean) => void;
+  sourceAudioVolume: number;
+  setSourceAudioVolume: (v: number) => void;
   triggering: boolean;
   validProjectId: number;
   project: ProjectDetail | null;
@@ -695,6 +763,7 @@ function EditSettingsBlock(props: EditSettingsBlockProps) {
   const bgmSummary = formatBgmSummary({
     source: props.currentBgmSource,
     bgmFilename,
+    sourceAudioVolume: props.sourceAudioVolume,
   });
   const visualSummary = formatVisualSummary(props.project);
 
@@ -734,6 +803,11 @@ function EditSettingsBlock(props: EditSettingsBlockProps) {
       </SettingsGroup>
 
       <SettingsGroup title="配樂" summary={bgmSummary}>
+        <SourceAudioVolumeControl
+          value={props.sourceAudioVolume}
+          onChange={props.setSourceAudioVolume}
+          disabled={props.triggering}
+        />
         <BgmSourcePicker
           projectId={props.validProjectId}
           bgmPath={props.project?.bgm_path}
@@ -883,6 +957,12 @@ export default function ProjectEdit() {
   // v0.18 — clip-style preset (fast / slow / commercial / artistic /
   // custom). ``custom`` is the legacy free-form default.
   const [stylePreset, setStylePreset] = useState<ClipStylePreset>("custom");
+  // v0.30.11 — first-render default for source/original audio. Before
+  // DraftSegment rows exist, the old per-segment sliders cannot mute the
+  // footage; this value is applied when the planner creates segments.
+  const [sourceAudioVolume, setSourceAudioVolume] = useState<number>(
+    DEFAULT_SOURCE_AUDIO_VOLUME,
+  );
   // v0.20.2 — observed source from <BgmSourcePicker>. Lets the
   // section-title summary line stay in sync without lifting the
   // picker's full state (it has lots of internal AI / library state
@@ -1188,6 +1268,18 @@ export default function ProjectEdit() {
     [markSettingsChanged],
   );
 
+  const handleSourceAudioVolumeChange = useCallback(
+    (next: number) => {
+      const clamped = Math.max(
+        SOURCE_AUDIO_VOLUME_MIN,
+        Math.min(SOURCE_AUDIO_VOLUME_MAX, next),
+      );
+      setSourceAudioVolume(clamped);
+      markSettingsChanged("原始影片聲音設定已更新");
+    },
+    [markSettingsChanged],
+  );
+
   // While the selected version is in flight (pending/processing), poll the
   // drafts list too so the chip status updates live as it transitions to
   // ready_for_review / failed. Cheap — list endpoint is one query.
@@ -1246,6 +1338,7 @@ export default function ProjectEdit() {
           subtitles: subtitlesOn,
           transitions: transitionsOn,
           auto_reframe: autoReframe,
+          initial_voice_volume: sourceAudioVolume,
           smart_camera: smartCamera,
           style_preset: stylePreset,
         });
@@ -1280,6 +1373,7 @@ export default function ProjectEdit() {
       subtitlesOn,
       transitionsOn,
       autoReframe,
+      sourceAudioVolume,
       smartCamera,
       stylePreset,
       refreshDrafts,
@@ -1535,6 +1629,8 @@ export default function ProjectEdit() {
             setAutoReframe={handleAutoReframeChange}
             smartCamera={smartCamera}
             setSmartCamera={handleSmartCameraChange}
+            sourceAudioVolume={sourceAudioVolume}
+            setSourceAudioVolume={handleSourceAudioVolumeChange}
             triggering={triggering}
             validProjectId={validProjectId}
             project={project}
@@ -1776,6 +1872,8 @@ export default function ProjectEdit() {
                 setAutoReframe={handleAutoReframeChange}
                 smartCamera={smartCamera}
                 setSmartCamera={handleSmartCameraChange}
+                sourceAudioVolume={sourceAudioVolume}
+                setSourceAudioVolume={handleSourceAudioVolumeChange}
                 triggering={triggering}
                 validProjectId={validProjectId}
                 project={project}
@@ -1919,6 +2017,8 @@ export default function ProjectEdit() {
             setAutoReframe={handleAutoReframeChange}
             smartCamera={smartCamera}
             setSmartCamera={handleSmartCameraChange}
+            sourceAudioVolume={sourceAudioVolume}
+            setSourceAudioVolume={handleSourceAudioVolumeChange}
             triggering={triggering}
             validProjectId={validProjectId}
             project={project}

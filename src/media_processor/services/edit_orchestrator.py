@@ -343,7 +343,12 @@ def _should_run_smart_camera_stage(
     return not skip_plan or _plan_needs_smart_camera(plan)
 
 
-async def _persist_plan(handle: _DraftHandle, plan: CutPlan) -> None:
+async def _persist_plan(
+    handle: _DraftHandle,
+    plan: CutPlan,
+    *,
+    initial_voice_volume: float = 1.0,
+) -> None:
     """Write ``Draft.cut_plan_json`` plus a row per CutPlanSegment."""
     # Pull per-asset secondary translations once so each cut can be
     # snapshot with its joined English text. Same getattr-with-default
@@ -395,6 +400,7 @@ async def _persist_plan(handle: _DraftHandle, plan: CutPlan) -> None:
                     on_timeline_end_ms=cursor_ms + max(1, duration),
                     source_kind=cut.source_kind,
                     plan_reason=cut.reason,
+                    voice_volume=initial_voice_volume,
                     subtitle_secondary_text=secondary_text,
                 )
             )
@@ -666,6 +672,7 @@ async def run_render(
     subtitles_enabled: bool = True,
     transitions_enabled: bool = False,
     auto_reframe_enabled: bool = True,
+    initial_voice_volume: float = 1.0,
     smart_camera_enabled: bool | None = None,
     style_preset: str = "custom",
 ) -> dict[str, Any]:
@@ -728,6 +735,7 @@ async def run_render(
         target_duration_ms = _compute_auto_target_ms(
             profile_target_ms, int(source_total_ms or 0), int(asset_count or 0)
         )
+    initial_voice_volume = max(0.0, min(1.5, float(initial_voice_volume)))
 
     # Stage 1 — plan. M7.1 skip-plan path: re-use the stored plan instead
     # of re-running Gemini (used after a manual timeline reorder).
@@ -746,7 +754,7 @@ async def run_render(
                 target_duration_ms,
                 style_preset=style_preset,
             )
-            await _persist_plan(handle, plan)
+            await _persist_plan(handle, plan, initial_voice_volume=initial_voice_volume)
     except Exception as exc:  # noqa: BLE001 — record + abort.
         reason = _failure_reason(exc)
         logger.exception("plan stage failed for project %d", project_id)

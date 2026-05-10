@@ -200,6 +200,12 @@ async def _handle_orphan(session: Any, draft: Draft) -> None:
     await session.commit()
 
     try:
+        snapshot = draft.render_flags_json if isinstance(draft.render_flags_json, dict) else {}
+        raw_initial_voice_volume = snapshot.get("initial_voice_volume", 1.0)
+        try:
+            initial_voice_volume = max(0.0, min(1.5, float(raw_initial_voice_volume)))
+        except (TypeError, ValueError):
+            initial_voice_volume = 1.0
         await asyncio.to_thread(
             enqueue_project_edit,
             draft.project_id,
@@ -211,6 +217,7 @@ async def _handle_orphan(session: Any, draft: Draft) -> None:
             stabilize=flags["stabilize"],
             subtitles=flags["subtitles"],
             auto_reframe=flags["auto_reframe"],
+            initial_voice_volume=initial_voice_volume,
             smart_camera=flags["smart_camera"],
             style_preset=str(draft.style_preset or "custom"),
         )

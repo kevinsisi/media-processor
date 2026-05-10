@@ -344,6 +344,9 @@ export interface EditTriggerRequest {
   // back to the static centered crop so leaving this on is safe even
   // on partially analyzed projects.
   auto_reframe?: boolean;
+  // v0.30.11 — default source/original-audio gain for segments created
+  // by this render. 1.0 keeps original audio; 0.0 mutes source audio.
+  initial_voice_volume?: number;
   // v0.30.0 — opt-in AI Smart Camera per-run override. ``null`` /
   // omitted = inherit ``Project.smart_camera_enabled``; explicit
   // ``true`` / ``false`` overrides for this single render.

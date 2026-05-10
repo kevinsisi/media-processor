@@ -363,6 +363,9 @@ async def trigger_project_edit(
             "stabilize": payload.stabilize,
             "subtitles": payload.subtitles,
             "auto_reframe": payload.auto_reframe,
+            # v0.30.11 — carried for orphan-watchdog retries that need
+            # to recreate segments before a first render finishes.
+            "initial_voice_volume": payload.initial_voice_volume,
             # v0.30.0 — snapshot the resolved smart-camera flag so a
             # later skip-plan re-render replays the same choice.
             "smart_camera": effective_smart_camera,
@@ -387,6 +390,7 @@ async def trigger_project_edit(
             subtitles=payload.subtitles,
             transitions=payload.transitions,
             auto_reframe=payload.auto_reframe,
+            initial_voice_volume=payload.initial_voice_volume,
             smart_camera=effective_smart_camera,
             style_preset=payload.style_preset,
         )
