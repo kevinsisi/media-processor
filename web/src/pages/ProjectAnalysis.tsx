@@ -746,41 +746,6 @@ function AssetCard({
         </span>
       </header>
 
-      <AnalysisStepStatusGrid
-        asset={asset}
-        onRetryStep={onRetryStep}
-        retryingStep={retryingStep}
-      />
-
-      {asset.scene_tags.length > 0 && (
-        <div className="scene-tag-row" aria-label="場景標籤">
-          {asset.scene_tags.map((t) => (
-            <span key={t.name} className="scene-chip" title={`${t.confidence.toFixed(2)}`}>
-              {labelForSceneTag(t.name)}
-            </span>
-          ))}
-        </div>
-      )}
-
-      <MotionTimeline totalMs={asset.duration_ms} segments={asset.motion_segments} />
-
-      {asset.emotion_tags && (
-        <div
-          className={`emotion-chip emotion-chip--${asset.emotion_tags.dominant}`}
-          aria-label={`主要情緒：${labelForEmotionTag(asset.emotion_tags.dominant)}`}
-          title={`${asset.emotion_tags.ranges.length} 段情緒（${asset.emotion_tags.ranges
-            .map((r) => labelForEmotionTag(r.emotion))
-            .join(" / ")}）`}
-        >
-          <span className="emotion-chip__icon" aria-hidden>
-            {iconForEmotionTag(asset.emotion_tags.dominant)}
-          </span>
-          <span className="emotion-chip__label">
-            {labelForEmotionTag(asset.emotion_tags.dominant)}
-          </span>
-        </div>
-      )}
-
       {asset.tracking_summary && (
         <div
           className={`tracking-chip tracking-chip--${
@@ -821,8 +786,6 @@ function AssetCard({
         />
       )}
 
-      <CoverageCard summary={asset.coverage_summary} />
-
       <div className="asset-card__transcript-toggle">
         <button
           type="button"
@@ -846,6 +809,43 @@ function AssetCard({
         onTranslate={onTranslate}
         translating={translating}
       />
+
+      <AnalysisStepStatusGrid
+        asset={asset}
+        onRetryStep={onRetryStep}
+        retryingStep={retryingStep}
+      />
+
+      {asset.scene_tags.length > 0 && (
+        <div className="scene-tag-row" aria-label="場景標籤">
+          {asset.scene_tags.map((t) => (
+            <span key={t.name} className="scene-chip" title={`${t.confidence.toFixed(2)}`}>
+              {labelForSceneTag(t.name)}
+            </span>
+          ))}
+        </div>
+      )}
+
+      <MotionTimeline totalMs={asset.duration_ms} segments={asset.motion_segments} />
+
+      {asset.emotion_tags && (
+        <div
+          className={`emotion-chip emotion-chip--${asset.emotion_tags.dominant}`}
+          aria-label={`主要情緒：${labelForEmotionTag(asset.emotion_tags.dominant)}`}
+          title={`${asset.emotion_tags.ranges.length} 段情緒（${asset.emotion_tags.ranges
+            .map((r) => labelForEmotionTag(r.emotion))
+            .join(" / ")}）`}
+        >
+          <span className="emotion-chip__icon" aria-hidden>
+            {iconForEmotionTag(asset.emotion_tags.dominant)}
+          </span>
+          <span className="emotion-chip__label">
+            {labelForEmotionTag(asset.emotion_tags.dominant)}
+          </span>
+        </div>
+      )}
+
+      <CoverageCard summary={asset.coverage_summary} />
 
       <footer className="asset-card__actions">
         <button

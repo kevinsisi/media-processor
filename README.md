@@ -2,7 +2,7 @@
 
 Content factory pipeline for novice-friendly Instagram and Facebook short-video production.
 
-**Status:** v0.30.11 / M9.15.11 — first-render source audio can be muted before generating a draft.
+**Status:** v0.30.12 / M9.15.12 — queue modal expands correctly and asset cards prioritize tracking/subtitle controls.
 
 ## Spec
 
