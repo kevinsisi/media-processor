@@ -10,6 +10,7 @@
 // "查看處理狀態" button — both pop the same modal.
 
 import { useCallback, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { ApiError, apiClient } from "../api/client";
 import type { QueueJobItem, QueueStatusOut } from "../api/types";
 import "./QueueStatusModal.css";
@@ -144,7 +145,7 @@ export default function QueueStatusModal({
   const running = data?.running ?? [];
   const queued = data?.queued ?? [];
 
-  return (
+  return createPortal(
     <div
       className="queue-modal__backdrop"
       role="dialog"
@@ -279,6 +280,7 @@ export default function QueueStatusModal({
         </section>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

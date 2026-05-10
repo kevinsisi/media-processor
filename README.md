@@ -2,7 +2,7 @@
 
 Content factory pipeline for novice-friendly Instagram and Facebook short-video production.
 
-**Status:** v0.30.12 / M9.15.12 — queue modal expands correctly and asset cards prioritize tracking/subtitle controls.
+**Status:** v0.30.13 / M9.15.13 — queue modal is portalled out of the header and keeps an adaptive height.
 
 ## Spec
 
