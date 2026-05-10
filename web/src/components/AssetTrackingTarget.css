@@ -69,6 +69,15 @@
   touch-action: none;
 }
 
+.tracking-target__canvas-wrap--draw {
+  cursor: crosshair;
+}
+
+.tracking-target__canvas-wrap--draw .tracking-target__bbox {
+  pointer-events: none;
+  opacity: 0.45;
+}
+
 .tracking-target__canvas-img {
   position: absolute;
   inset: 0;
@@ -116,6 +125,11 @@
   border: 2px dashed #66d9ff;
   background: rgba(102, 217, 255, 0.18);
   pointer-events: none;
+}
+
+.tracking-target__custom-roi--saved {
+  border-style: solid;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.45);
 }
 
 /* v0.23 — point-tracking crosshair on the originally-clicked pixel.

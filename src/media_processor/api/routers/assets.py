@@ -386,6 +386,25 @@ def _downsample_frames(frames: list[dict[str, Any]]) -> list[list[int]]:
     return out
 
 
+def _custom_roi_origin(asset: Asset) -> dict[str, int] | None:
+    blob = getattr(asset, "custom_roi_json", None)
+    if not isinstance(blob, dict):
+        return None
+    init = blob.get("init")
+    if not isinstance(init, dict):
+        return None
+    try:
+        return {
+            "x": int(init["x"]),
+            "y": int(init["y"]),
+            "w": int(init["w"]),
+            "h": int(init["h"]),
+            "source_t_ms": int(blob.get("init_t_ms") or 0),
+        }
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 @router.get("/{asset_id}/tracking", response_model=TrackingDetailOut)
 async def get_asset_tracking(
     asset_id: int,
@@ -414,6 +433,7 @@ async def get_asset_tracking(
             tracks=[],
             tracked_object_index=getattr(asset, "tracked_object_index", None),
             has_custom_roi=isinstance(getattr(asset, "custom_roi_json", None), dict),
+            custom_roi_origin=_custom_roi_origin(asset),
             has_point_track=isinstance(point_track, dict),
             point_tracking_origin=getattr(asset, "point_tracking_origin", None),
             point_tracking_status=point_status,
@@ -469,6 +489,7 @@ async def get_asset_tracking(
         tracks=tracks,
         tracked_object_index=getattr(asset, "tracked_object_index", None),
         has_custom_roi=isinstance(getattr(asset, "custom_roi_json", None), dict),
+        custom_roi_origin=_custom_roi_origin(asset),
         has_point_track=isinstance(getattr(asset, "point_tracking_json", None), dict),
         point_tracking_origin=getattr(asset, "point_tracking_origin", None),
         point_tracking_status=getattr(asset, "point_tracking_status", None),
@@ -669,6 +690,7 @@ async def patch_asset_tracking_target(
         asset_id=asset_id,
         tracked_object_index=getattr(asset, "tracked_object_index", None),
         has_custom_roi=isinstance(getattr(asset, "custom_roi_json", None), dict),
+        custom_roi_origin=_custom_roi_origin(asset),
         has_point_track=isinstance(getattr(asset, "point_tracking_json", None), dict),
         point_tracking_status=getattr(asset, "point_tracking_status", None),
     )

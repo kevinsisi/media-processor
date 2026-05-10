@@ -143,6 +143,7 @@ export default function AssetTrackingTarget({
                 ...prev,
                 tracked_object_index: resp.tracked_object_index,
                 has_custom_roi: resp.has_custom_roi,
+                custom_roi_origin: resp.custom_roi_origin ?? null,
                 has_point_track: resp.has_point_track,
                 point_tracking_status: resp.point_tracking_status ?? null,
                 point_tracking_error: null,
@@ -391,6 +392,19 @@ export default function AssetTrackingTarget({
     };
   };
 
+  const cssRoiFor = (
+    roi: { x: number; y: number; w: number; h: number } | null | undefined,
+  ): React.CSSProperties | null => {
+    if (!roi || !renderRect) return null;
+    const { srcW, srcH, renderedW, renderedH, offsetX, offsetY } = renderRect;
+    return {
+      left: `${(roi.x / srcW) * renderedW + offsetX}px`,
+      top: `${(roi.y / srcH) * renderedH + offsetY}px`,
+      width: `${(roi.w / srcW) * renderedW}px`,
+      height: `${(roi.h / srcH) * renderedH}px`,
+    };
+  };
+
   const draftStyle = roiDraft
     ? {
         left: `${Math.min(roiDraft.startX, roiDraft.curX)}px`,
@@ -399,6 +413,8 @@ export default function AssetTrackingTarget({
         height: `${Math.abs(roiDraft.curY - roiDraft.startY)}px`,
       }
     : null;
+  const savedCustomRoiStyle =
+    activeMode === "custom" ? cssRoiFor(detail.custom_roi_origin) : null;
 
   return (
     <div className="tracking-target" aria-label="畫面要跟住誰">
@@ -425,7 +441,7 @@ export default function AssetTrackingTarget({
       </div>
 
       <div
-        className="tracking-target__canvas-wrap"
+        className={`tracking-target__canvas-wrap${isCustomDrawing ? " tracking-target__canvas-wrap--draw" : ""}`}
         ref={wrapRef}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
@@ -453,7 +469,7 @@ export default function AssetTrackingTarget({
               type="button"
               className={`tracking-target__bbox${isActive ? " tracking-target__bbox--active" : ""}`}
               style={style}
-              disabled={busy}
+              disabled={busy || isCustomDrawing}
               onClick={(ev) => {
                 ev.stopPropagation();
                 handleObjectPick(track.object_index);
@@ -467,6 +483,12 @@ export default function AssetTrackingTarget({
             </button>
           );
         })}
+        {savedCustomRoiStyle && !draftStyle && (
+          <div
+            className="tracking-target__custom-roi tracking-target__custom-roi--saved"
+            style={savedCustomRoiStyle}
+          />
+        )}
         {draftStyle && (
           <div className="tracking-target__custom-roi" style={draftStyle} />
         )}
@@ -502,6 +524,11 @@ export default function AssetTrackingTarget({
       {activeMode === "point" && pendingMode !== "point" && detail.has_point_track && (
         <p className="tracking-target__hint">
           ✓ 已建立指定位置；按上方「點選位置」可重新選點。
+        </p>
+      )}
+      {activeMode === "custom" && pendingMode !== "custom" && detail.has_custom_roi && (
+        <p className="tracking-target__hint">
+          ✓ 已建立框選區域；按上方「框選區域」可重新框選。
         </p>
       )}
       {activeMode === "object" && (

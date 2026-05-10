@@ -697,6 +697,13 @@ export interface TrackingDetailOut {
   // -4 = point_tracking (v0.23).
   tracked_object_index: number | null;
   has_custom_roi: boolean;
+  custom_roi_origin?: {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    source_t_ms?: number;
+  } | null;
   // v0.23 — surfaces ``Asset.point_tracking_json`` presence so the
   // picker can render a "✓ pixel tracked" indicator without
   // re-fetching the per-frame trace.
@@ -755,6 +762,13 @@ export interface TrackingTargetResponse {
   has_point_track?: boolean;
   tracked_object_index: number | null;
   has_custom_roi: boolean;
+  custom_roi_origin?: {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    source_t_ms?: number;
+  } | null;
   // v0.28.0 — set to ``"pending"`` immediately after a mode=point
   // PATCH so the FE knows to flip into polling mode without waiting
   // for the next ``GET /tracking`` round-trip.

@@ -2,7 +2,7 @@
 
 Content factory pipeline for novice-friendly Instagram and Facebook short-video production.
 
-**Status:** v0.30.9 / M9.15.9 — Smart Camera overrides automatic auto-reframe when both are enabled.
+**Status:** v0.30.10 / M9.15.10 — tracking focus custom box selection now gives visible saved feedback.
 
 ## Spec
 
@@ -149,6 +149,13 @@ The React/Vite app is API-backed. Main routes:
 - Output ratios are narrowed to `9:16` and `16:9`.
 - Static crop-region anchors are available when source and output orientation
   differ; dynamic subject/point tracking still takes priority.
+
+## v0.30.10 Tracking Focus Notes
+
+- The custom box selection mode returns and displays the saved ROI seed box, so
+  operators can see that the frame selection was applied after the backend round-trip.
+- While drawing a custom box, existing YOLO subject boxes stop intercepting pointer
+  events, preventing accidental subject selection during drag.
 
 ## v0.28.4 Beginner Copy Notes
 

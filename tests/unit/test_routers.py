@@ -92,6 +92,18 @@ async def _seed(session_maker: async_sessionmaker[AsyncSession]) -> None:
             codec="h264",
             sha256="a" * 64,
             status="analyzed",
+            tracking_json={
+                "src_w": 3840,
+                "src_h": 2160,
+                "fps": 5.0,
+                "sampled_frames": 5,
+                "subject_class": "car",
+                "confidence": 0.9,
+                "frames": [
+                    {"t_ms": i * 250, "x": 100, "y": 200, "w": 800, "h": 400, "conf": 0.9}
+                    for i in range(5)
+                ],
+            },
         )
         s.add(a)
         await s.flush()
@@ -243,6 +255,59 @@ def test_point_tracking_enqueue_failure_reaches_terminal_state(
     body = detail.json()
     assert body["point_tracking_status"] == "failed"
     assert "enqueue failed" in body["point_tracking_error"]
+
+
+def test_tracking_detail_returns_custom_roi_origin(
+    app: FastAPI,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_track_custom_roi(*_args: Any, **kwargs: Any) -> dict[str, Any]:
+        return {
+            "src_w": 3840,
+            "src_h": 2160,
+            "fps": 5.0,
+            "init_t_ms": int(kwargs["init_t_ms"]),
+            "init": {
+                "x": int(kwargs["init_x"]),
+                "y": int(kwargs["init_y"]),
+                "w": int(kwargs["init_w"]),
+                "h": int(kwargs["init_h"]),
+            },
+            "frames": [
+                {
+                    "t_ms": int(kwargs["init_t_ms"]),
+                    "x": int(kwargs["init_x"]),
+                    "y": int(kwargs["init_y"]),
+                    "w": int(kwargs["init_w"]),
+                    "h": int(kwargs["init_h"]),
+                    "conf": 1.0,
+                }
+            ],
+            "sampled_frames": 1,
+        }
+
+    monkeypatch.setattr(assets_router.object_tracking, "track_custom_roi", fake_track_custom_roi)
+    client = TestClient(app)
+
+    resp = client.patch(
+        "/assets/1/tracking-target",
+        json={"mode": "custom", "custom_roi": {"x": 120, "y": 240, "w": 640, "h": 360}},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["custom_roi_origin"] == {
+        "x": 120,
+        "y": 240,
+        "w": 640,
+        "h": 360,
+        "source_t_ms": 0,
+    }
+
+    detail = client.get("/assets/1/tracking")
+    assert detail.status_code == 200, detail.text
+    body = detail.json()
+    assert body["tracked_object_index"] == -1
+    assert body["has_custom_roi"] is True
+    assert body["custom_roi_origin"] == resp.json()["custom_roi_origin"]
 
 
 def test_bgm_enqueue_failure_marks_job_failed(

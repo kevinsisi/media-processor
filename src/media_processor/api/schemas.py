@@ -918,6 +918,11 @@ class TrackingDetailOut(BaseModel):
     # auto-reframe; ``-4`` means point_tracking (v0.23).
     tracked_object_index: int | None = None
     has_custom_roi: bool = False
+    # v0.30.10 — initial user-drawn ROI for the custom tracking mode.
+    # The full CSRT trace remains in ``Asset.custom_roi_json``; the FE
+    # only needs this seed box to show that the saved frame selection
+    # is actually active after a round-trip.
+    custom_roi_origin: dict[str, Any] | None = None
     # v0.23 — surfaces ``Asset.point_tracking_json`` presence so the
     # FE can render a "this asset has an LK pixel-precise track"
     # indicator on the picker. The full per-frame trace lives in DB
@@ -967,6 +972,7 @@ class TrackingTargetResponse(BaseModel):
     asset_id: int
     tracked_object_index: int | None
     has_custom_roi: bool
+    custom_roi_origin: dict[str, Any] | None = None
     has_point_track: bool = False
     # v0.28.0 — surfaces the async-LK pipeline state so the FE knows
     # whether to enter polling mode immediately after the PATCH
