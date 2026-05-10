@@ -69,6 +69,12 @@ KALMAN_R: float = 80.0
 # realistic phone-shoot pan rate.
 MAX_DELTA_PX_PER_FRAME: float = 24.0
 
+# v0.30.15 — automatic YOLO reframes bypass vidstab, so handheld lateral
+# shake has to be absorbed before emitting crop commands. Explicit point,
+# custom ROI, and user-selected YOLO targets keep the tighter subject lock.
+CROP_PATH_SMOOTHING_WINDOW_S: float = 1.40
+CROP_PATH_DEADBAND_PX: float = 2.0
+
 # v0.16.1 — fraction of the maximum target-aspect window we actually
 # use for the dynamic crop. Shrinking below 1.0 zooms the subject in
 # (it fills more of the output frame) AND gives the crop window slack
@@ -198,6 +204,41 @@ def _interpolate(
     return out
 
 
+def _smooth_path_values(
+    values: list[float],
+    target_times_s: list[float],
+    *,
+    window_s: float = CROP_PATH_SMOOTHING_WINDOW_S,
+) -> list[float]:
+    """Centred moving-average smoothing for rendered crop positions.
+
+    The render path is known up front, so we can use a symmetric window
+    instead of a causal low-pass filter. That avoids the lag that would
+    leave a tracked subject trailing during a real pan, while suppressing
+    the high-frequency left/right oscillation that handheld footage feeds
+    into the dynamic crop commands.
+    """
+    if len(values) < 3 or len(values) != len(target_times_s) or window_s <= 0:
+        return list(values)
+    radius_s = window_s / 2.0
+    smoothed: list[float] = []
+    left = 0
+    right = 0
+    running_sum = 0.0
+    for center_t in target_times_s:
+        min_t = center_t - radius_s
+        max_t = center_t + radius_s
+        while right < len(values) and target_times_s[right] <= max_t:
+            running_sum += values[right]
+            right += 1
+        while left < right and target_times_s[left] < min_t:
+            running_sum -= values[left]
+            left += 1
+        count = max(1, right - left)
+        smoothed.append(running_sum / count)
+    return smoothed
+
+
 def _frames_for_object(tracking: dict[str, Any], object_index: int | None) -> list[dict[str, Any]]:
     """Pick the right per-frame bbox list out of ``tracking_json``.
 
@@ -225,6 +266,7 @@ def compute_crop_path(
     src_w: int | None = None,
     src_h: int | None = None,
     object_index: int | None = None,
+    smooth_camera_path: bool = True,
 ) -> CropPath | None:
     """Build a Kalman-smoothed dynamic crop for the cut span.
 
@@ -236,7 +278,9 @@ def compute_crop_path(
 
     ``object_index`` (v0.17) selects which track to follow inside a
     multi-track ``tracking`` dict. ``None`` keeps the historic
-    behaviour (follow the dominant track via ``frames``).
+    behaviour (follow the dominant track via ``frames``). ``smooth_camera_path``
+    is for automatic YOLO reframes only; explicit user locks pass False so
+    the crop remains tightly centred on the chosen point / ROI / object.
     """
     if not tracking:
         return None
@@ -292,25 +336,43 @@ def compute_crop_path(
     cx_list = _interpolate(smoothed_pts_x, target_times)
     cy_list = _interpolate(smoothed_pts_y, target_times)
 
-    # Convert center → top-left of the crop window. Clamp inside
-    # source. Apply a per-frame movement cap so any residual jitter
-    # in the smoothed signal can't pop the camera around.
+    # Convert center → top-left of the crop window. Clamp inside the
+    # source, smooth the full offline camera path to absorb hand-held
+    # lateral jitter, then apply a per-frame movement cap so any residual
+    # jitter in the smoothed signal can't pop the camera around.
     half_w = crop_w / 2.0
     half_h = crop_h / 2.0
     max_x = max(0, sw - crop_w)
     max_y = max(0, sh - crop_h)
+    target_x_list: list[float] = []
+    target_y_list: list[float] = []
+    for cx, cy in zip(cx_list, cy_list, strict=True):
+        target_x_list.append(max(0.0, min(float(max_x), cx - half_w)))
+        target_y_list.append(max(0.0, min(float(max_y), cy - half_h)))
+    if smooth_camera_path:
+        target_x_list = _smooth_path_values(target_x_list, target_times)
+        target_y_list = _smooth_path_values(target_y_list, target_times)
+
     points: list[tuple[float, int, int]] = []
     last_x: float | None = None
     last_y: float | None = None
-    for time_s, cx, cy in zip(target_times, cx_list, cy_list, strict=True):
-        target_x = max(0.0, min(float(max_x), cx - half_w))
-        target_y = max(0.0, min(float(max_y), cy - half_h))
+    for time_s, target_x, target_y in zip(
+        target_times,
+        target_x_list,
+        target_y_list,
+        strict=True,
+    ):
         if last_x is None or last_y is None:
             x_now = target_x
             y_now = target_y
         else:
             dx = target_x - last_x
             dy = target_y - last_y
+            if smooth_camera_path:
+                if abs(dx) < CROP_PATH_DEADBAND_PX:
+                    dx = 0.0
+                if abs(dy) < CROP_PATH_DEADBAND_PX:
+                    dy = 0.0
             x_now = last_x + max(-MAX_DELTA_PX_PER_FRAME, min(MAX_DELTA_PX_PER_FRAME, dx))
             y_now = last_y + max(-MAX_DELTA_PX_PER_FRAME, min(MAX_DELTA_PX_PER_FRAME, dy))
         last_x, last_y = x_now, y_now
@@ -356,6 +418,7 @@ def compute_crop_path_from_custom_roi(
         asset_end_ms=asset_end_ms,
         src_w=src_w,
         src_h=src_h,
+        smooth_camera_path=False,
     )
 
 
@@ -427,6 +490,7 @@ def compute_crop_path_from_point_track(
         asset_end_ms=asset_end_ms,
         src_w=src_w,
         src_h=src_h,
+        smooth_camera_path=False,
     )
 
 
@@ -491,6 +555,8 @@ def build_filter_chain(
 __all__ = [
     "ASPECT_RATIOS",
     "CROP_ZOOM_FACTOR",
+    "CROP_PATH_DEADBAND_PX",
+    "CROP_PATH_SMOOTHING_WINDOW_S",
     "KALMAN_Q",
     "KALMAN_R",
     "MAX_DELTA_PX_PER_FRAME",

@@ -614,6 +614,7 @@ def _cut_segment(
                 asset_start_ms=cut.asset_start_ms,
                 asset_end_ms=cut.asset_end_ms,
                 object_index=tracking_object_index,
+                smooth_camera_path=tracking_object_index is None,
             )
         if crop_path is not None:
             sendcmd_path = sendcmd_dir / f"reframe_seg_{cut.order:04d}.txt"

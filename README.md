@@ -2,7 +2,7 @@
 
 Content factory pipeline for novice-friendly Instagram and Facebook short-video production.
 
-**Status:** v0.30.14 / M9.15.14 — UI/UX pass: safer confirmations, clearer export copy, mobile touch/layout refinements.
+**Status:** v0.30.15 / M9.15.15 — Automatic YOLO crop path smoothing reduces handheld left/right shake without dropping selected clips.
 
 ## Spec
 
