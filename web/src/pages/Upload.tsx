@@ -358,7 +358,14 @@ export default function Upload() {
         : "可以先不填腳本；若有輸入，系統會自動保存。";
 
   const handleNextStep = async (): Promise<void> => {
-    if (assetCount === 0 || scriptSaving || !scriptInitialLoaded) return;
+    if (
+      assetCount === 0 ||
+      pendingUploadCount > 0 ||
+      scriptSaving ||
+      !scriptInitialLoaded
+    ) {
+      return;
+    }
     const saved = await saveScriptNow();
     if (!saved) return;
     navigate(`/projects/${projectId}/assets`);
@@ -589,12 +596,10 @@ export default function Upload() {
               type="button"
               className="summary-next summary-next--warning"
               onClick={() => void handleNextStep()}
-              disabled={scriptSaving || !scriptInitialLoaded}
-              title={`還有 ${pendingUploadCount} 個影片未上傳完，前往素材檢查可能看不到全部素材。`}
+              disabled
+              title={`還有 ${pendingUploadCount} 個影片未上傳完，完成後才能查看完整素材檢查。`}
             >
-              {scriptSaving
-                ? "正在保存腳本…"
-                : `下一步：查看素材檢查（${pendingUploadCount} 個還在上傳）→`}
+              等待 {pendingUploadCount} 個影片上傳完成…
             </button>
           ) : (
             <button

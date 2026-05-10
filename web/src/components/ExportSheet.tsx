@@ -180,17 +180,17 @@ export default function ExportSheet({ draftId, draftVersion, ready }: ExportShee
           type="button"
           className="cta cta--quiet export-sheet__trigger"
           onClick={() => setOpen(true)}
-          aria-label="建立 IG / FB 版本"
+          aria-label="建立社群下載版本"
         >
-          建立 IG / FB 版本
+          建立社群版本
         </button>
       ) : (
         <div className="export-sheet__panel" aria-modal="false">
           <div className="export-sheet__head">
             <div>
-              <h3 className="export-sheet__title">建立 IG / FB 短影音版本</h3>
+              <h3 className="export-sheet__title">建立社群下載版本</h3>
               <p className="export-sheet__subtitle">
-                選要發佈的平台，系統會用適合的尺寸建立 v{draftVersion} 下載檔。
+                選要發佈的平台，系統會用 9:16 或 16:9 建立 v{draftVersion} 下載檔。
               </p>
             </div>
             <button
@@ -316,7 +316,7 @@ export default function ExportSheet({ draftId, draftVersion, ready }: ExportShee
           <div className="export-sheet__list" aria-live="polite">
             <h4 className="export-sheet__list-title">已建立的下載版本</h4>
             {artifacts.length === 0 ? (
-              <p className="export-sheet__empty mono">尚未建立其他比例。</p>
+              <p className="export-sheet__empty mono">尚未建立社群下載版本。</p>
             ) : (
               <ul className="export-sheet__items">
                 {artifacts.map((item) => (

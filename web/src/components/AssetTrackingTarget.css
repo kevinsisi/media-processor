@@ -37,7 +37,8 @@
   background: rgba(255, 255, 255, 0.04);
   color: rgba(255, 255, 255, 0.85);
   border-radius: 999px;
-  padding: 4px 10px;
+  min-height: 44px;
+  padding: 8px 12px;
   font-size: 12px;
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s, color 0.15s;
@@ -204,7 +205,8 @@
   background: rgba(255, 255, 255, 0.05);
   color: rgba(255, 255, 255, 0.9);
   border-radius: 8px;
-  padding: 6px 10px;
+  min-height: 44px;
+  padding: 8px 12px;
   font-size: 12px;
   cursor: pointer;
   display: flex;

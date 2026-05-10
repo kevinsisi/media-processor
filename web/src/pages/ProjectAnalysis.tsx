@@ -9,6 +9,7 @@ import type {
   TranscriptSegmentOut,
 } from "../api/types";
 import AssetTrackingTarget from "../components/AssetTrackingTarget";
+import { type ConfirmFn, useConfirmDialog } from "../components/ConfirmDialog";
 import { useAssetPolling } from "../hooks/useAssetPolling";
 import {
   ANALYSIS_STEP_LABELS,
@@ -644,6 +645,7 @@ interface AssetCardProps {
   translating: boolean;
   selected: boolean;
   onToggleSelect: (assetId: number, next: boolean) => void;
+  confirmAction: ConfirmFn;
 }
 
 interface SecondarySubtitleToggleProps {
@@ -705,6 +707,7 @@ function AssetCard({
   translating,
   selected,
   onToggleSelect,
+  confirmAction,
 }: AssetCardProps) {
   const [expanded, setExpanded] = useState(false);
   return (
@@ -860,13 +863,15 @@ function AssetCard({
           type="button"
           className="cta"
           onClick={() => {
-            if (
-              window.confirm(
-                "重新檢查全部會覆蓋手動編輯過的逐字稿與字幕。確定要繼續？",
-              )
-            ) {
-              onAnalyze(asset.id, true);
-            }
+            void (async () => {
+              const ok = await confirmAction({
+                title: "覆寫手動字幕？",
+                message: "重新檢查全部會覆蓋手動編輯過的逐字稿與字幕。確定要繼續？",
+                confirmLabel: "覆寫並重跑",
+                tone: "danger",
+              });
+              if (ok) onAnalyze(asset.id, true);
+            })();
           }}
           title="所有檢查項目全部重跑，並覆寫手動編輯過的字幕。"
         >
@@ -881,6 +886,7 @@ export default function ProjectAnalysis() {
   const params = useParams<{ id: string }>();
   const projectId = params.id ? Number(params.id) : NaN;
   const validProjectId = Number.isFinite(projectId) ? projectId : null;
+  const { confirm, confirmDialog } = useConfirmDialog();
   const polling = useAssetPolling(validProjectId);
   const [triggerError, setTriggerError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
@@ -1030,11 +1036,13 @@ export default function ProjectAnalysis() {
     async (force: boolean) => {
       if (selectedIds.size === 0) return;
       if (force) {
-        if (
-          !window.confirm(
-            `將重新檢查 ${selectedIds.size} 個素材的全部項目，會覆蓋手動編輯的逐字稿。確定？`,
-          )
-        ) {
+        const ok = await confirm({
+          title: "覆寫所選素材的手動字幕？",
+          message: `將重新檢查 ${selectedIds.size} 個素材的全部項目，會覆蓋手動編輯的逐字稿。`,
+          confirmLabel: "覆寫並重跑",
+          tone: "danger",
+        });
+        if (!ok) {
           return;
         }
       }
@@ -1061,7 +1069,7 @@ export default function ProjectAnalysis() {
       if (failed === 0) clearSelection();
       polling.refresh();
     },
-    [selectedIds, polling, clearSelection],
+    [selectedIds, polling, clearSelection, confirm],
   );
 
   // v0.26.0 / v0.27.1 — bulk asset delete. Two-phase flow:
@@ -1081,11 +1089,13 @@ export default function ProjectAnalysis() {
   // reject each draft first — way too many clicks for a bulk-clean.
   const runBatchDelete = useCallback(async () => {
     if (selectedIds.size === 0 || validProjectId == null) return;
-    if (
-      !window.confirm(
-        `確定要刪除 ${selectedIds.size} 個素材？檔案、縮圖、畫面重點資料都會一起清掉，無法復原。`,
-      )
-    ) {
+    const deleteOk = await confirm({
+      title: "刪除所選素材？",
+      message: `確定要刪除 ${selectedIds.size} 個素材？檔案、縮圖、畫面重點資料都會一起清掉，無法復原。`,
+      confirmLabel: "刪除素材",
+      tone: "danger",
+    });
+    if (!deleteOk) {
       return;
     }
     setBatchRunning(true);
@@ -1102,14 +1112,17 @@ export default function ProjectAnalysis() {
               .join("、");
             return `素材 #${r.asset_id} 被 ${versions} 使用中`;
           });
-        const confirmed = window.confirm(
-          [
+        const confirmed = await confirm({
+          title: "素材正在被版本使用",
+          message: [
             `${summary.needs_force_count} 個素材正被使用中：`,
             ...lines,
             "",
-            "刪除後上述版本將被標為「失敗（素材已被刪除）」。確定刪除？",
+            "刪除後上述版本將被標為「失敗（素材已被刪除）」。",
           ].join("\n"),
-        );
+          confirmLabel: "仍然刪除",
+          tone: "danger",
+        });
         if (confirmed) {
           summary = await apiClient.batchDeleteAssets(
             validProjectId,
@@ -1152,7 +1165,7 @@ export default function ProjectAnalysis() {
     setBatchRunning(false);
     clearSelection();
     polling.refresh();
-  }, [selectedIds, validProjectId, polling, clearSelection]);
+  }, [selectedIds, validProjectId, polling, clearSelection, confirm]);
 
   const overallStatus = useMemo(() => {
     if (assets.length === 0) return "尚無素材";
@@ -1327,9 +1340,11 @@ export default function ProjectAnalysis() {
             translating={translatingIds.has(asset.id)}
             selected={selectedIds.has(asset.id)}
             onToggleSelect={toggleSelect}
+            confirmAction={confirm}
           />
         ))}
       </section>
+      {confirmDialog}
     </main>
   );
 }

@@ -68,13 +68,13 @@ export default function Health() {
 
       <header className="masthead">
         <div className="kicker">
-          編號 001 &nbsp;·&nbsp; 階段 α &nbsp;·&nbsp; STEP 0 + M1
+          系統狀態 &nbsp;·&nbsp; 15 秒自動更新
         </div>
         <h1 className="title">
           Media <span className="title-em">·</span> Processor
         </h1>
         <div className="subtitle">
-          短影音內容工廠 — 第零號
+          API、資料庫與佇列基礎服務檢查
         </div>
       </header>
 

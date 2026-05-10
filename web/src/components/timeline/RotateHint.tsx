@@ -14,10 +14,10 @@ export default function RotateHint() {
       </div>
       <h2 className="rotate-hint__title">需要橫向螢幕</h2>
       <p className="rotate-hint__body">
-        進階編輯需要更寬的視野，請將裝置轉為橫向。
+        進階片段編輯需要同時看到預覽、時間軸與片段設定，請將裝置轉為橫向或改用桌機。
       </p>
       <p className="rotate-hint__body rotate-hint__body--muted">
-        如果旋轉沒有反應，請確認系統「自動旋轉」沒有被鎖定。
+        手機直式仍可回成品頁預覽、下載或調整一般設定；若旋轉沒有反應，請確認系統「自動旋轉」沒有被鎖定。
       </p>
     </div>
   );

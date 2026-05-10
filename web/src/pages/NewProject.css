@@ -84,7 +84,7 @@ select.np-field__input {
 
 .np-ratios__grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: var(--space-3);
 }
 
@@ -196,7 +196,7 @@ select.np-field__input {
     padding: var(--space-5) var(--space-4) calc(var(--space-9) + 60px);
   }
   .np-ratios__grid {
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(2, 1fr);
     gap: var(--space-2);
   }
   .ratio-card {

@@ -407,6 +407,11 @@
   border-color: var(--gold);
 }
 
+.summary-next--warning:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
 .summary-next--warning:hover {
   background: var(--ink-elevated);
 }

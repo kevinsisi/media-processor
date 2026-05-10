@@ -2,7 +2,7 @@
 
 Content factory pipeline for novice-friendly Instagram and Facebook short-video production.
 
-**Status:** v0.30.13 / M9.15.13 — queue modal is portalled out of the header and keeps an adaptive height.
+**Status:** v0.30.14 / M9.15.14 — UI/UX pass: safer confirmations, clearer export copy, mobile touch/layout refinements.
 
 ## Spec
 

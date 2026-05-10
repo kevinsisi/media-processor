@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, apiClient } from "../api/client";
+import { useConfirmDialog } from "./ConfirmDialog";
 import type {
   ProjectDetail,
   WatermarkPosition,
@@ -57,6 +58,7 @@ export default function WatermarkPicker({
   disabled,
 }: WatermarkPickerProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const { confirm, confirmDialog } = useConfirmDialog();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // v0.20.2 — immediate-feedback state. Holds the just-uploaded
@@ -352,7 +354,13 @@ export default function WatermarkPicker({
   const handleDeletePreset = useCallback(
     async (preset: WatermarkPresetOut, ev: React.MouseEvent) => {
       ev.stopPropagation();
-      if (!window.confirm(`刪除預設「${preset.name}」？`)) return;
+      const ok = await confirm({
+        title: "刪除品牌標誌預設？",
+        message: `刪除預設「${preset.name}」？已套用到專案的標誌不會被移除。`,
+        confirmLabel: "刪除預設",
+        tone: "danger",
+      });
+      if (!ok) return;
       setPresetBusy(preset.id);
       try {
         await apiClient.deleteWatermarkPreset(preset.id);
@@ -369,7 +377,7 @@ export default function WatermarkPicker({
         setPresetBusy(null);
       }
     },
-    [refreshPresets],
+    [refreshPresets, confirm],
   );
 
   const interactive = !disabled && !busy;
@@ -584,6 +592,7 @@ export default function WatermarkPicker({
         下次產生成品時會將 PNG 標誌放到成片角落（{POSITION_LABEL[position]}），
         大小與透明度即時生效。
       </p>
+      {confirmDialog}
     </section>
   );
 }

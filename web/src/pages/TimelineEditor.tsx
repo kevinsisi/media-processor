@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ApiError, apiClient } from "../api/client";
+import { useConfirmDialog } from "../components/ConfirmDialog";
 import PreviewPane from "../components/timeline/PreviewPane";
 import RotateHint from "../components/timeline/RotateHint";
 import SegmentInspector from "../components/timeline/SegmentInspector";
@@ -26,6 +27,7 @@ export default function TimelineEditor() {
   const navigate = useNavigate();
   const projectId = Number.parseInt(params.projectId ?? "", 10);
   const draftId = Number.parseInt(params.draftId ?? "", 10);
+  const { confirm, confirmDialog } = useConfirmDialog();
 
   const [project, setProject] = useState<ProjectDetail | null>(null);
   const [draft, setDraft] = useState<DraftDetail | null>(null);
@@ -221,7 +223,13 @@ export default function TimelineEditor() {
 
   const handleDelete = useCallback(async () => {
     if (selectedSegmentId == null) return;
-    if (!window.confirm("刪除這個片段？這會立即更新時間軸。")) return;
+    const ok = await confirm({
+      title: "刪除這個片段？",
+      message: "這會立即更新時間軸；要回復需要重新產生或再手動調整。",
+      confirmLabel: "刪除片段",
+      tone: "danger",
+    });
+    if (!ok) return;
     setBusy(true);
     try {
       await apiClient.deleteDraftSegment(draftId, selectedSegmentId);
@@ -234,7 +242,7 @@ export default function TimelineEditor() {
     } finally {
       setBusy(false);
     }
-  }, [draftId, selectedSegmentId, applyDraftResponse]);
+  }, [draftId, selectedSegmentId, applyDraftResponse, confirm]);
 
   const handleApply = useCallback(async () => {
     if (!draft) return;
@@ -302,12 +310,12 @@ export default function TimelineEditor() {
   const applyTitle = applying
     ? "等待開始…"
     : dirty
-      ? "套用變更並重新產生成品"
-      : "尚無待套用的變更";
+      ? "重新產生成品以套用時間軸變更"
+      : "時間軸已套用到目前成品";
   // v0.22 — short label shown next to the icon so the button reads as
   // "套用 ↻" instead of just an emoji. ``applying`` keeps the dots
   // visible for spinner intent.
-  const applyLabel = applying ? "套用中…" : dirty ? "套用變更" : "已套用";
+  const applyLabel = applying ? "送出中…" : dirty ? "重新產生" : "已套用";
 
   return (
     <main className="timeline-editor">
@@ -465,6 +473,7 @@ export default function TimelineEditor() {
           </button>
         </div>
       )}
+      {confirmDialog}
     </main>
   );
 }

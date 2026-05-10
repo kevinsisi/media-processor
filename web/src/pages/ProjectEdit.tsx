@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { ApiError, apiClient } from "../api/client";
 import BgmFadeOutSlider from "../components/BgmFadeOutSlider";
 import BgmSourcePicker from "../components/BgmSourcePicker";
+import { useConfirmDialog } from "../components/ConfirmDialog";
 import type { BgmSource } from "../components/BgmSourcePicker";
 import CropRegionPicker, {
   type CropDirection,
@@ -911,6 +912,7 @@ export default function ProjectEdit() {
   const { id } = useParams<{ id: string }>();
   const projectId = id ? Number(id) : NaN;
   const validProjectId = Number.isFinite(projectId) ? projectId : 0;
+  const { confirm, confirmDialog } = useConfirmDialog();
 
   // Full list of drafts for this project. Sorted version-desc so [0] is the
   // newest version. Drives both the version switcher and the polling
@@ -1436,7 +1438,13 @@ export default function ProjectEdit() {
 
   const handleCancel = useCallback(async () => {
     if (selectedDraftId === null) return;
-    if (!window.confirm("確定要停止這次產生？已處理的進度會丟掉。")) return;
+    const ok = await confirm({
+      title: "停止這次產生？",
+      message: "已處理的進度會丟掉，之後需要重新送出。",
+      confirmLabel: "停止產生",
+      tone: "danger",
+    });
+    if (!ok) return;
     setCancelling(true);
     setCancelError(null);
     try {
@@ -1449,7 +1457,7 @@ export default function ProjectEdit() {
     } finally {
       setCancelling(false);
     }
-  }, [selectedDraftId, refreshDrafts]);
+  }, [selectedDraftId, refreshDrafts, confirm]);
 
   const status = draft?.status ?? null;
   // True both for the first-ever trigger (draft is null) and for a force-retry
@@ -1737,9 +1745,9 @@ export default function ProjectEdit() {
           <section className="publish-workbench" aria-label="成品發佈工作台">
             <div className="publish-workbench__intro">
               <p className="publish-workbench__eyebrow mono">發布工作台</p>
-              <h2 className="publish-workbench__title">可以直接拿去發 IG / FB</h2>
+              <h2 className="publish-workbench__title">可以直接拿去發佈</h2>
               <p className="publish-workbench__body">
-                先預覽主成品；沒問題就下載，或一鍵建立 Reels、貼文牆、方形貼文版本。
+                先預覽主成品；沒問題就下載，或建立 Reels 直式版與 YouTube / Web 橫向版。
               </p>
             </div>
 
@@ -2062,6 +2070,7 @@ export default function ProjectEdit() {
         onClose={() => setQueueModalOpen(false)}
         highlightDraftId={selectedDraftId}
       />
+      {confirmDialog}
     </main>
   );
 }

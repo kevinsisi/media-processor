@@ -64,6 +64,9 @@ function StatusCell({ project }: { project: ProjectSummary }) {
         <div className="progress-track progress-track--indeterminate" aria-hidden>
           <div className="progress-bar progress-bar--indeterminate" />
         </div>
+        <Link to={`/projects/${project.id}/assets`} className="cta cta--quiet">
+          查看進度 →
+        </Link>
       </div>
     );
   }
