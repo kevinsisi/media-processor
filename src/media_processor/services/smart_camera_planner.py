@@ -769,7 +769,9 @@ async def plan_smart_camera(
                         focus_regions=regions,
                     )
                 else:
-                    out[cut.order] = serialise_directive(directive, focus_regions=regions)
+                    blob = serialise_directive(directive, focus_regions=regions)
+                    if blob is not None:
+                        out[cut.order] = blob
                 logger.info(
                     "smart-camera: cut order=%d asset=%d → %s",
                     cut.order,
