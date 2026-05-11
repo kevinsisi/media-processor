@@ -62,6 +62,22 @@ def test_derive_pan_for_two_disjoint_clusters() -> None:
     assert directive.from_rect[0] < directive.to_rect[0]
 
 
+def test_derive_does_not_pan_for_simultaneous_clusters() -> None:
+    """Simultaneous saliency boxes are composition, not a camera move."""
+    regions = [
+        _r(0.0, 0.25, 0.25, 0.50, 0.50),
+        _r(0.0, 0.43, 0.60, 0.14, 0.05),
+        _r(0.33, 0.25, 0.25, 0.50, 0.50),
+        _r(0.33, 0.43, 0.60, 0.14, 0.05),
+        _r(0.66, 0.25, 0.25, 0.50, 0.50),
+        _r(0.66, 0.43, 0.60, 0.14, 0.05),
+        _r(1.0, 0.25, 0.25, 0.50, 0.50),
+        _r(1.0, 0.43, 0.60, 0.14, 0.05),
+    ]
+
+    assert scp._derive_directive(regions, dominant_motion="static") is None
+
+
 def test_derive_returns_none_when_mid_band_area() -> None:
     """A single cluster with mean_area between 0.25 and 0.60 → None."""
     regions = [_r(0.0, 0.25, 0.25, 0.50, 0.50)]

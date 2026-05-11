@@ -56,7 +56,7 @@ from media_processor.services.edit_planner import (
 logger = logging.getLogger(__name__)
 
 
-SMART_CAMERA_SCHEMA_VERSION = "smart-camera.v1"
+SMART_CAMERA_SCHEMA_VERSION = "smart-camera.v2"
 
 # Per-cut frame sampling cap. 4 keyframes is enough to spot a
 # zoom_in / zoom_out / pan candidate without burning tokens — most
@@ -81,6 +81,8 @@ ZOOM_OUT_AREA_MIN: float = 0.60
 # "the camera is static while the subject walks across the frame" as a
 # situation where a pan reads better than a Ken-Burns zoom.
 CLUSTER_DISJOINT_IOU: float = 0.10
+PAN_MIN_MEAN_T_DELTA: float = 0.35
+PAN_MAX_TIME_OVERLAP: float = 0.10
 
 # Zoom curve's start/end offsets — we crop into the span by 50 ms on
 # each side so the camera move starts after any inbound xfade has
@@ -442,6 +444,30 @@ def _cluster_bbox(cluster: Sequence[FocusRegion]) -> tuple[float, float, float, 
     return (x1, y1, max(0.0, x2 - x1), max(0.0, y2 - y1))
 
 
+def _cluster_time_stats(cluster: Sequence[FocusRegion]) -> tuple[float, float, float]:
+    """Return (min_t, max_t, mean_t) for a focus-region cluster."""
+    if not cluster:
+        return (0.0, 0.0, 0.0)
+    times = [r.t_norm for r in cluster]
+    return (min(times), max(times), sum(times) / len(times))
+
+
+def _is_chronological_pan(first: Sequence[FocusRegion], last: Sequence[FocusRegion]) -> bool:
+    """True only when two clusters represent motion across time.
+
+    Gemini often returns several simultaneous focus regions in every sampled
+    frame (e.g. car body + badge/text). Treating those as a pan creates an
+    artificial camera shove mid-cut. A pan is allowed only when the target
+    focus clearly moves from an early cluster to a later cluster.
+    """
+    first_min, first_max, first_mean = _cluster_time_stats(first)
+    last_min, _last_max, last_mean = _cluster_time_stats(last)
+    return (
+        last_mean - first_mean >= PAN_MIN_MEAN_T_DELTA
+        and first_max <= last_min + PAN_MAX_TIME_OVERLAP
+    )
+
+
 def _crop_window_around(
     cx: float,
     cy: float,
@@ -485,18 +511,21 @@ def _derive_directive(
     ease = "exp" if dominant_motion in DYNAMIC_MOTIONS else "linear"
 
     if len(clusters) >= 2:
-        # PAN: from first cluster's bbox centre → last cluster's
-        # bbox centre. We pick the temporally first / last cluster
-        # (sort by minimum t_norm in the cluster) so the camera
-        # follows the actual chronological motion, not the geometric
-        # ordering.
-        chrono = sorted(clusters, key=lambda c: min(r.t_norm for r in c))
+        # PAN: from first cluster's bbox centre → last cluster's bbox
+        # centre, but only when the clusters are separated in time. Multiple
+        # simultaneous saliency boxes are a composition cue, not a camera path.
+        chrono = sorted(clusters, key=lambda c: _cluster_time_stats(c)[2])
         first = chrono[0]
         last = chrono[-1]
         if _bbox_iou_clusters(first, last) >= CLUSTER_DISJOINT_IOU:
             # Two clusters but they actually overlap — fall back to
             # a single-cluster decision.
             clusters = [first + last]
+        elif not _is_chronological_pan(first, last):
+            # Disjoint but present at the same time (e.g. car + badge/text).
+            # Keep the dominant subject as the single-cluster candidate so a
+            # later fallback can do a gentle zoom instead of a fake pan.
+            clusters = [clusters[0]]
         else:
             from_bbox = _cluster_bbox(first)
             to_bbox = _cluster_bbox(last)
@@ -858,6 +887,8 @@ __all__ = [
     "EDGE_TRIM_S",
     "MAX_FRAMES_PER_CUT",
     "PAN_SCALE",
+    "PAN_MAX_TIME_OVERLAP",
+    "PAN_MIN_MEAN_T_DELTA",
     "SMART_CAMERA_SCHEMA_VERSION",
     "TRANSITION_OVERLAP_MS",
     "ZOOM_IN_AREA_MAX",

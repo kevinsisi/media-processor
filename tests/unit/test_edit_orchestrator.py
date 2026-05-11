@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from media_processor.services import smart_camera_planner
 from media_processor.services.edit_orchestrator import _should_run_smart_camera_stage
 from media_processor.services.edit_planner import CutPlan, CutPlanSegment
 
@@ -45,6 +46,7 @@ def test_smart_camera_skip_plan_reuses_existing_directives() -> None:
     plan = _plan(
         _segment(
             smart_camera_json={
+                "schema_version": smart_camera_planner.SMART_CAMERA_SCHEMA_VERSION,
                 "kind": "zoom_in",
                 "from_rect": [0.0, 0.0, 1.0, 1.0],
                 "to_rect": [0.2, 0.2, 0.6, 0.6],
@@ -59,6 +61,28 @@ def test_smart_camera_skip_plan_reuses_existing_directives() -> None:
             plan=plan,
         )
         is False
+    )
+
+
+def test_smart_camera_skip_plan_regenerates_old_schema_directives() -> None:
+    plan = _plan(
+        _segment(
+            smart_camera_json={
+                "schema_version": "smart-camera.v1",
+                "kind": "pan",
+                "from_rect": [0.0, 0.0, 1.0, 1.0],
+                "to_rect": [0.2, 0.2, 0.6, 0.6],
+            }
+        )
+    )
+
+    assert (
+        _should_run_smart_camera_stage(
+            smart_camera_active=True,
+            skip_plan=True,
+            plan=plan,
+        )
+        is True
     )
 
 

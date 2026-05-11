@@ -319,10 +319,14 @@ async def _restore_plan_blob(handle: _DraftHandle, plan: CutPlan) -> None:
 
 
 def _plan_needs_smart_camera(plan: CutPlan) -> bool:
-    """True when at least one cut lacks a stored smart-camera directive."""
-    return any(
-        not isinstance(getattr(seg, "smart_camera_json", None), dict) for seg in plan.segments
-    )
+    """True when at least one cut lacks a current smart-camera directive."""
+    for seg in plan.segments:
+        blob = getattr(seg, "smart_camera_json", None)
+        if not isinstance(blob, dict):
+            return True
+        if blob.get("schema_version") != smart_camera_planner.SMART_CAMERA_SCHEMA_VERSION:
+            return True
+    return False
 
 
 def _should_run_smart_camera_stage(
