@@ -226,20 +226,15 @@ WATERMARK_MARGIN_MIN_PX: int = 12
 
 # v0.14.3 — digital stabilization (vidstabdetect + vidstabtransform).
 # Two-pass: first pass writes a transforms file describing the shake,
-# second pass applies the inverse transform. v0.30.16 makes this the
-# aggressive preset: higher search accuracy, a wider temporal smoothing
-# window, and adaptive zoom so the stabiliser has room to counter strong
-# hand-held motion instead of preserving every source pixel at the cost
-# of visible shake. This is still vision-based EIS (no gyro stream), but
-# it corrects translation + roll/rotation + zoom-like compensation as far
-# as libvidstab can infer from image features.
-STABILIZE_SHAKINESS: int = 10  # 1-10, assume very shaky handheld input
-STABILIZE_ACCURACY: int = 15  # 1-15, more accurate = slower
-STABILIZE_STEPSIZE: int = 4  # smaller search step = finer correction
-STABILIZE_SMOOTHING: int = 30  # half-window of frames to smooth over
-STABILIZE_ZOOM: int = 6  # extra zoom % so transforms have crop margin
-STABILIZE_OPTZOOM: int = 2  # adaptive zoom suppresses black borders
-STABILIZE_ZOOMSPEED: float = 0.25  # slow adaptive-zoom changes
+# second pass applies the inverse transform. v0.30.18 rolls back the
+# over-aggressive 0.30.16 preset: stacking high smoothing / adaptive zoom
+# after Smart Camera could create a visible correction shove around cut
+# interiors. Keep the previously stable handheld preset instead.
+STABILIZE_SHAKINESS: int = 8  # 1-10, how shaky the input is
+STABILIZE_ACCURACY: int = 9  # 1-15, more accurate = slower
+STABILIZE_STEPSIZE: int = 6  # search-step size in px
+STABILIZE_SMOOTHING: int = 10  # half-window of frames to smooth over
+STABILIZE_ZOOM: int = 0  # extra zoom % during transform; 0 = letterbox
 
 
 class VideoRenderError(RuntimeError):
@@ -840,8 +835,6 @@ def _stabilize_segment(src: Path, dst: Path, scratch_dir: Path) -> None:
     transform_filter = (
         f"vidstabtransform=input={transforms_path.as_posix()}"
         f":zoom={STABILIZE_ZOOM}"
-        f":optzoom={STABILIZE_OPTZOOM}"
-        f":zoomspeed={STABILIZE_ZOOMSPEED}"
         f":smoothing={STABILIZE_SMOOTHING}"
         ",unsharp=5:5:0.8:3:3:0.4"
     )

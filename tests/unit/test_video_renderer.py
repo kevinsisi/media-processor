@@ -516,7 +516,7 @@ def test_smart_camera_overrides_explicit_tracking(
     assert captured_filters == ["SMART_CAMERA_CHAIN"]
 
 
-def test_stabilize_segment_uses_aggressive_vidstab_options(
+def test_stabilize_segment_uses_stable_vidstab_options(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     src = tmp_path / "seg_0000.mp4"
@@ -536,9 +536,15 @@ def test_stabilize_segment_uses_aggressive_vidstab_options(
     video_renderer._stabilize_segment(src, dst, tmp_path / "scratch")
 
     assert any(
-        "vidstabdetect=" in f and "shakiness=10" in f and "accuracy=15" in f for f in filters
+        "vidstabdetect=" in f and "shakiness=8" in f and "accuracy=9" in f for f in filters
     )
-    assert any("vidstabtransform=" in f and "optzoom=2" in f and "zoom=6" in f for f in filters)
+    assert any(
+        "vidstabtransform=" in f
+        and "smoothing=10" in f
+        and "zoom=0" in f
+        and "optzoom" not in f
+        for f in filters
+    )
 
 
 def test_circlecrop_in_transition_whitelist() -> None:

@@ -2,7 +2,7 @@
 
 Content factory pipeline for novice-friendly Instagram and Facebook short-video production.
 
-**Status:** v0.30.17 / M9.15.17 — Smart Camera avoids false pans, keeps enabled camera moves visible, and shows the deployed version in the UI.
+**Status:** v0.30.18 / M9.15.18 — Roll back over-aggressive vidstab settings that caused a visible mid-cut correction shove.
 
 ## Spec
 
