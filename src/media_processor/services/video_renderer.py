@@ -19,7 +19,7 @@ import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from media_processor.services import auto_reframe
 from media_processor.services.edit_planner import CutPlan, CutPlanSegment
@@ -246,6 +246,9 @@ TRACKING_POST_STABILIZE_ACCURACY: int = 15
 TRACKING_POST_STABILIZE_STEPSIZE: int = 4
 TRACKING_POST_STABILIZE_SMOOTHING: int = 45
 TRACKING_POST_STABILIZE_ZOOM: int = 10
+TRACKING_POST_STABILIZE_MIN_IMPROVEMENT_RATIO: float = 0.05
+TRACKING_POST_STABILIZE_SCORE_WIDTH: int = 480
+TRACKING_POST_STABILIZE_SCORE_MAX_CORNERS: int = 800
 
 
 class VideoRenderError(RuntimeError):
@@ -996,6 +999,129 @@ def _stabilize_segment(
     _run(transform_cmd, timeout_s=STABILIZE_TIMEOUT_S, stage=f"stabilize-apply({src.name})")
 
 
+def _segment_high_frequency_motion_score(path: Path) -> float | None:
+    """Return a p95 high-frequency affine-motion score for a rendered segment.
+
+    This is a safety gate for explicit tracking post-stabilisation. Vidstab
+    usually removes source hand-held jitter, but after a dynamic tracking crop
+    it can occasionally introduce a worse correction on short or low-texture
+    cuts. Scoring the already-rendered before/after segments lets us keep the
+    better-looking result instead of trusting one stabiliser setting globally.
+    """
+    try:
+        import cv2
+        import numpy as np
+    except Exception as exc:  # pragma: no cover - dependency exists in CI/worker images
+        logger.warning("tracking-stabilize: motion scorer unavailable: %s", exc)
+        return None
+
+    cap = cv2.VideoCapture(str(path))
+    if not cap.isOpened():
+        return None
+    fps = float(cap.get(cv2.CAP_PROP_FPS) or VIDEO_FPS)
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+    if width <= 0 or height <= 0:
+        cap.release()
+        return None
+
+    scale = max(1.0, width / TRACKING_POST_STABILIZE_SCORE_WIDTH)
+    small_w = int(round(width / scale))
+    small_h = int(round(height / scale))
+    vectors: list[tuple[float, float]] = []
+    prev_gray: Any | None = None
+    calc_lk = cast(Any, cv2.calcOpticalFlowPyrLK)
+
+    while True:
+        ok, frame = cap.read()
+        if not ok:
+            break
+        if scale != 1.0:
+            frame = cv2.resize(frame, (small_w, small_h), interpolation=cv2.INTER_AREA)
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        if prev_gray is not None:
+            points = cv2.goodFeaturesToTrack(
+                prev_gray,
+                maxCorners=TRACKING_POST_STABILIZE_SCORE_MAX_CORNERS,
+                qualityLevel=0.01,
+                minDistance=8,
+                blockSize=7,
+            )
+            if points is not None and len(points) >= 12:
+                next_points, status, _err = calc_lk(
+                    prev_gray,
+                    gray,
+                    points,
+                    None,
+                    winSize=(21, 21),
+                    maxLevel=3,
+                    criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.01),
+                )
+                if next_points is not None and status is not None:
+                    good_prev = points[status.ravel() == 1].reshape(-1, 2)
+                    good_next = next_points[status.ravel() == 1].reshape(-1, 2)
+                    if len(good_prev) >= 12:
+                        affine, inliers = cv2.estimateAffinePartial2D(
+                            good_prev,
+                            good_next,
+                            method=cv2.RANSAC,
+                            ransacReprojThreshold=3.0,
+                            maxIters=2000,
+                            confidence=0.99,
+                            refineIters=10,
+                        )
+                        if affine is not None and (inliers is None or int(inliers.sum()) >= 12):
+                            vectors.append(
+                                (float(affine[0, 2] * scale), float(affine[1, 2] * scale))
+                            )
+        prev_gray = gray
+    cap.release()
+
+    if len(vectors) < 10:
+        return None
+
+    half_window = max(1, int(round(fps)))
+    residuals: list[float] = []
+    for i, (dx, dy) in enumerate(vectors):
+        start = max(0, i - half_window)
+        end = min(len(vectors), i + half_window + 1)
+        window = vectors[start:end]
+        mean_dx = float(np.mean([v[0] for v in window]))
+        mean_dy = float(np.mean([v[1] for v in window]))
+        residuals.append(((dx - mean_dx) ** 2 + (dy - mean_dy) ** 2) ** 0.5)
+    return float(np.percentile(np.array(residuals, dtype=float), 95))
+
+
+def _select_tracking_post_stabilized_segment(src: Path, stabilized: Path) -> Path:
+    """Choose the lower-jitter segment after a tracking post-stab attempt."""
+    src_score = _segment_high_frequency_motion_score(src)
+    stabilized_score = _segment_high_frequency_motion_score(stabilized)
+    if src_score is None or stabilized_score is None:
+        logger.info(
+            "tracking-stabilize: jitter score unavailable for %s; using post-stabilized segment",
+            src.name,
+        )
+        return stabilized
+
+    required_score = src_score * (1.0 - TRACKING_POST_STABILIZE_MIN_IMPROVEMENT_RATIO)
+    if stabilized_score <= required_score:
+        logger.info(
+            "tracking-stabilize: accepted %s (hf_p95 %.3f -> %.3f)",
+            stabilized.name,
+            src_score,
+            stabilized_score,
+        )
+        return stabilized
+
+    logger.info(
+        "tracking-stabilize: rejected %s (hf_p95 %.3f -> %.3f); keeping tracking crop",
+        stabilized.name,
+        src_score,
+        stabilized_score,
+    )
+    return src
+
+
 def stabilize_segments(
     intermediate_paths: list[Path],
     intermediate_dir: Path,
@@ -1020,9 +1146,10 @@ def stabilize_segments(
     Skipped segments are returned at their pre-stabilisation path so
     the concat list stays the same length and order.
 
-    ``tracking_post_indexes`` (v0.30.26) are explicit user-tracking cuts
-    that should still get a stronger post-stabilisation pass after tracking.
-    These are removed from ``skip_indexes`` by the caller.
+    ``tracking_post_indexes`` (v0.30.26/v0.30.27) are explicit user-tracking
+    cuts that should try a stronger post-stabilisation pass after tracking.
+    v0.30.27 scores before/after jitter and keeps the original tracking crop
+    when post-stabilisation makes a short cut worse.
     """
     _require_ffmpeg()
     skip = skip_indexes or set()
@@ -1046,6 +1173,7 @@ def stabilize_segments(
                     zoom=TRACKING_POST_STABILIZE_ZOOM,
                     optzoom=True,
                 )
+                stab_dst = _select_tracking_post_stabilized_segment(src, stab_dst)
             else:
                 _stabilize_segment(src, stab_dst, intermediate_dir)
             out.append(stab_dst)

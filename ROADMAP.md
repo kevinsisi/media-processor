@@ -2,7 +2,7 @@
 
 > **單一定位**：沒有剪輯背景的小白也能「拍完就上傳，AI 直接給大量 IG / FB 短影音」的工具。
 > 目標 UX：手機優先、繁體中文、高級感、最少手動編輯。
-> 目前版本：**0.30.26**（M9.15.26 — 使用者追蹤後追加穩定器，壓制實際輸出手持高頻抖動）
+> 目前版本：**0.30.27**（M9.15.27 — 使用者追蹤 post-stabilization 加入逐段 jitter safeguard，避免少數 cut 被修壞）
 > 下一個 milestone：M10 — 多專案批次 + 社群直接發布 + AI 自動縮圖。
 
 ## Phase 進度速覽
@@ -62,6 +62,7 @@
 | **M9.15.24** | **AI Smart Camera 運鏡調教：使用者 point / ROI / 指定目標追蹤優先，Vision 無明確動機時記錄 no-move、不 fallback pan / zoom** | ✅ done | **0.30.24** |
 | **M9.15.25** | **使用者 point / ROI / 指定物件追蹤加入數位防手震平滑：保留 0.30.22 穩定手感，不恢復 Smart Camera 疊 tracking** | ✅ done | **0.30.25** |
 | **M9.15.26** | **使用者追蹤後追加 tracking-aware post-stabilization，修正 crop path 已平滑但輸出仍有來源手持高頻晃動** | ✅ done | **0.30.26** |
+| **M9.15.27** | **tracking-aware post-stabilization 加入 before/after jitter safeguard，只保留高頻晃動分數明確改善的 cut** | ✅ done | **0.30.27** |
 | M10 | 多專案批次 + 社群直接發布 + AI 自動縮圖 | 🔮 future | 0.31.x+ |
 
 ---

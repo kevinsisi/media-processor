@@ -756,6 +756,32 @@ def test_tracking_post_stabilize_uses_stronger_vidstab_options(
     )
 
 
+def test_tracking_post_stabilize_rejects_worse_jitter_score(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    src = tmp_path / "seg_0000.mp4"
+    src.write_bytes(b"fake")
+
+    def fake_run(cmd: list[str], *, timeout_s: float, stage: str) -> None:
+        if cmd[-1] != "-":
+            Path(cmd[-1]).write_bytes(b"stab")
+
+    def fake_score(path: Path) -> float:
+        return 4.0 if path == src else 6.0
+
+    monkeypatch.setattr(video_renderer, "_run", fake_run)
+    monkeypatch.setattr(video_renderer, "_segment_high_frequency_motion_score", fake_score)
+
+    out = video_renderer.stabilize_segments(
+        [src],
+        tmp_path,
+        skip_indexes=set(),
+        tracking_post_indexes={0},
+    )
+
+    assert out == [src]
+
+
 def test_circlecrop_in_transition_whitelist() -> None:
     """Phase 8.1 — emotion-shift transitions resolve to circlecrop, not the default."""
     assert "circlecrop" in video_renderer.VALID_TRANSITIONS
