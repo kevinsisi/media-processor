@@ -294,6 +294,35 @@ def test_smart_camera_filter_uses_exp_ease_when_requested() -> None:
     assert "exp(" in chain  # exp ease curve appears in the progress expr.
 
 
+def test_smart_camera_sync_frame_picks_beat_near_visual_hit() -> None:
+    frame = video_renderer._smart_camera_sync_frame(
+        duration_s=3.0,
+        timeline_start_s=10.0,
+        beat_grid_s=[10.5, 11.2, 12.4, 12.9],
+    )
+
+    # 80% through a 3 s cut starting at 10 s is 12.4 s.
+    assert frame == 72
+
+
+def test_smart_camera_filter_can_finish_move_on_bgm_beat() -> None:
+    chain = video_renderer._smart_camera_filter(
+        {
+            "kind": "zoom_in",
+            "from_rect": [0.0, 0.0, 1.0, 1.0],
+            "to_rect": [0.40, 0.40, 0.20, 0.20],
+            "ease": "linear",
+        },
+        "9:16",
+        duration_s=3.0,
+        timeline_start_s=10.0,
+        beat_grid_s=[12.4],
+    )
+
+    assert chain is not None
+    assert "min(1\\,on/72)" in chain
+
+
 def test_smart_camera_overrides_emotion_zoompan(tmp_path: Path) -> None:
     """When a smart-camera directive is present AND the cut is also
     eligible for emotion zoompan (happy + face), smart-camera wins.

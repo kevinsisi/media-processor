@@ -606,7 +606,8 @@ OpenSpec：`openspec/changes/ai-smart-camera/proposal.md` + `tasks.md`。
 - 單一 cut 的 smart camera filter 失敗 → catch + 退回原 cut，**不**讓單一 cut 把整個 render fail
 
 ### 9.15.3 節拍同步 + xfade 對齊
-- 讀 `_AssetScore.dominant_motion`（M6.2 已存）：`energetic` → `ease=exp`，其他 → `ease=linear`
+- v0.30.0 先讀 `_AssetScore.dominant_motion`（M6.2 已存）：`energetic` → `ease=exp`，其他 → `ease=linear`。
+- v0.30.20 補真正 BGM beat sync：render 前用 ffmpeg + numpy 對 draft snapshot BGM 建 beat grid；不改 cut 長度，只讓 Smart Camera 的 zoom/pan 完成點吸附到該 segment 內接近 80% 位置的最近節拍。沒有 BGM 或 beat 分析失敗時回退既有 ease。
 - zoom 起終點各內縮 50 ms 對齊 xfade overlap，仿 v0.14.1 的 `TRANSITION_OVERLAP_MS` 邏輯
 
 ### 9.15.4 Pan 直接 reuse `auto_reframe.write_sendcmd_file`

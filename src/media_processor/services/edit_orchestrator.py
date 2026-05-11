@@ -36,6 +36,7 @@ from media_processor.models import (
 )
 from media_processor.profile.loader import ProfileSpec, load_profile
 from media_processor.services import (
+    beat_sync,
     bgm_mixer,
     edit_planner,
     smart_camera_planner,
@@ -896,6 +897,36 @@ async def run_render(
     scratch_dir = Path(settings.analysis_dir) / "edits"
     scratch_dir.mkdir(parents=True, exist_ok=True)
 
+    # v0.30.20 — resolve the draft's BGM before video render so Smart Camera
+    # can snap its move completion to the same track that the later BGM stage
+    # will mix. This does not change cut lengths; no beat grid just falls back
+    # to the existing visual-motion ease.
+    bgm_source_path = await _snapshot_draft_bgm_path(handle.draft_id, project.bgm_path)
+    smart_camera_beat_grid_s: list[float] | None = None
+    if smart_camera_active and bgm_source_path:
+        try:
+            plan_duration_s = sum(
+                max(1, seg.asset_end_ms - seg.asset_start_ms) for seg in plan.segments
+            ) / 1000.0
+            analysis_duration_s = max(plan_duration_s, target_duration_ms / 1000.0) + 5.0
+            beat_analysis = await asyncio.to_thread(
+                beat_sync.analyze_bgm_beats,
+                Path(bgm_source_path),
+                duration_s=analysis_duration_s,
+            )
+            if beat_analysis.beats_s:
+                smart_camera_beat_grid_s = beat_analysis.beats_s
+                logger.info(
+                    "draft %d: smart-camera beat sync enabled (bpm=%s, beats=%d)",
+                    handle.draft_id,
+                    beat_analysis.bpm,
+                    len(beat_analysis.beats_s),
+                )
+            else:
+                logger.info("draft %d: smart-camera beat sync unavailable", handle.draft_id)
+        except Exception:  # noqa: BLE001 — beat sync should never block rendering.
+            logger.exception("draft %d: smart-camera beat sync failed", handle.draft_id)
+
     # Stages 2-5 — cut / [stabilize] / concat / subtitles. The renderer
     # batches these so the on_progress callback is the only progress hook.
     progress_state = {
@@ -1017,6 +1048,7 @@ async def run_render(
             point_track_by_asset=point_track_by_asset if auto_reframe_enabled else None,
             crop_region=crop_region_tuple,
             smart_camera_enabled=smart_camera_active,
+            smart_camera_beat_grid_s=smart_camera_beat_grid_s,
             subtitle_style=subtitle_style if subtitles_enabled else None,
             on_progress=_sync_progress,
         )
@@ -1049,7 +1081,6 @@ async def run_render(
     # it actually shipped with — generating a fresh AI track no longer
     # silently swaps the soundtrack on older drafts.
     await update_state(EditStep.BGM.value, "running")
-    bgm_source_path = await _snapshot_draft_bgm_path(handle.draft_id, project.bgm_path)
     # v0.17 — pull per-segment voice/bgm gain overrides off the draft's
     # DraftSegments so the mixer can apply them. ``segments`` is empty
     # when nothing's been overridden; mixer treats that as a no-op.

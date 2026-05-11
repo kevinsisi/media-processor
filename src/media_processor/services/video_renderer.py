@@ -364,12 +364,62 @@ def _should_zoompan(cut: CutPlanSegment) -> bool:
 # sendcmd file needed for zoom_in / zoom_out, and pan re-uses the
 # same expression form (just different from/to rectangles).
 SMART_CAMERA_KINDS: frozenset[str] = frozenset({"zoom_in", "zoom_out", "pan"})
+SMART_CAMERA_BEAT_SYNC_START_RATIO: float = 0.35
+SMART_CAMERA_BEAT_SYNC_TARGET_RATIO: float = 0.80
+SMART_CAMERA_BEAT_SYNC_END_RATIO: float = 0.95
+
+
+def _smart_camera_sync_frame(
+    *,
+    duration_s: float,
+    timeline_start_s: float,
+    beat_grid_s: list[float] | tuple[float, ...] | None,
+) -> int | None:
+    """Pick the output frame where the Smart Camera move should finish.
+
+    The safe v0.30.20 sync keeps cut boundaries unchanged and only snaps the
+    camera move's completion point to a nearby BGM beat. A beat near 80% of
+    the cut usually reads as the visual "hit" without making the move finish
+    too early.
+    """
+    if not beat_grid_s:
+        return None
+    duration_s = max(0.001, float(duration_s))
+    total_frames = max(1, int(round(duration_s * VIDEO_FPS)))
+    if total_frames <= 2:
+        return None
+    timeline_start_s = max(0.0, float(timeline_start_s))
+    window_start = timeline_start_s + duration_s * SMART_CAMERA_BEAT_SYNC_START_RATIO
+    preferred = timeline_start_s + duration_s * SMART_CAMERA_BEAT_SYNC_TARGET_RATIO
+    window_end = timeline_start_s + duration_s * SMART_CAMERA_BEAT_SYNC_END_RATIO
+    candidates = [float(b) for b in beat_grid_s if window_start <= float(b) <= window_end]
+    if not candidates:
+        return None
+    beat_s = min(candidates, key=lambda b: abs(b - preferred))
+    frame = int(round((beat_s - timeline_start_s) * VIDEO_FPS))
+    return max(1, min(total_frames - 1, frame))
+
+
+def _smart_camera_progress_expr(
+    *,
+    ease: str,
+    total_frames: int,
+    sync_frame: int | None,
+) -> str:
+    if sync_frame is not None:
+        t_lin = f"min(1\\,on/{sync_frame})"
+    else:
+        t_lin = f"on/{max(1, total_frames - 1)}"
+    return f"(1-exp(-3*{t_lin}))/(1-exp(-3))" if ease == "exp" else t_lin
 
 
 def _smart_camera_filter(
     directive_blob: dict[str, Any],
     target_aspect: str,
     duration_s: float,
+    *,
+    timeline_start_s: float = 0.0,
+    beat_grid_s: list[float] | tuple[float, ...] | None = None,
 ) -> str | None:
     """Build a ``zoompan`` filter chain for a smart-camera cut.
 
@@ -437,13 +487,20 @@ def _smart_camera_filter(
     if ease not in ("linear", "exp"):
         ease = "linear"
 
+    sync_frame = _smart_camera_sync_frame(
+        duration_s=duration_s,
+        timeline_start_s=timeline_start_s,
+        beat_grid_s=beat_grid_s,
+    )
     # Normalised time progress in [0, 1] across the cut. With d=1 and
-    # output fps = VIDEO_FPS, ``on`` (= zoompan's "current output
-    # frame number") runs 0..total_frames-1.
-    t_lin = f"on/{max(1, total_frames - 1)}"
-    # Smooth exp-ease for energetic-motion cuts (linear ramp reads as
-    # mechanical there); otherwise the linear progress is what we want.
-    t_progress = f"(1-exp(-3*{t_lin}))/(1-exp(-3))" if ease == "exp" else t_lin
+    # output fps = VIDEO_FPS, ``on`` (= zoompan's current output frame)
+    # runs 0..total_frames-1. When BGM beats are available, the progress
+    # reaches 1.0 on the selected beat then holds the final composition.
+    t_progress = _smart_camera_progress_expr(
+        ease=ease,
+        total_frames=total_frames,
+        sync_frame=sync_frame,
+    )
 
     # Zoom + position lerp.
     if abs(f_zoom - t_zoom) < 1e-6:
@@ -555,6 +612,8 @@ def _cut_segment(
     crop_region: tuple[float, float] | None = None,
     smart_camera_enabled: bool = False,
     stabilize_enabled: bool = False,
+    smart_camera_beat_grid_s: list[float] | None = None,
+    timeline_start_s: float = 0.0,
 ) -> bool:
     """Cut + scale-and-crop one segment to a uniform intermediate mp4.
 
@@ -636,7 +695,13 @@ def _cut_segment(
     smart_chain: str | None = None
     if smart_camera_enabled and isinstance(smart_blob, dict):
         try:
-            smart_chain = _smart_camera_filter(smart_blob, target_aspect, duration_s)
+            smart_chain = _smart_camera_filter(
+                smart_blob,
+                target_aspect,
+                duration_s,
+                timeline_start_s=timeline_start_s,
+                beat_grid_s=smart_camera_beat_grid_s,
+            )
         except Exception:  # noqa: BLE001 — never let a single bad directive fail render.
             logger.exception(
                 "smart-camera filter build failed for cut %d; falling back to static",
@@ -715,6 +780,7 @@ def cut_segments(
     crop_region: tuple[float, float] | None = None,
     smart_camera_enabled: bool = False,
     stabilize_enabled: bool = False,
+    smart_camera_beat_grid_s: list[float] | None = None,
 ) -> tuple[list[Path], list[bool]]:
     """Cut every segment in the plan; return ``(paths, reframed_flags)``.
 
@@ -747,6 +813,7 @@ def cut_segments(
     out_paths: list[Path] = []
     reframed_flags: list[bool] = []
     total = len(plan.segments)
+    timeline_start_s = 0.0
     for cut in plan.segments:
         src = asset_paths.get(cut.asset_id)
         if src is None or not Path(src).is_file():
@@ -777,9 +844,12 @@ def cut_segments(
             crop_region=crop_region,
             smart_camera_enabled=smart_camera_enabled,
             stabilize_enabled=stabilize_enabled,
+            smart_camera_beat_grid_s=smart_camera_beat_grid_s,
+            timeline_start_s=timeline_start_s,
         )
         out_paths.append(out)
         reframed_flags.append(bool(reframed))
+        timeline_start_s += max(0.001, (cut.asset_end_ms - cut.asset_start_ms) / 1000.0)
         if on_progress is not None:
             on_progress(cut.order + 1, total)
     return out_paths, reframed_flags
@@ -1324,6 +1394,7 @@ def render(
     point_track_by_asset: dict[int, dict[str, Any]] | None = None,
     crop_region: tuple[float, float] | None = None,
     smart_camera_enabled: bool = False,
+    smart_camera_beat_grid_s: list[float] | None = None,
     subtitle_style: SubtitleStyle | None = None,
     on_progress: Callable[[str, int, int], None] | None = None,
 ) -> RenderResult:
@@ -1373,6 +1444,7 @@ def render(
         crop_region=crop_region,
         smart_camera_enabled=smart_camera_enabled,
         stabilize_enabled=stabilize,
+        smart_camera_beat_grid_s=smart_camera_beat_grid_s,
     )
 
     # Stage 1.5 — optional digital stabilization. Replaces each
