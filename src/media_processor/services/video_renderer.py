@@ -260,7 +260,7 @@ TRACKING_POST_STABILIZE_ACCURACY: int = 15
 TRACKING_POST_STABILIZE_STEPSIZE: int = 4
 TRACKING_POST_STABILIZE_SMOOTHING: int = 45
 TRACKING_POST_STABILIZE_ZOOM: int = 10
-TRACKING_POST_STABILIZE_MIN_IMPROVEMENT_RATIO: float = 0.05
+TRACKING_POST_STABILIZE_MIN_IMPROVEMENT_RATIO: float = 0.03
 TRACKING_POST_STABILIZE_SCORE_WIDTH: int = 480
 TRACKING_POST_STABILIZE_SCORE_MAX_CORNERS: int = 800
 TRACKING_POST_STABILIZE_STEADY_SMOOTHING: int = 30
@@ -292,6 +292,20 @@ TRACKING_POST_STABILIZE_PRESETS: tuple[StabilizePreset, ...] = (
 TRACKING_SOURCE_COMPENSATION_WINDOW_S: float = 1.60
 TRACKING_SOURCE_COMPENSATION_MIN_IMPROVEMENT_RATIO: float = 0.03
 TRACKING_SOURCE_COMPENSATION_GAINS: tuple[float, ...] = (1.0, -1.0)
+TRACKING_CROP_CANDIDATE_LABELS: tuple[str, ...] = (
+    "cropsteady",
+    *(f"srcstab{i}" for i, _gain in enumerate(TRACKING_SOURCE_COMPENSATION_GAINS)),
+)
+
+
+@dataclass(frozen=True)
+class TrackingMotionScore:
+    hf_p95: float
+    step_p95: float
+
+    @property
+    def selection_score(self) -> float:
+        return max(self.hf_p95, self.step_p95)
 
 
 class VideoRenderError(RuntimeError):
@@ -883,7 +897,7 @@ def _render_tracking_cut_with_source_candidates(
         vf_chain=base_vf_chain,
         stage=f"cut(seg={cut_order})",
     )
-    base_score = _segment_high_frequency_motion_score(out_path)
+    base_score = _segment_tracking_motion_score(out_path)
     if base_score is None:
         return
 
@@ -909,8 +923,8 @@ def _render_tracking_cut_with_source_candidates(
             vf_chain=candidate_chain,
             stage=f"cut-crop-candidate(seg={cut_order},candidate={label})",
         )
-        candidate_score = _segment_high_frequency_motion_score(candidate_path)
-        if candidate_score is not None and candidate_score < best_score:
+        candidate_score = _segment_tracking_motion_score(candidate_path)
+        if candidate_score is not None and candidate_score.selection_score < best_score.selection_score:
             best_path = candidate_path
             best_score = candidate_score
             best_label = label
@@ -941,30 +955,36 @@ def _render_tracking_cut_with_source_candidates(
             vf_chain=candidate_chain,
             stage=f"cut-source-stabilize(seg={cut_order},candidate={candidate_i})",
         )
-        candidate_score = _segment_high_frequency_motion_score(candidate_path)
-        if candidate_score is not None and candidate_score < best_score:
+        candidate_score = _segment_tracking_motion_score(candidate_path)
+        if candidate_score is not None and candidate_score.selection_score < best_score.selection_score:
             best_path = candidate_path
             best_score = candidate_score
             best_label = f"srcstab{candidate_i}"
 
-    required_score = base_score * (1.0 - TRACKING_SOURCE_COMPENSATION_MIN_IMPROVEMENT_RATIO)
-    if best_path != out_path and best_score <= required_score:
+    required_score = base_score.selection_score * (
+        1.0 - TRACKING_SOURCE_COMPENSATION_MIN_IMPROVEMENT_RATIO
+    )
+    if best_path != out_path and best_score.selection_score <= required_score:
         out_path.unlink(missing_ok=True)
         shutil.move(str(best_path), str(out_path))
         logger.info(
-            "tracking-candidate: accepted %s seg_%04d (hf_p95 %.3f -> %.3f)",
+            "tracking-candidate: accepted %s seg_%04d (score %.3f -> %.3f; hf_p95 %.3f -> %.3f)",
             best_label,
             cut_order,
-            base_score,
-            best_score,
+            base_score.selection_score,
+            best_score.selection_score,
+            base_score.hf_p95,
+            best_score.hf_p95,
         )
     else:
         logger.info(
-            "tracking-candidate: kept baseline seg_%04d (best %s hf_p95 %.3f -> %.3f)",
+            "tracking-candidate: kept baseline seg_%04d (best %s score %.3f -> %.3f; hf_p95 %.3f -> %.3f)",
             cut_order,
             best_label,
-            base_score,
-            best_score,
+            base_score.selection_score,
+            best_score.selection_score,
+            base_score.hf_p95,
+            best_score.hf_p95,
         )
 
 
@@ -1362,14 +1382,17 @@ def _stabilize_segment(
     _run(transform_cmd, timeout_s=STABILIZE_TIMEOUT_S, stage=f"stabilize-apply({src.name})")
 
 
-def _segment_high_frequency_motion_score(path: Path) -> float | None:
-    """Return a p95 high-frequency affine-motion score for a rendered segment.
+def _segment_tracking_motion_score(path: Path) -> TrackingMotionScore | None:
+    """Return high-frequency and adjacent-step motion scores for a segment.
 
     This is a safety gate for explicit tracking post-stabilisation. Vidstab
     usually removes source hand-held jitter, but after a dynamic tracking crop
     it can occasionally introduce a worse correction on short or low-texture
     cuts. Scoring the already-rendered before/after segments lets us keep the
     better-looking result instead of trusting one stabiliser setting globally.
+
+    ``hf_p95`` catches broad high-frequency drift. ``step_p95`` catches visible
+    single-frame bounce patterns that a whole-cut p95 can dilute.
     """
     try:
         import cv2
@@ -1452,7 +1475,19 @@ def _segment_high_frequency_motion_score(path: Path) -> float | None:
         mean_dx = float(np.mean([v[0] for v in window]))
         mean_dy = float(np.mean([v[1] for v in window]))
         residuals.append(((dx - mean_dx) ** 2 + (dy - mean_dy) ** 2) ** 0.5)
-    return float(np.percentile(np.array(residuals, dtype=float), 95))
+    steps = [
+        ((dx - prev_dx) ** 2 + (dy - prev_dy) ** 2) ** 0.5
+        for (prev_dx, prev_dy), (dx, dy) in zip(vectors, vectors[1:], strict=False)
+    ]
+    hf_p95 = float(np.percentile(np.array(residuals, dtype=float), 95))
+    step_p95 = float(np.percentile(np.array(steps, dtype=float), 95)) if steps else hf_p95
+    return TrackingMotionScore(hf_p95=hf_p95, step_p95=step_p95)
+
+
+def _segment_high_frequency_motion_score(path: Path) -> float | None:
+    """Return a p95 high-frequency affine-motion score for a rendered segment."""
+    score = _segment_tracking_motion_score(path)
+    return None if score is None else score.hf_p95
 
 
 def _select_tracking_post_stabilized_segment(src: Path, stabilized: Path) -> Path:
@@ -1462,7 +1497,7 @@ def _select_tracking_post_stabilized_segment(src: Path, stabilized: Path) -> Pat
 
 def _select_best_tracking_post_stabilized_segment(src: Path, candidates: list[Path]) -> Path:
     """Choose the best measured tracking post-stabilization candidate."""
-    src_score = _segment_high_frequency_motion_score(src)
+    src_score = _segment_tracking_motion_score(src)
     if src_score is None:
         logger.info(
             "tracking-stabilize: jitter score unavailable for %s; using post-stabilized segment",
@@ -1471,12 +1506,12 @@ def _select_best_tracking_post_stabilized_segment(src: Path, candidates: list[Pa
         return candidates[0]
 
     best_path: Path | None = None
-    best_score: float | None = None
+    best_score: TrackingMotionScore | None = None
     for candidate in candidates:
-        candidate_score = _segment_high_frequency_motion_score(candidate)
+        candidate_score = _segment_tracking_motion_score(candidate)
         if candidate_score is None:
             continue
-        if best_score is None or candidate_score < best_score:
+        if best_score is None or candidate_score.selection_score < best_score.selection_score:
             best_path = candidate
             best_score = candidate_score
 
@@ -1487,23 +1522,39 @@ def _select_best_tracking_post_stabilized_segment(src: Path, candidates: list[Pa
         )
         return candidates[0]
 
-    required_score = src_score * (1.0 - TRACKING_POST_STABILIZE_MIN_IMPROVEMENT_RATIO)
-    if best_score <= required_score:
+    required_score = src_score.selection_score * (
+        1.0 - TRACKING_POST_STABILIZE_MIN_IMPROVEMENT_RATIO
+    )
+    if best_score.selection_score <= required_score:
         logger.info(
-            "tracking-stabilize: accepted %s (best hf_p95 %.3f -> %.3f)",
+            "tracking-stabilize: accepted %s (score %.3f -> %.3f; hf_p95 %.3f -> %.3f)",
             best_path.name,
-            src_score,
-            best_score,
+            src_score.selection_score,
+            best_score.selection_score,
+            src_score.hf_p95,
+            best_score.hf_p95,
         )
         return best_path
 
     logger.info(
-        "tracking-stabilize: rejected best candidate for %s (hf_p95 %.3f -> %.3f); keeping tracking crop",
+        "tracking-stabilize: rejected best candidate for %s (score %.3f -> %.3f; hf_p95 %.3f -> %.3f); keeping tracking crop",
         src.name,
-        src_score,
-        best_score,
+        src_score.selection_score,
+        best_score.selection_score,
+        src_score.hf_p95,
+        best_score.hf_p95,
     )
     return src
+
+
+def _tracking_crop_candidate_sources(src: Path) -> list[Path]:
+    """Return crop candidate sidecars rendered during explicit tracking cut stage."""
+    out: list[Path] = []
+    for label in TRACKING_CROP_CANDIDATE_LABELS:
+        candidate = src.with_name(f"{src.stem}.{label}.mp4")
+        if candidate.is_file():
+            out.append(candidate)
+    return out
 
 
 def stabilize_segments(
@@ -1548,20 +1599,24 @@ def stabilize_segments(
             stab_dst = intermediate_dir / f"{src.stem}.stab.mp4"
             if i in tracking_post:
                 candidates: list[Path] = []
-                for preset in TRACKING_POST_STABILIZE_PRESETS:
-                    candidate_dst = intermediate_dir / f"{src.stem}.{preset.suffix}.mp4"
-                    _stabilize_segment(
-                        src,
-                        candidate_dst,
-                        intermediate_dir,
-                        shakiness=preset.shakiness,
-                        accuracy=preset.accuracy,
-                        stepsize=preset.stepsize,
-                        smoothing=preset.smoothing,
-                        zoom=preset.zoom,
-                        optzoom=preset.optzoom,
-                    )
-                    candidates.append(candidate_dst)
+                candidate_sources = [src, *_tracking_crop_candidate_sources(src)]
+                for candidate_src in candidate_sources:
+                    if candidate_src != src:
+                        candidates.append(candidate_src)
+                    for preset in TRACKING_POST_STABILIZE_PRESETS:
+                        candidate_dst = intermediate_dir / f"{candidate_src.stem}.{preset.suffix}.mp4"
+                        _stabilize_segment(
+                            candidate_src,
+                            candidate_dst,
+                            intermediate_dir,
+                            shakiness=preset.shakiness,
+                            accuracy=preset.accuracy,
+                            stepsize=preset.stepsize,
+                            smoothing=preset.smoothing,
+                            zoom=preset.zoom,
+                            optzoom=preset.optzoom,
+                        )
+                        candidates.append(candidate_dst)
                 stab_dst = _select_best_tracking_post_stabilized_segment(src, candidates)
             else:
                 _stabilize_segment(src, stab_dst, intermediate_dir)

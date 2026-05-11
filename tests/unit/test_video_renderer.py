@@ -743,14 +743,16 @@ def test_explicit_tracking_uses_lower_jitter_source_compensated_candidate(
         fake_source_compensated,
     )
 
-    def fake_score(path: Path) -> float:
+    def fake_score(path: Path) -> video_renderer.TrackingMotionScore:
         if path.name.endswith("srcstab0.mp4"):
-            return 5.0
-        if path.name.endswith("srcstab1.mp4"):
-            return 7.0
-        return 8.0
+            score = 5.0
+        elif path.name.endswith("srcstab1.mp4"):
+            score = 7.0
+        else:
+            score = 8.0
+        return video_renderer.TrackingMotionScore(hf_p95=score, step_p95=score)
 
-    monkeypatch.setattr(video_renderer, "_segment_high_frequency_motion_score", fake_score)
+    monkeypatch.setattr(video_renderer, "_segment_tracking_motion_score", fake_score)
 
     def fake_run(cmd: list[str], *, timeout_s: float, stage: str) -> None:
         out = Path(cmd[-1])
@@ -824,10 +826,11 @@ def test_explicit_tracking_uses_lower_jitter_steady_crop_candidate(
 
     monkeypatch.setattr(video_renderer.auto_reframe, "build_filter_chain", fake_build_filter_chain)
 
-    def fake_score(path: Path) -> float:
-        return 5.0 if path.name.endswith("cropsteady.mp4") else 8.0
+    def fake_score(path: Path) -> video_renderer.TrackingMotionScore:
+        score = 5.0 if path.name.endswith("cropsteady.mp4") else 8.0
+        return video_renderer.TrackingMotionScore(hf_p95=score, step_p95=score)
 
-    monkeypatch.setattr(video_renderer, "_segment_high_frequency_motion_score", fake_score)
+    monkeypatch.setattr(video_renderer, "_segment_tracking_motion_score", fake_score)
 
     def fake_run(cmd: list[str], *, timeout_s: float, stage: str) -> None:
         out = Path(cmd[-1])
@@ -919,11 +922,12 @@ def test_tracking_post_stabilize_rejects_worse_jitter_score(
         if cmd[-1] != "-":
             Path(cmd[-1]).write_bytes(b"stab")
 
-    def fake_score(path: Path) -> float:
-        return 4.0 if path == src else 6.0
+    def fake_score(path: Path) -> video_renderer.TrackingMotionScore:
+        score = 4.0 if path == src else 6.0
+        return video_renderer.TrackingMotionScore(hf_p95=score, step_p95=score)
 
     monkeypatch.setattr(video_renderer, "_run", fake_run)
-    monkeypatch.setattr(video_renderer, "_segment_high_frequency_motion_score", fake_score)
+    monkeypatch.setattr(video_renderer, "_segment_tracking_motion_score", fake_score)
 
     out = video_renderer.stabilize_segments(
         [src],
@@ -945,15 +949,17 @@ def test_tracking_post_stabilize_selects_best_measured_preset(
         if cmd[-1] != "-":
             Path(cmd[-1]).write_bytes(b"stab")
 
-    def fake_score(path: Path) -> float:
+    def fake_score(path: Path) -> video_renderer.TrackingMotionScore:
         if path == src:
-            return 10.0
-        if path.name.endswith(".stab_steady.mp4"):
-            return 7.0
-        return 12.0
+            score = 10.0
+        elif path.name.endswith(".stab_steady.mp4"):
+            score = 7.0
+        else:
+            score = 12.0
+        return video_renderer.TrackingMotionScore(hf_p95=score, step_p95=score)
 
     monkeypatch.setattr(video_renderer, "_run", fake_run)
-    monkeypatch.setattr(video_renderer, "_segment_high_frequency_motion_score", fake_score)
+    monkeypatch.setattr(video_renderer, "_segment_tracking_motion_score", fake_score)
 
     out = video_renderer.stabilize_segments(
         [src],
@@ -963,6 +969,41 @@ def test_tracking_post_stabilize_selects_best_measured_preset(
     )
 
     assert out[0].name.endswith(".stab_steady.mp4")
+
+
+def test_tracking_post_stabilize_can_select_stabilized_crop_sidecar(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A crop candidate can be worse alone but best after steady post-stab."""
+    src = tmp_path / "seg_0000.mp4"
+    src.write_bytes(b"fake")
+    cropsteady = tmp_path / "seg_0000.cropsteady.mp4"
+    cropsteady.write_bytes(b"fake")
+
+    def fake_run(cmd: list[str], *, timeout_s: float, stage: str) -> None:
+        if cmd[-1] != "-":
+            Path(cmd[-1]).write_bytes(b"stab")
+
+    def fake_score(path: Path) -> video_renderer.TrackingMotionScore:
+        if path == src:
+            return video_renderer.TrackingMotionScore(hf_p95=2.9, step_p95=3.8)
+        if path.name == "seg_0000.cropsteady.stab_steady.mp4":
+            return video_renderer.TrackingMotionScore(hf_p95=3.6, step_p95=3.2)
+        if path == cropsteady:
+            return video_renderer.TrackingMotionScore(hf_p95=4.6, step_p95=4.2)
+        return video_renderer.TrackingMotionScore(hf_p95=6.0, step_p95=6.0)
+
+    monkeypatch.setattr(video_renderer, "_run", fake_run)
+    monkeypatch.setattr(video_renderer, "_segment_tracking_motion_score", fake_score)
+
+    out = video_renderer.stabilize_segments(
+        [src],
+        tmp_path,
+        skip_indexes=set(),
+        tracking_post_indexes={0},
+    )
+
+    assert out[0].name == "seg_0000.cropsteady.stab_steady.mp4"
 
 
 def test_circlecrop_in_transition_whitelist() -> None:
