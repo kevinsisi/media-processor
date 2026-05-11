@@ -905,9 +905,9 @@ async def run_render(
     smart_camera_beat_grid_s: list[float] | None = None
     if smart_camera_active and bgm_source_path:
         try:
-            plan_duration_s = sum(
-                max(1, seg.asset_end_ms - seg.asset_start_ms) for seg in plan.segments
-            ) / 1000.0
+            plan_duration_s = (
+                sum(max(1, seg.asset_end_ms - seg.asset_start_ms) for seg in plan.segments) / 1000.0
+            )
             analysis_duration_s = max(plan_duration_s, target_duration_ms / 1000.0) + 5.0
             beat_analysis = await asyncio.to_thread(
                 beat_sync.analyze_bgm_beats,
