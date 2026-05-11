@@ -723,6 +723,39 @@ def test_stabilize_segment_uses_stable_vidstab_options(
     )
 
 
+def test_tracking_post_stabilize_uses_stronger_vidstab_options(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    src = tmp_path / "seg_0000.mp4"
+    src.write_bytes(b"fake")
+    filters: list[str] = []
+
+    def fake_run(cmd: list[str], *, timeout_s: float, stage: str) -> None:
+        if "-vf" in cmd:
+            filters.append(cmd[cmd.index("-vf") + 1])
+        Path(cmd[-1]).parent.mkdir(parents=True, exist_ok=True)
+        if cmd[-1] != "-":
+            Path(cmd[-1]).write_bytes(b"")
+
+    monkeypatch.setattr(video_renderer, "_run", fake_run)
+
+    out = video_renderer.stabilize_segments(
+        [src],
+        tmp_path,
+        skip_indexes=set(),
+        tracking_post_indexes={0},
+    )
+
+    assert out[0].name.endswith(".stab.mp4")
+    assert any(
+        "vidstabdetect=" in f and "shakiness=10" in f and "accuracy=15" in f for f in filters
+    )
+    assert any(
+        "vidstabtransform=" in f and "smoothing=45" in f and "zoom=10" in f and "optzoom=1" in f
+        for f in filters
+    )
+
+
 def test_circlecrop_in_transition_whitelist() -> None:
     """Phase 8.1 — emotion-shift transitions resolve to circlecrop, not the default."""
     assert "circlecrop" in video_renderer.VALID_TRANSITIONS

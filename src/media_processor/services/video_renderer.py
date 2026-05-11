@@ -236,6 +236,17 @@ STABILIZE_STEPSIZE: int = 6  # search-step size in px
 STABILIZE_SMOOTHING: int = 10  # half-window of frames to smooth over
 STABILIZE_ZOOM: int = 0  # extra zoom % during transform; 0 = letterbox
 
+# v0.30.26 — explicit point / ROI / picked-object reframes still need real
+# digital stabilisation after tracking. Crop-path smoothing only removes camera
+# command jitter; it cannot correct the source footage's high-frequency
+# rotation/translation shake. Use a stronger post pass with zoom margin so the
+# final tracked shot feels closer to phone/gimbal digital stabilisation.
+TRACKING_POST_STABILIZE_SHAKINESS: int = 10
+TRACKING_POST_STABILIZE_ACCURACY: int = 15
+TRACKING_POST_STABILIZE_STEPSIZE: int = 4
+TRACKING_POST_STABILIZE_SMOOTHING: int = 45
+TRACKING_POST_STABILIZE_ZOOM: int = 10
+
 
 class VideoRenderError(RuntimeError):
     """Generic ffmpeg failure during the M5 render pipeline."""
@@ -899,7 +910,18 @@ def cut_segments(
 # ---------- stage 1.5: digital stabilization (optional) ----------
 
 
-def _stabilize_segment(src: Path, dst: Path, scratch_dir: Path) -> None:
+def _stabilize_segment(
+    src: Path,
+    dst: Path,
+    scratch_dir: Path,
+    *,
+    shakiness: int = STABILIZE_SHAKINESS,
+    accuracy: int = STABILIZE_ACCURACY,
+    stepsize: int = STABILIZE_STEPSIZE,
+    smoothing: int = STABILIZE_SMOOTHING,
+    zoom: int = STABILIZE_ZOOM,
+    optzoom: bool = False,
+) -> None:
     """Two-pass vidstab on ``src`` writing to ``dst``.
 
     Pass 1 (``vidstabdetect``) walks the clip and writes a per-frame
@@ -919,9 +941,9 @@ def _stabilize_segment(src: Path, dst: Path, scratch_dir: Path) -> None:
     transforms_path = scratch_dir / f"{src.stem}.trf"
 
     detect_filter = (
-        f"vidstabdetect=stepsize={STABILIZE_STEPSIZE}"
-        f":shakiness={STABILIZE_SHAKINESS}"
-        f":accuracy={STABILIZE_ACCURACY}"
+        f"vidstabdetect=stepsize={stepsize}"
+        f":shakiness={shakiness}"
+        f":accuracy={accuracy}"
         f":result={transforms_path.as_posix()}"
     )
     detect_cmd = [
@@ -942,8 +964,9 @@ def _stabilize_segment(src: Path, dst: Path, scratch_dir: Path) -> None:
 
     transform_filter = (
         f"vidstabtransform=input={transforms_path.as_posix()}"
-        f":zoom={STABILIZE_ZOOM}"
-        f":smoothing={STABILIZE_SMOOTHING}"
+        f":zoom={zoom}"
+        f":smoothing={smoothing}"
+        f"{':optzoom=1' if optzoom else ''}"
         ",unsharp=5:5:0.8:3:3:0.4"
     )
     transform_cmd = [
@@ -979,6 +1002,7 @@ def stabilize_segments(
     *,
     on_progress: Callable[[int, int], None] | None = None,
     skip_indexes: set[int] | None = None,
+    tracking_post_indexes: set[int] | None = None,
 ) -> list[Path]:
     """Run two-pass vidstab over each per-segment intermediate.
 
@@ -995,9 +1019,14 @@ def stabilize_segments(
     subject still while the camera panned) and undo the centring.
     Skipped segments are returned at their pre-stabilisation path so
     the concat list stays the same length and order.
+
+    ``tracking_post_indexes`` (v0.30.26) are explicit user-tracking cuts
+    that should still get a stronger post-stabilisation pass after tracking.
+    These are removed from ``skip_indexes`` by the caller.
     """
     _require_ffmpeg()
     skip = skip_indexes or set()
+    tracking_post = tracking_post_indexes or set()
     out: list[Path] = []
     total = len(intermediate_paths)
     for i, src in enumerate(intermediate_paths):
@@ -1005,7 +1034,20 @@ def stabilize_segments(
             out.append(src)
         else:
             stab_dst = intermediate_dir / f"{src.stem}.stab.mp4"
-            _stabilize_segment(src, stab_dst, intermediate_dir)
+            if i in tracking_post:
+                _stabilize_segment(
+                    src,
+                    stab_dst,
+                    intermediate_dir,
+                    shakiness=TRACKING_POST_STABILIZE_SHAKINESS,
+                    accuracy=TRACKING_POST_STABILIZE_ACCURACY,
+                    stepsize=TRACKING_POST_STABILIZE_STEPSIZE,
+                    smoothing=TRACKING_POST_STABILIZE_SMOOTHING,
+                    zoom=TRACKING_POST_STABILIZE_ZOOM,
+                    optzoom=True,
+                )
+            else:
+                _stabilize_segment(src, stab_dst, intermediate_dir)
             out.append(stab_dst)
         if on_progress is not None:
             on_progress(i + 1, total)
@@ -1488,6 +1530,21 @@ def render(
         smart_camera_beat_grid_s=smart_camera_beat_grid_s,
     )
 
+    tracking_post_indexes: set[int] = set()
+    for i, cut in enumerate(plan.segments):
+        target_idx = (tracking_target_by_asset or {}).get(cut.asset_id)
+        has_point = target_idx == -4 and (point_track_by_asset or {}).get(cut.asset_id) is not None
+        has_custom_roi = (
+            target_idx == -1 and (custom_roi_by_asset or {}).get(cut.asset_id) is not None
+        )
+        has_picked_object = (
+            target_idx is not None
+            and target_idx >= 0
+            and (tracking_by_asset or {}).get(cut.asset_id) is not None
+        )
+        if has_point or has_custom_roi or has_picked_object:
+            tracking_post_indexes.add(i)
+
     # Stage 1.5 — optional digital stabilization. Replaces each
     # intermediate with a stabilised version before concat. The two-pass
     # vidstab is the slow part of the pipeline so we surface it as its
@@ -1509,7 +1566,10 @@ def render(
             intermediates,
             intermediate_dir,
             on_progress=_stab_progress,
-            skip_indexes={i for i, r in enumerate(reframed_flags) if r},
+            skip_indexes={
+                i for i, r in enumerate(reframed_flags) if r and i not in tracking_post_indexes
+            },
+            tracking_post_indexes=tracking_post_indexes,
         )
 
     # Stage 2 — concat into the final output path. If we're going to burn

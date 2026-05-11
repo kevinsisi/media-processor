@@ -46,6 +46,7 @@ Use this skill to decide whether a video cut should move at all, what kind of mo
 - Do not stack Smart Camera over explicit tracking unless the implementation produces a single stable crop path and frame-by-frame metrics prove it does not jitter.
 - Do not run stabilization over already-reframed AI motion unless the stabilization step is proven not to counteract the intended move.
 - Explicit point / ROI / picked-object tracking must feel like digital stabilization, not raw tracker lock. Preserve the stable v0.30.22-like viewer comfort by smoothing high-frequency crop-path jitter before writing per-frame crop commands.
+- If frame-by-frame output analysis still shows high-frequency background/rotation shake after crop-path smoothing, apply a tracking-aware post-stabilization pass to explicit tracking cuts instead of further increasing Smart Camera motion or raw tracker gain.
 
 ## Priority Rules
 
@@ -72,6 +73,7 @@ Use this skill to decide whether a video cut should move at all, what kind of mo
 - Verify the implemented mutex order against the intended order: explicit tracking > Smart Camera > automatic YOLO > emotion zoompan.
 - Confirm whether stabilization is skipped for dynamically reframed cuts.
 - For explicit tracking cuts, confirm crop-path smoothing/deadband is active if vidstab is skipped.
+- For explicit tracking cuts that receive post-stabilization, measure actual output optical-flow jitter, not only crop-command deltas.
 - Confirm frame samples correspond to the real start, middle, and end of the cut.
 - Re-render a representative failing draft and inspect both the video and the crop-motion metrics.
 
