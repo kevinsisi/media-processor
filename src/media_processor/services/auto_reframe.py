@@ -69,11 +69,16 @@ KALMAN_R: float = 80.0
 # realistic phone-shoot pan rate.
 MAX_DELTA_PX_PER_FRAME: float = 24.0
 
-# v0.30.15 — automatic YOLO reframes bypass vidstab, so handheld lateral
-# shake has to be absorbed before emitting crop commands. Explicit point,
-# custom ROI, and user-selected YOLO targets keep the tighter subject lock.
+# v0.30.15 — dynamic reframes bypass vidstab, so handheld lateral shake has
+# to be absorbed before emitting crop commands. Automatic YOLO uses the
+# lighter default below; explicit user locks use the stronger v0.30.25
+# constants so "follow this point/ROI/object" still feels like digital
+# stabilisation instead of raw tracker jitter.
 CROP_PATH_SMOOTHING_WINDOW_S: float = 1.40
 CROP_PATH_DEADBAND_PX: float = 2.0
+USER_TRACKING_SMOOTHING_WINDOW_S: float = 2.40
+USER_TRACKING_DEADBAND_PX: float = 3.0
+USER_TRACKING_MAX_DELTA_PX_PER_FRAME: float = 12.0
 
 # v0.16.1 — fraction of the maximum target-aspect window we actually
 # use for the dynamic crop. Shrinking below 1.0 zooms the subject in
@@ -267,6 +272,9 @@ def compute_crop_path(
     src_h: int | None = None,
     object_index: int | None = None,
     smooth_camera_path: bool = True,
+    smoothing_window_s: float = CROP_PATH_SMOOTHING_WINDOW_S,
+    deadband_px: float = CROP_PATH_DEADBAND_PX,
+    max_delta_px_per_frame: float = MAX_DELTA_PX_PER_FRAME,
 ) -> CropPath | None:
     """Build a Kalman-smoothed dynamic crop for the cut span.
 
@@ -279,8 +287,10 @@ def compute_crop_path(
     ``object_index`` (v0.17) selects which track to follow inside a
     multi-track ``tracking`` dict. ``None`` keeps the historic
     behaviour (follow the dominant track via ``frames``). ``smooth_camera_path``
-    is for automatic YOLO reframes only; explicit user locks pass False so
-    the crop remains tightly centred on the chosen point / ROI / object.
+    controls the offline anti-jitter pass. Callers can tune the smoothing
+    window / deadband / per-frame cap; explicit user locks use stronger values
+    than automatic YOLO so the target stays primary without exposing every
+    point-tracker micro shake as camera motion.
     """
     if not tracking:
         return None
@@ -350,8 +360,12 @@ def compute_crop_path(
         target_x_list.append(max(0.0, min(float(max_x), cx - half_w)))
         target_y_list.append(max(0.0, min(float(max_y), cy - half_h)))
     if smooth_camera_path:
-        target_x_list = _smooth_path_values(target_x_list, target_times)
-        target_y_list = _smooth_path_values(target_y_list, target_times)
+        target_x_list = _smooth_path_values(
+            target_x_list, target_times, window_s=smoothing_window_s
+        )
+        target_y_list = _smooth_path_values(
+            target_y_list, target_times, window_s=smoothing_window_s
+        )
 
     points: list[tuple[float, int, int]] = []
     last_x: float | None = None
@@ -369,12 +383,12 @@ def compute_crop_path(
             dx = target_x - last_x
             dy = target_y - last_y
             if smooth_camera_path:
-                if abs(dx) < CROP_PATH_DEADBAND_PX:
+                if abs(dx) < deadband_px:
                     dx = 0.0
-                if abs(dy) < CROP_PATH_DEADBAND_PX:
+                if abs(dy) < deadband_px:
                     dy = 0.0
-            x_now = last_x + max(-MAX_DELTA_PX_PER_FRAME, min(MAX_DELTA_PX_PER_FRAME, dx))
-            y_now = last_y + max(-MAX_DELTA_PX_PER_FRAME, min(MAX_DELTA_PX_PER_FRAME, dy))
+            x_now = last_x + max(-max_delta_px_per_frame, min(max_delta_px_per_frame, dx))
+            y_now = last_y + max(-max_delta_px_per_frame, min(max_delta_px_per_frame, dy))
         last_x, last_y = x_now, y_now
         points.append((time_s, int(round(x_now)), int(round(y_now))))
 
@@ -395,6 +409,7 @@ def compute_crop_path_from_custom_roi(
     asset_end_ms: int,
     src_w: int | None = None,
     src_h: int | None = None,
+    smooth_camera_path: bool = True,
 ) -> CropPath | None:
     """Same as :func:`compute_crop_path` but using a CSRT-tracked ROI.
 
@@ -418,7 +433,10 @@ def compute_crop_path_from_custom_roi(
         asset_end_ms=asset_end_ms,
         src_w=src_w,
         src_h=src_h,
-        smooth_camera_path=False,
+        smooth_camera_path=smooth_camera_path,
+        smoothing_window_s=USER_TRACKING_SMOOTHING_WINDOW_S,
+        deadband_px=USER_TRACKING_DEADBAND_PX,
+        max_delta_px_per_frame=USER_TRACKING_MAX_DELTA_PX_PER_FRAME,
     )
 
 
@@ -430,6 +448,7 @@ def compute_crop_path_from_point_track(
     asset_end_ms: int,
     src_w: int | None = None,
     src_h: int | None = None,
+    smooth_camera_path: bool = True,
 ) -> CropPath | None:
     """v0.23 — auto-reframe centred on a single LK-tracked pixel.
 
@@ -490,7 +509,10 @@ def compute_crop_path_from_point_track(
         asset_end_ms=asset_end_ms,
         src_w=src_w,
         src_h=src_h,
-        smooth_camera_path=False,
+        smooth_camera_path=smooth_camera_path,
+        smoothing_window_s=USER_TRACKING_SMOOTHING_WINDOW_S,
+        deadband_px=USER_TRACKING_DEADBAND_PX,
+        max_delta_px_per_frame=USER_TRACKING_MAX_DELTA_PX_PER_FRAME,
     )
 
 
@@ -561,6 +583,9 @@ __all__ = [
     "KALMAN_R",
     "MAX_DELTA_PX_PER_FRAME",
     "RENDER_FPS",
+    "USER_TRACKING_DEADBAND_PX",
+    "USER_TRACKING_MAX_DELTA_PX_PER_FRAME",
+    "USER_TRACKING_SMOOTHING_WINDOW_S",
     "CropPath",
     "build_filter_chain",
     "compute_crop_path",

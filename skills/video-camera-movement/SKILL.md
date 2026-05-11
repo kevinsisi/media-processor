@@ -45,6 +45,7 @@ Use this skill to decide whether a video cut should move at all, what kind of mo
 - Do not amplify tiny crop deltas. If motion is below the threshold where it reads as intentional, keep it static rather than creating subtle drift.
 - Do not stack Smart Camera over explicit tracking unless the implementation produces a single stable crop path and frame-by-frame metrics prove it does not jitter.
 - Do not run stabilization over already-reframed AI motion unless the stabilization step is proven not to counteract the intended move.
+- Explicit point / ROI / picked-object tracking must feel like digital stabilization, not raw tracker lock. Preserve the stable v0.30.22-like viewer comfort by smoothing high-frequency crop-path jitter before writing per-frame crop commands.
 
 ## Priority Rules
 
@@ -70,6 +71,7 @@ Use this skill to decide whether a video cut should move at all, what kind of mo
 - Compare raw footage motion and output motion at the same scaled width before blaming the source asset.
 - Verify the implemented mutex order against the intended order: explicit tracking > Smart Camera > automatic YOLO > emotion zoompan.
 - Confirm whether stabilization is skipped for dynamically reframed cuts.
+- For explicit tracking cuts, confirm crop-path smoothing/deadband is active if vidstab is skipped.
 - Confirm frame samples correspond to the real start, middle, and end of the cut.
 - Re-render a representative failing draft and inspect both the video and the crop-motion metrics.
 
