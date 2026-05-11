@@ -631,9 +631,7 @@ def test_point_tracking_overrides_smart_camera(
     assert captured_filters == ["POINT_TRACKING_CHAIN"]
 
 
-def test_custom_roi_overrides_smart_camera(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_custom_roi_overrides_smart_camera(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A drawn tracking region is explicit operator intent."""
     src = tmp_path / "asset.mp4"
     src.write_bytes(b"fake")
