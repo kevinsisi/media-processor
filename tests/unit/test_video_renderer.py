@@ -493,10 +493,10 @@ def test_smart_camera_overrides_automatic_auto_reframe(
     assert captured_filters == ["SMART_CAMERA_CHAIN"]
 
 
-def test_smart_camera_overrides_explicit_tracking(
+def test_explicit_picked_tracking_overrides_smart_camera(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """When Smart Camera is checked, even picked tracking targets must not mask it."""
+    """User-picked tracking targets must keep priority over Smart Camera."""
     src = tmp_path / "asset.mp4"
     src.write_bytes(b"fake")
     plan = CutPlan(
@@ -512,6 +512,8 @@ def test_smart_camera_overrides_explicit_tracking(
                 1_000,
                 "improv",
                 "",
+                dominant_emotion="happy",
+                has_face=True,
                 smart_camera_json={
                     "kind": "pan",
                     "from_rect": [0.0, 0.0, 1.0, 1.0],
@@ -558,7 +560,143 @@ def test_smart_camera_overrides_explicit_tracking(
     )
 
     assert reframed == [True]
-    assert captured_filters == ["SMART_CAMERA_CHAIN"]
+    assert captured_filters == ["EXPLICIT_TRACKING_CHAIN"]
+
+
+def test_point_tracking_overrides_smart_camera(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A selected centre point is explicit operator intent."""
+    src = tmp_path / "asset.mp4"
+    src.write_bytes(b"fake")
+    plan = CutPlan(
+        schema_version="m5.cut-plan.v1",
+        target_duration_ms=1_000,
+        target_aspect_ratio="9:16",
+        profile_name="universal",
+        segments=(
+            CutPlanSegment(
+                0,
+                1,
+                0,
+                1_000,
+                "improv",
+                "",
+                smart_camera_json={
+                    "kind": "pan",
+                    "from_rect": [0.0, 0.0, 1.0, 1.0],
+                    "to_rect": [0.20, 0.20, 0.60, 0.60],
+                    "ease": "linear",
+                },
+            ),
+        ),
+    )
+    captured_filters: list[str] = []
+
+    monkeypatch.setattr(
+        video_renderer.auto_reframe,
+        "compute_crop_path_from_point_track",
+        lambda *args, **kwargs: [(0, 0, 1080, 1920)],
+    )
+    monkeypatch.setattr(video_renderer.auto_reframe, "write_sendcmd_file", lambda *args: None)
+    monkeypatch.setattr(
+        video_renderer.auto_reframe,
+        "build_filter_chain",
+        lambda *args, **kwargs: "POINT_TRACKING_CHAIN",
+    )
+    monkeypatch.setattr(
+        video_renderer,
+        "_smart_camera_filter",
+        lambda *args, **kwargs: "SMART_CAMERA_CHAIN",
+    )
+
+    def fake_run(cmd: list[str], *, timeout_s: float, stage: str) -> None:
+        captured_filters.append(cmd[cmd.index("-vf") + 1])
+        Path(cmd[-1]).parent.mkdir(parents=True, exist_ok=True)
+        Path(cmd[-1]).write_bytes(b"")
+
+    monkeypatch.setattr(video_renderer, "_run", fake_run)
+
+    _paths, reframed = video_renderer.cut_segments(
+        plan,
+        asset_paths={1: src},
+        intermediate_dir=tmp_path / "out",
+        target_aspect="9:16",
+        tracking_target_by_asset={1: -4},
+        point_track_by_asset={1: {"frames": [{"t_ms": 0, "x": 100, "y": 100}]}},
+        smart_camera_enabled=True,
+    )
+
+    assert reframed == [True]
+    assert captured_filters == ["POINT_TRACKING_CHAIN"]
+
+
+def test_custom_roi_overrides_smart_camera(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A drawn tracking region is explicit operator intent."""
+    src = tmp_path / "asset.mp4"
+    src.write_bytes(b"fake")
+    plan = CutPlan(
+        schema_version="m5.cut-plan.v1",
+        target_duration_ms=1_000,
+        target_aspect_ratio="9:16",
+        profile_name="universal",
+        segments=(
+            CutPlanSegment(
+                0,
+                1,
+                0,
+                1_000,
+                "improv",
+                "",
+                smart_camera_json={
+                    "kind": "zoom_in",
+                    "from_rect": [0.0, 0.0, 1.0, 1.0],
+                    "to_rect": [0.20, 0.20, 0.60, 0.60],
+                    "ease": "linear",
+                },
+            ),
+        ),
+    )
+    captured_filters: list[str] = []
+
+    monkeypatch.setattr(
+        video_renderer.auto_reframe,
+        "compute_crop_path_from_custom_roi",
+        lambda *args, **kwargs: [(0, 0, 1080, 1920)],
+    )
+    monkeypatch.setattr(video_renderer.auto_reframe, "write_sendcmd_file", lambda *args: None)
+    monkeypatch.setattr(
+        video_renderer.auto_reframe,
+        "build_filter_chain",
+        lambda *args, **kwargs: "CUSTOM_ROI_CHAIN",
+    )
+    monkeypatch.setattr(
+        video_renderer,
+        "_smart_camera_filter",
+        lambda *args, **kwargs: "SMART_CAMERA_CHAIN",
+    )
+
+    def fake_run(cmd: list[str], *, timeout_s: float, stage: str) -> None:
+        captured_filters.append(cmd[cmd.index("-vf") + 1])
+        Path(cmd[-1]).parent.mkdir(parents=True, exist_ok=True)
+        Path(cmd[-1]).write_bytes(b"")
+
+    monkeypatch.setattr(video_renderer, "_run", fake_run)
+
+    _paths, reframed = video_renderer.cut_segments(
+        plan,
+        asset_paths={1: src},
+        intermediate_dir=tmp_path / "out",
+        target_aspect="9:16",
+        tracking_target_by_asset={1: -1},
+        custom_roi_by_asset={1: {"frames": [{"t_ms": 0, "x": 10, "y": 10, "w": 20, "h": 20}]}},
+        smart_camera_enabled=True,
+    )
+
+    assert reframed == [True]
+    assert captured_filters == ["CUSTOM_ROI_CHAIN"]
 
 
 def test_stabilize_segment_uses_stable_vidstab_options(

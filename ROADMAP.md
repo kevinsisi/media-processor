@@ -2,7 +2,7 @@
 
 > **單一定位**：沒有剪輯背景的小白也能「拍完就上傳，AI 直接給大量 IG / FB 短影音」的工具。
 > 目標 UX：手機優先、繁體中文、高級感、最少手動編輯。
-> 目前版本：**0.30.22**（M9.15.22 — AI Smart Camera 明顯化：放大 zoom / pan 強度）
+> 目前版本：**0.30.24**（M9.15.24 — AI Smart Camera 運鏡調教：使用者追蹤優先、Vision 不確定則不運鏡）
 > 下一個 milestone：M10 — 多專案批次 + 社群直接發布 + AI 自動縮圖。
 
 ## Phase 進度速覽
@@ -59,6 +59,7 @@
 | **M9.15.20** | **真正 BGM beat sync：Smart Camera 運鏡完成點吸附到配樂節拍，不改 cut 長度** | ✅ done | **0.30.20** |
 | **M9.15.21** | **AI 配樂 UX：進剪輯頁背景預抓建議，生成仍以欄位文字為準，AI / 音樂庫配樂可下載** | ✅ done | **0.30.21** |
 | **M9.15.22** | **AI Smart Camera 明顯化：新 directive 與舊 draft render-time 都放大 zoom / pan，讓運鏡肉眼可辨識** | ✅ done | **0.30.22** |
+| **M9.15.24** | **AI Smart Camera 運鏡調教：使用者 point / ROI / 指定目標追蹤優先，Vision 無明確動機時記錄 no-move、不 fallback pan / zoom** | ✅ done | **0.30.24** |
 | M10 | 多專案批次 + 社群直接發布 + AI 自動縮圖 | 🔮 future | 0.31.x+ |
 
 ---

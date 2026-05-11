@@ -84,8 +84,8 @@ def test_derive_returns_none_when_mid_band_area() -> None:
     assert scp._derive_directive(regions, dominant_motion="static") is None
 
 
-def test_fallback_directives_cover_every_cut() -> None:
-    """When Smart Camera is enabled but Vision has no move, every cut still moves."""
+def test_fallback_directives_record_no_move_for_every_cut() -> None:
+    """When Vision is unavailable, Smart Camera records no-op decisions."""
     plan = CutPlan(
         schema_version="m5.cut-plan.v1",
         target_duration_ms=3000,
@@ -101,8 +101,8 @@ def test_fallback_directives_cover_every_cut() -> None:
     directives = scp.build_fallback_directives(plan, reason="unit test")
 
     assert sorted(directives) == [0, 1, 2]
-    assert {directives[i]["kind"] for i in directives} <= {"zoom_in", "zoom_out", "pan"}
-    assert all("fallback" in directives[i]["notes"] for i in directives)
+    assert {directives[i]["kind"] for i in directives} == {scp.SMART_CAMERA_NO_MOVE_KIND}
+    assert all(directives[i]["notes"] == "unit test" for i in directives)
 
 
 def test_derive_returns_none_for_empty_regions() -> None:
@@ -148,6 +148,14 @@ def test_deserialise_rejects_malformed_blob() -> None:
     assert scp.deserialise_directive({}) is None
     assert scp.deserialise_directive({"kind": "wibble"}) is None
     assert scp.deserialise_directive({"kind": "zoom_in", "from_rect": [0, 0, 1]}) is None
+
+
+def test_deserialise_no_move_marker_returns_none() -> None:
+    blob = scp.serialise_no_move("no motivated move")
+
+    assert blob["schema_version"] == scp.SMART_CAMERA_SCHEMA_VERSION
+    assert blob["kind"] == scp.SMART_CAMERA_NO_MOVE_KIND
+    assert scp.deserialise_directive(blob) is None
 
 
 def test_apply_smart_camera_to_plan_decorates_only_matching_segments() -> None:

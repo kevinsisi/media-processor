@@ -671,6 +671,9 @@ def _cut_segment(
     #   tracking + tracking_object_index  → user-picked YOLO track
     #   tracking only → dominant YOLO track (historic default)
     crop_path = None
+    explicit_tracking_requested = bool(
+        point_track is not None or custom_roi is not None or tracking_object_index is not None
+    )
     if sendcmd_dir is not None:
         # v0.23 — point_track wins over custom_roi which wins over
         # YOLO tracking. The dispatch reads the same way as the
@@ -705,18 +708,18 @@ def _cut_segment(
             target_w, target_h = ASPECT_DIMENSIONS[target_aspect]
             vf_chain = auto_reframe.build_filter_chain(crop_path, sendcmd_path, target_w, target_h)
 
-    # v0.30.16 — opt-in smart camera is literal: when the operator turns
-    # it on and a directive exists, it overrides every tracking crop path
-    # (automatic YOLO, picked YOLO object, custom ROI, or point track) plus
-    # emotion zoompan. Explicit tracking is still useful when Smart Camera
-    # is off; with Smart Camera on, the camera move must be visible.
+    # Smart Camera is allowed to replace automatic YOLO reframing, but not
+    # explicit operator intent. Point tracking, custom ROI, and user-picked
+    # YOLO targets define what the viewer expects to keep watching; if those
+    # are present, keep that crop path (or static fallback if tracking failed)
+    # rather than switching targets to an AI saliency box.
     #
     # Smart-camera cuts are reported as dynamically reframed so the later
     # vidstab stage skips them. Running vidstab after zoompan can interpret
     # the intentional camera move as shake and create a mid-cut correction shove.
     smart_blob = getattr(cut, "smart_camera_json", None)
     smart_chain: str | None = None
-    if smart_camera_enabled and isinstance(smart_blob, dict):
+    if smart_camera_enabled and isinstance(smart_blob, dict) and not explicit_tracking_requested:
         try:
             smart_chain = _smart_camera_filter(
                 smart_blob,
@@ -736,6 +739,11 @@ def _cut_segment(
                 "smart-camera: cut %d directive present but filter rejected; static fallback",
                 cut.order,
             )
+    if smart_camera_enabled and isinstance(smart_blob, dict) and explicit_tracking_requested:
+        logger.info(
+            "smart-camera: cut %d skipped because explicit tracking is active",
+            cut.order,
+        )
     if smart_chain is not None and crop_path is not None:
         logger.info(
             "smart-camera: cut %d overrides automatic auto-reframe",
@@ -746,7 +754,7 @@ def _cut_segment(
         # canvas, so the static aspect step is redundant. Replace
         # the chain entirely with the zoompan-driven crop.
         vf_chain = smart_chain
-    elif _should_zoompan(cut):
+    elif crop_path is None and _should_zoompan(cut):
         # zoompan operates on its own canvas, so we run it AFTER the
         # aspect crop so the zoom centre is the cropped frame's centre
         # rather than the original asset's.

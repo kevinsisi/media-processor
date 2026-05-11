@@ -843,7 +843,7 @@ async def run_render(
                     await _restore_plan_blob(handle, plan)
         except Exception:  # noqa: BLE001 — never let smart-camera fail the render.
             logger.exception(
-                "draft %d: smart-camera stage failed; using fallback camera moves",
+                "draft %d: smart-camera stage failed; recording no-move markers",
                 handle.draft_id,
             )
             directives = smart_camera_planner.build_fallback_directives(
