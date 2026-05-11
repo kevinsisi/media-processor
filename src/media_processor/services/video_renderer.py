@@ -368,9 +368,6 @@ SMART_CAMERA_VISIBLE_ZOOM_IN_MIN: float = 1.85
 SMART_CAMERA_VISIBLE_ZOOM_OUT_MIN: float = 1.65
 SMART_CAMERA_VISIBLE_PAN_ZOOM_MIN: float = 1.65
 SMART_CAMERA_VISIBLE_PAN_GAIN: float = 1.50
-SMART_CAMERA_TRACKING_ZOOM_IN_END: float = 1.25
-SMART_CAMERA_TRACKING_ZOOM_OUT_START: float = 1.22
-SMART_CAMERA_TRACKING_PAN_ZOOM_END: float = 1.18
 SMART_CAMERA_BEAT_SYNC_START_RATIO: float = 0.35
 SMART_CAMERA_BEAT_SYNC_TARGET_RATIO: float = 0.80
 SMART_CAMERA_BEAT_SYNC_END_RATIO: float = 0.95
@@ -557,64 +554,6 @@ def _smart_camera_filter(
     )
 
 
-def _smart_camera_tracking_zoom_filter(
-    directive_blob: dict[str, Any],
-    target_aspect: str,
-    duration_s: float,
-    *,
-    timeline_start_s: float = 0.0,
-    beat_grid_s: list[float] | tuple[float, ...] | None = None,
-) -> str | None:
-    """Build a centre zoom to append after explicit user tracking.
-
-    Point / ROI / picked-object tracking decides the crop centre. Smart Camera
-    can still add visual energy by zooming around that already-centred target,
-    but it must not replace the user's tracking path or pan away from it.
-    """
-    if target_aspect not in ASPECT_DIMENSIONS:
-        return None
-    width, height = ASPECT_DIMENSIONS[target_aspect]
-    duration_s = max(0.001, float(duration_s))
-    total_frames = max(1, int(round(duration_s * VIDEO_FPS)))
-    kind = str(directive_blob.get("kind", ""))
-    if kind not in SMART_CAMERA_KINDS:
-        return None
-
-    ease = str(directive_blob.get("ease", "linear"))
-    if ease not in ("linear", "exp"):
-        ease = "linear"
-    sync_frame = _smart_camera_sync_frame(
-        duration_s=duration_s,
-        timeline_start_s=timeline_start_s,
-        beat_grid_s=beat_grid_s,
-    )
-    t_progress = _smart_camera_progress_expr(
-        ease=ease,
-        total_frames=total_frames,
-        sync_frame=sync_frame,
-    )
-
-    if kind == "zoom_out":
-        z_expr = f"({SMART_CAMERA_TRACKING_ZOOM_OUT_START:.6f}+({1.0 - SMART_CAMERA_TRACKING_ZOOM_OUT_START:.6f})*({t_progress}))"
-    else:
-        end_zoom = (
-            SMART_CAMERA_TRACKING_PAN_ZOOM_END
-            if kind == "pan"
-            else SMART_CAMERA_TRACKING_ZOOM_IN_END
-        )
-        z_expr = f"(1.000000+({end_zoom - 1.0:.6f})*({t_progress}))"
-
-    return (
-        f"zoompan="
-        f"z='{z_expr}'"
-        f":d=1"
-        f":x='iw/2-(iw/zoom)/2'"
-        f":y='ih/2-(ih/zoom)/2'"
-        f":s={width}x{height}"
-        f":fps={VIDEO_FPS}"
-    )
-
-
 def _zoompan_filter(target_aspect: str, duration_s: float) -> str:
     """Build a ``zoompan`` filter chain that smoothly zooms 1.0 → 1.15.
 
@@ -732,9 +671,6 @@ def _cut_segment(
     #   tracking + tracking_object_index  → user-picked YOLO track
     #   tracking only → dominant YOLO track (historic default)
     crop_path = None
-    explicit_tracking_requested = (
-        point_track is not None or custom_roi is not None or tracking_object_index is not None
-    )
     if sendcmd_dir is not None:
         # v0.23 — point_track wins over custom_roi which wins over
         # YOLO tracking. The dispatch reads the same way as the
@@ -769,40 +705,18 @@ def _cut_segment(
             target_w, target_h = ASPECT_DIMENSIONS[target_aspect]
             vf_chain = auto_reframe.build_filter_chain(crop_path, sendcmd_path, target_w, target_h)
 
-    # v0.30.23 — explicit user tracking targets are load-bearing. If the
-    # operator picked a point / ROI / object, that path owns the crop centre;
-    # Smart Camera may only append a centred zoom after the tracking chain.
-    # Automatic YOLO can still be replaced by Smart Camera because it is a
-    # default helper, not a user instruction.
+    # v0.30.16 — opt-in smart camera is literal: when the operator turns
+    # it on and a directive exists, it overrides every tracking crop path
+    # (automatic YOLO, picked YOLO object, custom ROI, or point track) plus
+    # emotion zoompan. Explicit tracking is still useful when Smart Camera
+    # is off; with Smart Camera on, the camera move must be visible.
     #
     # Smart-camera cuts are reported as dynamically reframed so the later
     # vidstab stage skips them. Running vidstab after zoompan can interpret
     # the intentional camera move as shake and create a mid-cut correction shove.
     smart_blob = getattr(cut, "smart_camera_json", None)
     smart_chain: str | None = None
-    tracking_zoom_chain: str | None = None
-    explicit_tracking_applied = bool(crop_path is not None and explicit_tracking_requested)
-    if explicit_tracking_applied and smart_camera_enabled and isinstance(smart_blob, dict):
-        try:
-            tracking_zoom_chain = _smart_camera_tracking_zoom_filter(
-                smart_blob,
-                target_aspect,
-                duration_s,
-                timeline_start_s=timeline_start_s,
-                beat_grid_s=smart_camera_beat_grid_s,
-            )
-        except Exception:  # noqa: BLE001 — tracking itself remains usable.
-            logger.exception(
-                "smart-camera tracking zoom failed for cut %d; keeping explicit tracking",
-                cut.order,
-            )
-            tracking_zoom_chain = None
-        if tracking_zoom_chain is not None:
-            logger.info(
-                "smart-camera: cut %d adds zoom on explicit tracking target",
-                cut.order,
-            )
-    elif smart_camera_enabled and isinstance(smart_blob, dict):
+    if smart_camera_enabled and isinstance(smart_blob, dict):
         try:
             smart_chain = _smart_camera_filter(
                 smart_blob,
@@ -832,8 +746,6 @@ def _cut_segment(
         # canvas, so the static aspect step is redundant. Replace
         # the chain entirely with the zoompan-driven crop.
         vf_chain = smart_chain
-    elif tracking_zoom_chain is not None:
-        vf_chain = f"{vf_chain},{tracking_zoom_chain}"
     elif _should_zoompan(cut):
         # zoompan operates on its own canvas, so we run it AFTER the
         # aspect crop so the zoom centre is the cropped frame's centre

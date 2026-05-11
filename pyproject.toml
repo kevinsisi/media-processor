@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "media-processor"
-version = "0.30.23"
+version = "0.30.22"
 description = "Content factory pipeline for short-form video production"
 requires-python = ">=3.11"
 dependencies = [
