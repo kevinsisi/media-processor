@@ -872,8 +872,9 @@ def _render_tracking_cut_with_source_candidates(
     base_vf_chain: str,
     sendcmd_dir: Path,
     target_aspect: str,
+    crop_path_candidates: list[tuple[str, auto_reframe.CropPath]] | None = None,
 ) -> None:
-    """Render baseline and source-motion-compensated tracking candidates."""
+    """Render baseline and measured tracking crop/stabilization candidates."""
     _render_cut_segment(
         src,
         out_path,
@@ -889,19 +890,44 @@ def _render_tracking_cut_with_source_candidates(
     target_w, target_h = ASPECT_DIMENSIONS[target_aspect]
     best_path = out_path
     best_score = base_score
+    best_label = "baseline"
+    for label, candidate_crop_path in crop_path_candidates or []:
+        candidate_sendcmd = sendcmd_dir / f"reframe_seg_{cut_order:04d}.{label}.txt"
+        auto_reframe.write_sendcmd_file(candidate_crop_path, candidate_sendcmd)
+        candidate_chain = auto_reframe.build_filter_chain(
+            candidate_crop_path,
+            candidate_sendcmd,
+            target_w,
+            target_h,
+        )
+        candidate_path = out_path.with_name(f"{out_path.stem}.{label}.mp4")
+        _render_cut_segment(
+            src,
+            candidate_path,
+            start_s=start_s,
+            duration_s=duration_s,
+            vf_chain=candidate_chain,
+            stage=f"cut-crop-candidate(seg={cut_order},candidate={label})",
+        )
+        candidate_score = _segment_high_frequency_motion_score(candidate_path)
+        if candidate_score is not None and candidate_score < best_score:
+            best_path = candidate_path
+            best_score = candidate_score
+            best_label = label
+
     for candidate_i, gain in enumerate(TRACKING_SOURCE_COMPENSATION_GAINS):
-        candidate_crop_path = _source_motion_compensated_crop_path(
+        source_candidate_crop_path = _source_motion_compensated_crop_path(
             base_crop_path,
             src,
             start_s=start_s,
             gain=gain,
         )
-        if candidate_crop_path is None:
+        if source_candidate_crop_path is None:
             continue
         candidate_sendcmd = sendcmd_dir / f"reframe_seg_{cut_order:04d}.srcstab{candidate_i}.txt"
-        auto_reframe.write_sendcmd_file(candidate_crop_path, candidate_sendcmd)
+        auto_reframe.write_sendcmd_file(source_candidate_crop_path, candidate_sendcmd)
         candidate_chain = auto_reframe.build_filter_chain(
-            candidate_crop_path,
+            source_candidate_crop_path,
             candidate_sendcmd,
             target_w,
             target_h,
@@ -919,21 +945,24 @@ def _render_tracking_cut_with_source_candidates(
         if candidate_score is not None and candidate_score < best_score:
             best_path = candidate_path
             best_score = candidate_score
+            best_label = f"srcstab{candidate_i}"
 
     required_score = base_score * (1.0 - TRACKING_SOURCE_COMPENSATION_MIN_IMPROVEMENT_RATIO)
     if best_path != out_path and best_score <= required_score:
         out_path.unlink(missing_ok=True)
         shutil.move(str(best_path), str(out_path))
         logger.info(
-            "tracking-source-stabilize: accepted seg_%04d (hf_p95 %.3f -> %.3f)",
+            "tracking-candidate: accepted %s seg_%04d (hf_p95 %.3f -> %.3f)",
+            best_label,
             cut_order,
             base_score,
             best_score,
         )
     else:
         logger.info(
-            "tracking-source-stabilize: kept baseline seg_%04d (best hf_p95 %.3f -> %.3f)",
+            "tracking-candidate: kept baseline seg_%04d (best %s hf_p95 %.3f -> %.3f)",
             cut_order,
+            best_label,
             base_score,
             best_score,
         )
@@ -989,6 +1018,7 @@ def _cut_segment(
     #   tracking + tracking_object_index  → user-picked YOLO track
     #   tracking only → dominant YOLO track (historic default)
     crop_path = None
+    crop_path_candidates: list[tuple[str, auto_reframe.CropPath]] = []
     explicit_tracking_requested = bool(
         point_track is not None or custom_roi is not None or tracking_object_index is not None
     )
@@ -1004,6 +1034,17 @@ def _cut_segment(
                 asset_start_ms=cut.asset_start_ms,
                 asset_end_ms=cut.asset_end_ms,
             )
+            steady_crop_path = auto_reframe.compute_crop_path_from_point_track(
+                point_track,
+                target_aspect=target_aspect,
+                asset_start_ms=cut.asset_start_ms,
+                asset_end_ms=cut.asset_end_ms,
+                smoothing_window_s=auto_reframe.USER_TRACKING_STEADY_SMOOTHING_WINDOW_S,
+                deadband_px=auto_reframe.USER_TRACKING_STEADY_DEADBAND_PX,
+                max_delta_px_per_frame=auto_reframe.USER_TRACKING_STEADY_MAX_DELTA_PX_PER_FRAME,
+            )
+            if steady_crop_path is not None:
+                crop_path_candidates.append(("cropsteady", steady_crop_path))
         elif custom_roi:
             crop_path = auto_reframe.compute_crop_path_from_custom_roi(
                 custom_roi,
@@ -1011,6 +1052,17 @@ def _cut_segment(
                 asset_start_ms=cut.asset_start_ms,
                 asset_end_ms=cut.asset_end_ms,
             )
+            steady_crop_path = auto_reframe.compute_crop_path_from_custom_roi(
+                custom_roi,
+                target_aspect=target_aspect,
+                asset_start_ms=cut.asset_start_ms,
+                asset_end_ms=cut.asset_end_ms,
+                smoothing_window_s=auto_reframe.USER_TRACKING_STEADY_SMOOTHING_WINDOW_S,
+                deadband_px=auto_reframe.USER_TRACKING_STEADY_DEADBAND_PX,
+                max_delta_px_per_frame=auto_reframe.USER_TRACKING_STEADY_MAX_DELTA_PX_PER_FRAME,
+            )
+            if steady_crop_path is not None:
+                crop_path_candidates.append(("cropsteady", steady_crop_path))
         elif tracking:
             user_picked_object = tracking_object_index is not None
             crop_path = auto_reframe.compute_crop_path(
@@ -1030,6 +1082,20 @@ def _cut_segment(
                 if user_picked_object
                 else auto_reframe.MAX_DELTA_PX_PER_FRAME,
             )
+            if user_picked_object:
+                steady_crop_path = auto_reframe.compute_crop_path(
+                    tracking,
+                    target_aspect=target_aspect,
+                    asset_start_ms=cut.asset_start_ms,
+                    asset_end_ms=cut.asset_end_ms,
+                    object_index=tracking_object_index,
+                    smooth_camera_path=True,
+                    smoothing_window_s=auto_reframe.USER_TRACKING_STEADY_SMOOTHING_WINDOW_S,
+                    deadband_px=auto_reframe.USER_TRACKING_STEADY_DEADBAND_PX,
+                    max_delta_px_per_frame=auto_reframe.USER_TRACKING_STEADY_MAX_DELTA_PX_PER_FRAME,
+                )
+                if steady_crop_path is not None:
+                    crop_path_candidates.append(("cropsteady", steady_crop_path))
         if crop_path is not None:
             sendcmd_path = sendcmd_dir / f"reframe_seg_{cut.order:04d}.txt"
             auto_reframe.write_sendcmd_file(crop_path, sendcmd_path)
@@ -1104,6 +1170,7 @@ def _cut_segment(
             base_vf_chain=vf_chain,
             sendcmd_dir=sendcmd_dir,
             target_aspect=target_aspect,
+            crop_path_candidates=crop_path_candidates,
         )
     else:
         _render_cut_segment(

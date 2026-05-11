@@ -73,12 +73,17 @@ MAX_DELTA_PX_PER_FRAME: float = 24.0
 # to be absorbed before emitting crop commands. Automatic YOLO uses the
 # lighter default below; explicit user locks use the stronger v0.30.25
 # constants so "follow this point/ROI/object" still feels like digital
-# stabilisation instead of raw tracker jitter.
+# stabilisation instead of raw tracker jitter. v0.30.30 adds a steadier
+# measured candidate for cuts where the normal explicit path still follows
+# too much high-frequency point/crop movement.
 CROP_PATH_SMOOTHING_WINDOW_S: float = 1.40
 CROP_PATH_DEADBAND_PX: float = 2.0
 USER_TRACKING_SMOOTHING_WINDOW_S: float = 2.40
 USER_TRACKING_DEADBAND_PX: float = 3.0
 USER_TRACKING_MAX_DELTA_PX_PER_FRAME: float = 12.0
+USER_TRACKING_STEADY_SMOOTHING_WINDOW_S: float = 4.00
+USER_TRACKING_STEADY_DEADBAND_PX: float = 4.0
+USER_TRACKING_STEADY_MAX_DELTA_PX_PER_FRAME: float = 8.0
 
 # v0.16.1 — fraction of the maximum target-aspect window we actually
 # use for the dynamic crop. Shrinking below 1.0 zooms the subject in
@@ -410,6 +415,9 @@ def compute_crop_path_from_custom_roi(
     src_w: int | None = None,
     src_h: int | None = None,
     smooth_camera_path: bool = True,
+    smoothing_window_s: float = USER_TRACKING_SMOOTHING_WINDOW_S,
+    deadband_px: float = USER_TRACKING_DEADBAND_PX,
+    max_delta_px_per_frame: float = USER_TRACKING_MAX_DELTA_PX_PER_FRAME,
 ) -> CropPath | None:
     """Same as :func:`compute_crop_path` but using a CSRT-tracked ROI.
 
@@ -434,9 +442,9 @@ def compute_crop_path_from_custom_roi(
         src_w=src_w,
         src_h=src_h,
         smooth_camera_path=smooth_camera_path,
-        smoothing_window_s=USER_TRACKING_SMOOTHING_WINDOW_S,
-        deadband_px=USER_TRACKING_DEADBAND_PX,
-        max_delta_px_per_frame=USER_TRACKING_MAX_DELTA_PX_PER_FRAME,
+        smoothing_window_s=smoothing_window_s,
+        deadband_px=deadband_px,
+        max_delta_px_per_frame=max_delta_px_per_frame,
     )
 
 
@@ -449,6 +457,9 @@ def compute_crop_path_from_point_track(
     src_w: int | None = None,
     src_h: int | None = None,
     smooth_camera_path: bool = True,
+    smoothing_window_s: float = USER_TRACKING_SMOOTHING_WINDOW_S,
+    deadband_px: float = USER_TRACKING_DEADBAND_PX,
+    max_delta_px_per_frame: float = USER_TRACKING_MAX_DELTA_PX_PER_FRAME,
 ) -> CropPath | None:
     """v0.23 — auto-reframe centred on a single LK-tracked pixel.
 
@@ -510,9 +521,9 @@ def compute_crop_path_from_point_track(
         src_w=src_w,
         src_h=src_h,
         smooth_camera_path=smooth_camera_path,
-        smoothing_window_s=USER_TRACKING_SMOOTHING_WINDOW_S,
-        deadband_px=USER_TRACKING_DEADBAND_PX,
-        max_delta_px_per_frame=USER_TRACKING_MAX_DELTA_PX_PER_FRAME,
+        smoothing_window_s=smoothing_window_s,
+        deadband_px=deadband_px,
+        max_delta_px_per_frame=max_delta_px_per_frame,
     )
 
 
@@ -586,6 +597,9 @@ __all__ = [
     "USER_TRACKING_DEADBAND_PX",
     "USER_TRACKING_MAX_DELTA_PX_PER_FRAME",
     "USER_TRACKING_SMOOTHING_WINDOW_S",
+    "USER_TRACKING_STEADY_DEADBAND_PX",
+    "USER_TRACKING_STEADY_MAX_DELTA_PX_PER_FRAME",
+    "USER_TRACKING_STEADY_SMOOTHING_WINDOW_S",
     "CropPath",
     "build_filter_chain",
     "compute_crop_path",
