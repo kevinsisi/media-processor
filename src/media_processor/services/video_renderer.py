@@ -924,7 +924,10 @@ def _render_tracking_cut_with_source_candidates(
             stage=f"cut-crop-candidate(seg={cut_order},candidate={label})",
         )
         candidate_score = _segment_tracking_motion_score(candidate_path)
-        if candidate_score is not None and candidate_score.selection_score < best_score.selection_score:
+        if (
+            candidate_score is not None
+            and candidate_score.selection_score < best_score.selection_score
+        ):
             best_path = candidate_path
             best_score = candidate_score
             best_label = label
@@ -956,7 +959,10 @@ def _render_tracking_cut_with_source_candidates(
             stage=f"cut-source-stabilize(seg={cut_order},candidate={candidate_i})",
         )
         candidate_score = _segment_tracking_motion_score(candidate_path)
-        if candidate_score is not None and candidate_score.selection_score < best_score.selection_score:
+        if (
+            candidate_score is not None
+            and candidate_score.selection_score < best_score.selection_score
+        ):
             best_path = candidate_path
             best_score = candidate_score
             best_label = f"srcstab{candidate_i}"
@@ -1604,7 +1610,9 @@ def stabilize_segments(
                     if candidate_src != src:
                         candidates.append(candidate_src)
                     for preset in TRACKING_POST_STABILIZE_PRESETS:
-                        candidate_dst = intermediate_dir / f"{candidate_src.stem}.{preset.suffix}.mp4"
+                        candidate_dst = (
+                            intermediate_dir / f"{candidate_src.stem}.{preset.suffix}.mp4"
+                        )
                         _stabilize_segment(
                             candidate_src,
                             candidate_dst,
