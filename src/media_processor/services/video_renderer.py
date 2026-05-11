@@ -628,26 +628,17 @@ def _cut_segment(
             target_w, target_h = ASPECT_DIMENSIONS[target_aspect]
             vf_chain = auto_reframe.build_filter_chain(crop_path, sendcmd_path, target_w, target_h)
 
-    # v0.30.0 — opt-in smart camera. Mutex priority (top wins):
-    #   1. explicit user tracking (point / custom_roi / picked YOLO
-    #      object) → smart camera skipped; the user-directed subject
-    #      lock is more specific than an AI camera move.
-    #   2. Smart camera directive present + enabled → smart camera
-    #      OVERRIDES automatic YOLO auto-reframe and emotion zoompan.
-    #      Reason: focus_regions is real visual saliency from Vision;
-    #      emotion/default YOLO is a guessed proxy.
-    #   3. Otherwise → automatic YOLO / emotion zoompan keep working.
+    # v0.30.16 — opt-in smart camera is literal: when the operator turns
+    # it on and a directive exists, it overrides every tracking crop path
+    # (automatic YOLO, picked YOLO object, custom ROI, or point track) plus
+    # emotion zoompan. Explicit tracking is still useful when Smart Camera
+    # is off; with Smart Camera on, the camera move must be visible.
     #
     # Smart-camera cuts are not reported as subject-locked; strong vidstab
     # still runs afterwards when enabled so both toggles have visible effect.
     smart_blob = getattr(cut, "smart_camera_json", None)
     smart_chain: str | None = None
-    explicit_reframe_active = bool(point_track or custom_roi or tracking_object_index is not None)
-    if (
-        smart_camera_enabled
-        and isinstance(smart_blob, dict)
-        and (crop_path is None or not explicit_reframe_active)
-    ):
+    if smart_camera_enabled and isinstance(smart_blob, dict):
         try:
             smart_chain = _smart_camera_filter(smart_blob, target_aspect, duration_s)
         except Exception:  # noqa: BLE001 — never let a single bad directive fail render.
@@ -666,17 +657,6 @@ def _cut_segment(
             "smart-camera: cut %d overrides automatic auto-reframe",
             cut.order,
         )
-    if (
-        smart_camera_enabled
-        and crop_path is not None
-        and isinstance(smart_blob, dict)
-        and explicit_reframe_active
-    ):
-        logger.info(
-            "smart-camera: cut %d skipped — explicit tracking already active",
-            cut.order,
-        )
-
     if smart_chain is not None:
         # The smart-camera filter renders directly to the target
         # canvas, so the static aspect step is redundant. Replace
