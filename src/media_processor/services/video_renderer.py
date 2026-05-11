@@ -364,6 +364,10 @@ def _should_zoompan(cut: CutPlanSegment) -> bool:
 # sendcmd file needed for zoom_in / zoom_out, and pan re-uses the
 # same expression form (just different from/to rectangles).
 SMART_CAMERA_KINDS: frozenset[str] = frozenset({"zoom_in", "zoom_out", "pan"})
+SMART_CAMERA_VISIBLE_ZOOM_IN_MIN: float = 1.85
+SMART_CAMERA_VISIBLE_ZOOM_OUT_MIN: float = 1.65
+SMART_CAMERA_VISIBLE_PAN_ZOOM_MIN: float = 1.65
+SMART_CAMERA_VISIBLE_PAN_GAIN: float = 1.50
 SMART_CAMERA_BEAT_SYNC_START_RATIO: float = 0.35
 SMART_CAMERA_BEAT_SYNC_TARGET_RATIO: float = 0.80
 SMART_CAMERA_BEAT_SYNC_END_RATIO: float = 0.95
@@ -482,6 +486,25 @@ def _smart_camera_filter(
     t_cy = ty + th / 2.0
     f_zoom = 1.0 / max(fw, fh)
     t_zoom = 1.0 / max(tw, th)
+
+    # v0.30.22 — make AI Smart Camera visibly different. Existing stored
+    # v2 directives are still valid, but several were too gentle (especially
+    # fallback zooms around 1.16x and short pans). Boost render-time zoom/pan
+    # while keeping the original focus centres and beat-sync timing.
+    if kind == "zoom_in":
+        t_zoom = max(t_zoom, SMART_CAMERA_VISIBLE_ZOOM_IN_MIN)
+    elif kind == "zoom_out":
+        f_zoom = max(f_zoom, SMART_CAMERA_VISIBLE_ZOOM_OUT_MIN)
+    elif kind == "pan":
+        mid_cx = (f_cx + t_cx) / 2.0
+        mid_cy = (f_cy + t_cy) / 2.0
+        f_cx = max(0.0, min(1.0, mid_cx + (f_cx - mid_cx) * SMART_CAMERA_VISIBLE_PAN_GAIN))
+        f_cy = max(0.0, min(1.0, mid_cy + (f_cy - mid_cy) * SMART_CAMERA_VISIBLE_PAN_GAIN))
+        t_cx = max(0.0, min(1.0, mid_cx + (t_cx - mid_cx) * SMART_CAMERA_VISIBLE_PAN_GAIN))
+        t_cy = max(0.0, min(1.0, mid_cy + (t_cy - mid_cy) * SMART_CAMERA_VISIBLE_PAN_GAIN))
+        pan_zoom = max(f_zoom, t_zoom, SMART_CAMERA_VISIBLE_PAN_ZOOM_MIN)
+        f_zoom = pan_zoom
+        t_zoom = pan_zoom
 
     ease = str(directive_blob.get("ease", "linear"))
     if ease not in ("linear", "exp"):

@@ -90,17 +90,16 @@ PAN_MAX_TIME_OVERLAP: float = 0.10
 TRANSITION_OVERLAP_MS: int = 500
 EDGE_TRIM_S: float = 0.05
 
-# Final camera-frame size, expressed as a fraction of the source
-# frame. ``ZOOM_IN`` ends with the camera at 1.4× the source (i.e.
-# its window is 1/1.4 ≈ 0.714 of the source); ``ZOOM_OUT`` starts at
-# 1.3× and lands at 1.0×. These are the values v0.30.0 ships with;
-# operator feedback may tune them.
-ZOOM_IN_END_SCALE: float = 1.55
-ZOOM_OUT_START_SCALE: float = 1.45
-PAN_SCALE: float = 1.35  # pan keeps a constant zoom factor; the move is the directive
-FALLBACK_ZOOM_IN_END_SCALE: float = 1.18
-FALLBACK_ZOOM_OUT_START_SCALE: float = 1.16
-FALLBACK_PAN_SCALE: float = 1.28
+# Final camera-frame size, expressed as a fraction of the source frame.
+# v0.30.22 makes the move intentionally visible; the previous values were
+# technically correct but too subtle for operators to tell AI Smart Camera was
+# doing anything.
+ZOOM_IN_END_SCALE: float = 1.85
+ZOOM_OUT_START_SCALE: float = 1.65
+PAN_SCALE: float = 1.65  # pan keeps a constant zoom factor; the move is the directive
+FALLBACK_ZOOM_IN_END_SCALE: float = 1.45
+FALLBACK_ZOOM_OUT_START_SCALE: float = 1.35
+FALLBACK_PAN_SCALE: float = 1.55
 
 _FENCE_RE = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.DOTALL)
 

@@ -244,8 +244,8 @@ def test_smart_camera_filter_pan_uses_constant_zoom() -> None:
     chain = video_renderer._smart_camera_filter(
         {
             "kind": "pan",
-            "from_rect": [0.0, 0.40, 0.20, 0.20],
-            "to_rect": [0.80, 0.40, 0.20, 0.20],
+            "from_rect": [0.0, 0.12, 0.78, 0.78],
+            "to_rect": [0.22, 0.12, 0.78, 0.78],
             "ease": "linear",
         },
         "16:9",
@@ -254,6 +254,23 @@ def test_smart_camera_filter_pan_uses_constant_zoom() -> None:
     assert chain is not None
     assert "zoompan=" in chain
     assert "s=1920x1080" in chain
+    assert f"z='{video_renderer.SMART_CAMERA_VISIBLE_PAN_ZOOM_MIN:.6f}'" in chain
+
+
+def test_smart_camera_filter_boosts_subtle_zoom_out() -> None:
+    chain = video_renderer._smart_camera_filter(
+        {
+            "kind": "zoom_out",
+            "from_rect": [0.07, 0.07, 0.86, 0.86],
+            "to_rect": [0.0, 0.0, 1.0, 1.0],
+            "ease": "linear",
+        },
+        "16:9",
+        duration_s=3.0,
+    )
+
+    assert chain is not None
+    assert f"{video_renderer.SMART_CAMERA_VISIBLE_ZOOM_OUT_MIN:.6f}" in chain
 
 
 def test_smart_camera_filter_rejects_malformed_directive() -> None:
