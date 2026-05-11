@@ -629,8 +629,9 @@ def _cut_segment(
     # emotion zoompan. Explicit tracking is still useful when Smart Camera
     # is off; with Smart Camera on, the camera move must be visible.
     #
-    # Smart-camera cuts are not reported as subject-locked; strong vidstab
-    # still runs afterwards when enabled so both toggles have visible effect.
+    # Smart-camera cuts are reported as dynamically reframed so the later
+    # vidstab stage skips them. Running vidstab after zoompan can interpret
+    # the intentional camera move as shake and create a mid-cut correction shove.
     smart_blob = getattr(cut, "smart_camera_json", None)
     smart_chain: str | None = None
     if smart_camera_enabled and isinstance(smart_blob, dict):
@@ -697,7 +698,7 @@ def _cut_segment(
         str(out_path),
     ]
     _run(cmd, timeout_s=PER_SEGMENT_TIMEOUT_S, stage=f"cut(seg={cut.order})")
-    return crop_path is not None and smart_chain is None
+    return crop_path is not None or smart_chain is not None
 
 
 def cut_segments(
@@ -717,14 +718,10 @@ def cut_segments(
 ) -> tuple[list[Path], list[bool]]:
     """Cut every segment in the plan; return ``(paths, reframed_flags)``.
 
-    ``reframed_flags[i]`` is ``True`` only when segment i was rendered with
-    a subject-lock crop path (point / custom_roi / YOLO tracking). Callers
-    thread this into ``stabilize_segments`` so a segment that's already
-    subject-stabilised by a dynamic crop doesn't get a second vidstab pass.
-    v0.30.16 deliberately does NOT mark AI Smart Camera as skippable: if
-    the operator enables both strong stabilisation and AI camera motion,
-    both should be visible in the render instead of the smart-camera cut
-    silently bypassing the stabiliser.
+    ``reframed_flags[i]`` is ``True`` when segment i was rendered with a
+    dynamic crop path (point / custom_roi / YOLO tracking, or AI Smart
+    Camera). Callers thread this into ``stabilize_segments`` so a segment
+    that's already camera-directed doesn't get a second vidstab pass.
 
     ``tracking_by_asset`` (when supplied) maps ``asset_id`` to its
     ``Asset.tracking_json`` dict; segments backed by an asset present in

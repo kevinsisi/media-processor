@@ -2,7 +2,7 @@
 
 Content factory pipeline for novice-friendly Instagram and Facebook short-video production.
 
-**Status:** v0.30.18 / M9.15.18 — Roll back over-aggressive vidstab settings that caused a visible mid-cut correction shove.
+**Status:** v0.30.19 / M9.15.19 — Smart Camera segments skip vidstab to prevent mid-cut correction shoves.
 
 ## Spec
 

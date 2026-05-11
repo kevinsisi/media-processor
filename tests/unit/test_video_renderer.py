@@ -336,13 +336,12 @@ def test_smart_camera_overrides_emotion_zoompan(tmp_path: Path) -> None:
     )
     assert len(paths) == 1
     assert paths[0].is_file()
-    # Smart camera no longer suppresses the later strong stabiliser.
-    assert reframed == [False]
+    # Smart Camera is already a directed camera path, so vidstab must skip it.
+    assert reframed == [True]
 
 
-def test_smart_camera_does_not_skip_stabilize_when_stabilize_active(tmp_path: Path) -> None:
-    """When stabilize is on, smart-camera still applies without making
-    that cut skip the later vidstab stage."""
+def test_smart_camera_skips_later_vidstab_when_stabilize_active(tmp_path: Path) -> None:
+    """When stabilize is on, Smart Camera still applies and skips vidstab."""
     src = tmp_path / "asset.mp4"
     src.write_bytes(b"fake")
     plan = CutPlan(
@@ -377,7 +376,7 @@ def test_smart_camera_does_not_skip_stabilize_when_stabilize_active(tmp_path: Pa
         stabilize_enabled=True,
     )
     assert len(paths) == 1
-    assert reframed == [False]
+    assert reframed == [True]
 
 
 def test_smart_camera_overrides_automatic_auto_reframe(
@@ -444,7 +443,7 @@ def test_smart_camera_overrides_automatic_auto_reframe(
     )
 
     assert len(paths) == 1
-    assert reframed == [False]
+    assert reframed == [True]
     assert captured_filters == ["SMART_CAMERA_CHAIN"]
 
 
@@ -512,7 +511,7 @@ def test_smart_camera_overrides_explicit_tracking(
         smart_camera_enabled=True,
     )
 
-    assert reframed == [False]
+    assert reframed == [True]
     assert captured_filters == ["SMART_CAMERA_CHAIN"]
 
 
