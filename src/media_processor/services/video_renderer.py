@@ -226,14 +226,20 @@ WATERMARK_MARGIN_MIN_PX: int = 12
 
 # v0.14.3 — digital stabilization (vidstabdetect + vidstabtransform).
 # Two-pass: first pass writes a transforms file describing the shake,
-# second pass applies the inverse transform. Defaults are tuned for
-# handheld phone footage; raising shakiness or smoothing too high blurs
-# the image instead of stabilising it.
-STABILIZE_SHAKINESS: int = 8  # 1-10, how shaky the input is
-STABILIZE_ACCURACY: int = 9  # 1-15, more accurate = slower
-STABILIZE_STEPSIZE: int = 6  # search-step size in px
-STABILIZE_SMOOTHING: int = 10  # half-window of frames to smooth over
-STABILIZE_ZOOM: int = 0  # extra zoom % during transform; 0 = letterbox
+# second pass applies the inverse transform. v0.30.16 makes this the
+# aggressive preset: higher search accuracy, a wider temporal smoothing
+# window, and adaptive zoom so the stabiliser has room to counter strong
+# hand-held motion instead of preserving every source pixel at the cost
+# of visible shake. This is still vision-based EIS (no gyro stream), but
+# it corrects translation + roll/rotation + zoom-like compensation as far
+# as libvidstab can infer from image features.
+STABILIZE_SHAKINESS: int = 10  # 1-10, assume very shaky handheld input
+STABILIZE_ACCURACY: int = 15  # 1-15, more accurate = slower
+STABILIZE_STEPSIZE: int = 4  # smaller search step = finer correction
+STABILIZE_SMOOTHING: int = 30  # half-window of frames to smooth over
+STABILIZE_ZOOM: int = 6  # extra zoom % so transforms have crop margin
+STABILIZE_OPTZOOM: int = 2  # adaptive zoom suppresses black borders
+STABILIZE_ZOOMSPEED: float = 0.25  # slow adaptive-zoom changes
 
 
 class VideoRenderError(RuntimeError):
@@ -513,7 +519,7 @@ def _run(cmd: list[str], *, timeout_s: float, stage: str) -> None:
         # Tests rely on the *.mp4 path being a real (empty) file so
         # downstream stages can read its existence.
         out_idx = _find_output_path(cmd)
-        if out_idx is not None:
+        if out_idx is not None and cmd[out_idx] != "-":
             Path(cmd[out_idx]).parent.mkdir(parents=True, exist_ok=True)
             Path(cmd[out_idx]).write_bytes(b"")
         return
@@ -632,8 +638,8 @@ def _cut_segment(
     #      emotion/default YOLO is a guessed proxy.
     #   3. Otherwise → automatic YOLO / emotion zoompan keep working.
     #
-    # Smart-camera cuts are reported as dynamically reframed so the later
-    # vidstab stage skips only those cuts instead of suppressing the camera move.
+    # Smart-camera cuts are not reported as subject-locked; strong vidstab
+    # still runs afterwards when enabled so both toggles have visible effect.
     smart_blob = getattr(cut, "smart_camera_json", None)
     smart_chain: str | None = None
     explicit_reframe_active = bool(point_track or custom_roi or tracking_object_index is not None)
@@ -716,7 +722,7 @@ def _cut_segment(
         str(out_path),
     ]
     _run(cmd, timeout_s=PER_SEGMENT_TIMEOUT_S, stage=f"cut(seg={cut.order})")
-    return crop_path is not None or smart_chain is not None
+    return crop_path is not None and smart_chain is None
 
 
 def cut_segments(
@@ -736,14 +742,14 @@ def cut_segments(
 ) -> tuple[list[Path], list[bool]]:
     """Cut every segment in the plan; return ``(paths, reframed_flags)``.
 
-    ``reframed_flags[i]`` is ``True`` when segment i was rendered with a
-    dynamic camera path (point / custom_roi / YOLO tracking, or AI Smart
-    Camera) and ``False`` when it fell through to the static aspect crop.
-    Callers thread this into ``stabilize_segments`` so a segment that's
-    already subject-stabilised by a dynamic crop doesn't get a second
-    vidstab pass — vidstab on top of a subject-centred frame re-introduces
-    the very translation that the dynamic crop was cancelling out (v0.23.4
-    fix, extended to smart camera in v0.30.7).
+    ``reframed_flags[i]`` is ``True`` only when segment i was rendered with
+    a subject-lock crop path (point / custom_roi / YOLO tracking). Callers
+    thread this into ``stabilize_segments`` so a segment that's already
+    subject-stabilised by a dynamic crop doesn't get a second vidstab pass.
+    v0.30.16 deliberately does NOT mark AI Smart Camera as skippable: if
+    the operator enables both strong stabilisation and AI camera motion,
+    both should be visible in the render instead of the smart-camera cut
+    silently bypassing the stabiliser.
 
     ``tracking_by_asset`` (when supplied) maps ``asset_id`` to its
     ``Asset.tracking_json`` dict; segments backed by an asset present in
@@ -854,6 +860,8 @@ def _stabilize_segment(src: Path, dst: Path, scratch_dir: Path) -> None:
     transform_filter = (
         f"vidstabtransform=input={transforms_path.as_posix()}"
         f":zoom={STABILIZE_ZOOM}"
+        f":optzoom={STABILIZE_OPTZOOM}"
+        f":zoomspeed={STABILIZE_ZOOMSPEED}"
         f":smoothing={STABILIZE_SMOOTHING}"
         ",unsharp=5:5:0.8:3:3:0.4"
     )

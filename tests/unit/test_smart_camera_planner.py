@@ -68,6 +68,27 @@ def test_derive_returns_none_when_mid_band_area() -> None:
     assert scp._derive_directive(regions, dominant_motion="static") is None
 
 
+def test_fallback_directives_cover_every_cut() -> None:
+    """When Smart Camera is enabled but Vision has no move, every cut still moves."""
+    plan = CutPlan(
+        schema_version="m5.cut-plan.v1",
+        target_duration_ms=3000,
+        target_aspect_ratio="9:16",
+        profile_name="universal",
+        segments=(
+            CutPlanSegment(0, 1, 0, 1000, "scripted", "", dominant_motion="static"),
+            CutPlanSegment(1, 1, 1000, 2000, "scripted", "", dominant_motion="pan"),
+            CutPlanSegment(2, 1, 2000, 3000, "scripted", "", dominant_motion="tilt"),
+        ),
+    )
+
+    directives = scp.build_fallback_directives(plan, reason="unit test")
+
+    assert sorted(directives) == [0, 1, 2]
+    assert {directives[i]["kind"] for i in directives} <= {"zoom_in", "zoom_out", "pan"}
+    assert all("fallback" in directives[i]["notes"] for i in directives)
+
+
 def test_derive_returns_none_for_empty_regions() -> None:
     assert scp._derive_directive([], dominant_motion="static") is None
 

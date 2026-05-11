@@ -336,13 +336,13 @@ def test_smart_camera_overrides_emotion_zoompan(tmp_path: Path) -> None:
     )
     assert len(paths) == 1
     assert paths[0].is_file()
-    # Smart camera is a dynamic camera path, so later vidstab skips this cut.
-    assert reframed == [True]
+    # Smart camera no longer suppresses the later strong stabiliser.
+    assert reframed == [False]
 
 
-def test_smart_camera_marks_cut_reframed_when_stabilize_active(tmp_path: Path) -> None:
-    """When stabilize is on, smart-camera still applies and marks only
-    that cut as reframed so the later vidstab stage skips it."""
+def test_smart_camera_does_not_skip_stabilize_when_stabilize_active(tmp_path: Path) -> None:
+    """When stabilize is on, smart-camera still applies without making
+    that cut skip the later vidstab stage."""
     src = tmp_path / "asset.mp4"
     src.write_bytes(b"fake")
     plan = CutPlan(
@@ -377,7 +377,7 @@ def test_smart_camera_marks_cut_reframed_when_stabilize_active(tmp_path: Path) -
         stabilize_enabled=True,
     )
     assert len(paths) == 1
-    assert reframed == [True]
+    assert reframed == [False]
 
 
 def test_smart_camera_overrides_automatic_auto_reframe(
@@ -444,8 +444,31 @@ def test_smart_camera_overrides_automatic_auto_reframe(
     )
 
     assert len(paths) == 1
-    assert reframed == [True]
+    assert reframed == [False]
     assert captured_filters == ["SMART_CAMERA_CHAIN"]
+
+
+def test_stabilize_segment_uses_aggressive_vidstab_options(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    src = tmp_path / "seg_0000.mp4"
+    src.write_bytes(b"fake")
+    dst = tmp_path / "seg_0000.stab.mp4"
+    filters: list[str] = []
+
+    def fake_run(cmd: list[str], *, timeout_s: float, stage: str) -> None:
+        if "-vf" in cmd:
+            filters.append(cmd[cmd.index("-vf") + 1])
+        Path(cmd[-1]).parent.mkdir(parents=True, exist_ok=True)
+        if cmd[-1] != "-":
+            Path(cmd[-1]).write_bytes(b"")
+
+    monkeypatch.setattr(video_renderer, "_run", fake_run)
+
+    video_renderer._stabilize_segment(src, dst, tmp_path / "scratch")
+
+    assert any("vidstabdetect=" in f and "shakiness=10" in f and "accuracy=15" in f for f in filters)
+    assert any("vidstabtransform=" in f and "optzoom=2" in f and "zoom=6" in f for f in filters)
 
 
 def test_circlecrop_in_transition_whitelist() -> None:

@@ -93,9 +93,12 @@ EDGE_TRIM_S: float = 0.05
 # its window is 1/1.4 ≈ 0.714 of the source); ``ZOOM_OUT`` starts at
 # 1.3× and lands at 1.0×. These are the values v0.30.0 ships with;
 # operator feedback may tune them.
-ZOOM_IN_END_SCALE: float = 1.4
-ZOOM_OUT_START_SCALE: float = 1.3
-PAN_SCALE: float = 1.2  # pan keeps a constant zoom factor; the move is the directive
+ZOOM_IN_END_SCALE: float = 1.55
+ZOOM_OUT_START_SCALE: float = 1.45
+PAN_SCALE: float = 1.35  # pan keeps a constant zoom factor; the move is the directive
+FALLBACK_ZOOM_IN_END_SCALE: float = 1.18
+FALLBACK_ZOOM_OUT_START_SCALE: float = 1.16
+FALLBACK_PAN_SCALE: float = 1.28
 
 _FENCE_RE = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.DOTALL)
 
@@ -539,6 +542,61 @@ def _derive_directive(
     return None
 
 
+def _fallback_directive_for_cut(
+    cut: CutPlanSegment,
+    *,
+    reason: str,
+) -> Directive:
+    """Return a visible deterministic move when Vision produces no directive.
+
+    The product contract for the toggle is now literal: enabling AI Smart
+    Camera must affect the render. Vision-derived focus still wins, but an
+    empty / failed / mid-band result no longer falls through to a static crop.
+    """
+    motion = getattr(cut, "dominant_motion", "static")
+    ease = "exp" if motion in DYNAMIC_MOTIONS else "linear"
+    order = int(getattr(cut, "order", 0))
+
+    if motion == "tilt":
+        top = _crop_window_around(0.5, 0.34 if order % 2 == 0 else 0.66, scale=FALLBACK_PAN_SCALE)
+        bottom = _crop_window_around(0.5, 0.66 if order % 2 == 0 else 0.34, scale=FALLBACK_PAN_SCALE)
+        return Directive(
+            kind="pan",
+            from_rect=top,
+            to_rect=bottom,
+            ease=ease,
+            notes=f"fallback tilt pan: {reason}",
+        )
+
+    if motion in {"pan", "handheld"} or order % 3 == 1:
+        left = _crop_window_around(0.36 if order % 2 == 0 else 0.64, 0.5, scale=FALLBACK_PAN_SCALE)
+        right = _crop_window_around(0.64 if order % 2 == 0 else 0.36, 0.5, scale=FALLBACK_PAN_SCALE)
+        return Directive(
+            kind="pan",
+            from_rect=left,
+            to_rect=right,
+            ease=ease,
+            notes=f"fallback lateral pan: {reason}",
+        )
+
+    if order % 3 == 2:
+        return Directive(
+            kind="zoom_out",
+            from_rect=_crop_window_around(0.5, 0.5, scale=FALLBACK_ZOOM_OUT_START_SCALE),
+            to_rect=(0.0, 0.0, 1.0, 1.0),
+            ease=ease,
+            notes=f"fallback zoom_out: {reason}",
+        )
+
+    return Directive(
+        kind="zoom_in",
+        from_rect=(0.0, 0.0, 1.0, 1.0),
+        to_rect=_crop_window_around(0.5, 0.5, scale=FALLBACK_ZOOM_IN_END_SCALE),
+        ease=ease,
+        notes=f"fallback zoom_in: {reason}",
+    )
+
+
 def _bbox_iou_clusters(a: Sequence[FocusRegion], b: Sequence[FocusRegion]) -> float:
     """IoU of the encompassing bboxes for two clusters."""
     ax, ay, aw, ah = _cluster_bbox(a)
@@ -700,6 +758,8 @@ async def plan_smart_camera(
                     regions,
                     dominant_motion=getattr(cut, "dominant_motion", "static"),
                 )
+                if directive is None:
+                    directive = _fallback_directive_for_cut(cut, reason="vision returned no move")
                 blob = serialise_directive(directive, focus_regions=regions)
                 if blob is not None:
                     out[cut.order] = blob
@@ -716,16 +776,37 @@ async def plan_smart_camera(
                     cut.asset_id,
                     exc,
                 )
-                # Partial-success: leave this cut absent from ``out``
-                # so the renderer falls back to the static path.
+                directive = _fallback_directive_for_cut(cut, reason=type(exc).__name__)
+                blob = serialise_directive(directive)
+                if blob is not None:
+                    out[cut.order] = blob
             except Exception:  # noqa: BLE001 — never bring down the stage.
                 logger.exception(
                     "smart-camera: cut order=%d asset=%d unexpected error",
                     cut.order,
                     cut.asset_id,
                 )
+                directive = _fallback_directive_for_cut(cut, reason="unexpected error")
+                blob = serialise_directive(directive)
+                if blob is not None:
+                    out[cut.order] = blob
             finally:
                 shutil.rmtree(cut_scratch, ignore_errors=True)
+    return out
+
+
+def build_fallback_directives(plan: CutPlan, *, reason: str) -> dict[int, dict[str, Any]]:
+    """Build smart-camera directives without a Vision call.
+
+    Used when the toggle is enabled but API keys are missing/exhausted before
+    sampling starts. The render still gets visible camera motion instead of
+    silently becoming a static crop.
+    """
+    out: dict[int, dict[str, Any]] = {}
+    for cut in plan.segments:
+        blob = serialise_directive(_fallback_directive_for_cut(cut, reason=reason))
+        if blob is not None:
+            out[cut.order] = blob
     return out
 
 
@@ -788,6 +869,7 @@ __all__ = [
     "SmartCameraQuotaError",
     "_derive_directive",
     "apply_smart_camera_to_plan",
+    "build_fallback_directives",
     "deserialise_directive",
     "plan_smart_camera",
     "serialise_directive",

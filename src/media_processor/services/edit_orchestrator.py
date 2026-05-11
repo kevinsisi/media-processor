@@ -829,11 +829,25 @@ async def run_render(
                     "draft %d: smart-camera enabled but no LLM_API_KEYS configured",
                     handle.draft_id,
                 )
+                directives = smart_camera_planner.build_fallback_directives(
+                    plan,
+                    reason="no LLM_API_KEYS configured",
+                )
+                if directives:
+                    plan = smart_camera_planner.apply_smart_camera_to_plan(plan, directives)
+                    await _restore_plan_blob(handle, plan)
         except Exception:  # noqa: BLE001 — never let smart-camera fail the render.
             logger.exception(
-                "draft %d: smart-camera stage failed; rendering without camera moves",
+                "draft %d: smart-camera stage failed; using fallback camera moves",
                 handle.draft_id,
             )
+            directives = smart_camera_planner.build_fallback_directives(
+                plan,
+                reason="smart-camera stage failed",
+            )
+            if directives:
+                plan = smart_camera_planner.apply_smart_camera_to_plan(plan, directives)
+                await _restore_plan_blob(handle, plan)
     elif smart_camera_active and skip_plan:
         logger.info(
             "draft %d: smart-camera skip-plan render reused existing directives",
