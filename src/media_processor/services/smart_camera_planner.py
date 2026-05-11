@@ -559,7 +559,9 @@ def _fallback_directive_for_cut(
 
     if motion == "tilt":
         top = _crop_window_around(0.5, 0.34 if order % 2 == 0 else 0.66, scale=FALLBACK_PAN_SCALE)
-        bottom = _crop_window_around(0.5, 0.66 if order % 2 == 0 else 0.34, scale=FALLBACK_PAN_SCALE)
+        bottom = _crop_window_around(
+            0.5, 0.66 if order % 2 == 0 else 0.34, scale=FALLBACK_PAN_SCALE
+        )
         return Directive(
             kind="pan",
             from_rect=top,

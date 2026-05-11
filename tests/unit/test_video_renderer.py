@@ -467,7 +467,9 @@ def test_stabilize_segment_uses_aggressive_vidstab_options(
 
     video_renderer._stabilize_segment(src, dst, tmp_path / "scratch")
 
-    assert any("vidstabdetect=" in f and "shakiness=10" in f and "accuracy=15" in f for f in filters)
+    assert any(
+        "vidstabdetect=" in f and "shakiness=10" in f and "accuracy=15" in f for f in filters
+    )
     assert any("vidstabtransform=" in f and "optzoom=2" in f and "zoom=6" in f for f in filters)
 
 
