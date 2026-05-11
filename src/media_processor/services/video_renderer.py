@@ -250,6 +250,14 @@ TRACKING_POST_STABILIZE_MIN_IMPROVEMENT_RATIO: float = 0.05
 TRACKING_POST_STABILIZE_SCORE_WIDTH: int = 480
 TRACKING_POST_STABILIZE_SCORE_MAX_CORNERS: int = 800
 
+# v0.30.28 — compose tracking with measured source shake instead of only
+# trying to rescue the already-cropped result. Explicit tracking now renders a
+# baseline crop plus source-motion-compensated candidates, then keeps the lower
+# measured output-jitter segment.
+TRACKING_SOURCE_COMPENSATION_WINDOW_S: float = 1.60
+TRACKING_SOURCE_COMPENSATION_MIN_IMPROVEMENT_RATIO: float = 0.03
+TRACKING_SOURCE_COMPENSATION_GAINS: tuple[float, ...] = (1.0, -1.0)
+
 
 class VideoRenderError(RuntimeError):
     """Generic ffmpeg failure during the M5 render pipeline."""
@@ -635,6 +643,267 @@ def _find_output_path(cmd: list[str]) -> int | None:
 # ---------- stage 1: per-segment cut + scale + re-encode ----------
 
 
+def _cut_segment_command(
+    src: Path,
+    out_path: Path,
+    *,
+    start_s: float,
+    duration_s: float,
+    vf_chain: str,
+) -> list[str]:
+    return [
+        "ffmpeg",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-ss",
+        f"{start_s:.3f}",
+        "-i",
+        str(src),
+        "-t",
+        f"{duration_s:.3f}",
+        "-vf",
+        vf_chain,
+        "-r",
+        str(VIDEO_FPS),
+        "-c:v",
+        VIDEO_CODEC,
+        "-pix_fmt",
+        VIDEO_PIX_FMT,
+        "-preset",
+        VIDEO_PRESET,
+        "-crf",
+        str(VIDEO_CRF),
+        "-c:a",
+        AUDIO_CODEC,
+        "-b:a",
+        AUDIO_BITRATE,
+        "-ac",
+        "2",
+        "-movflags",
+        "+faststart",
+        str(out_path),
+    ]
+
+
+def _render_cut_segment(
+    src: Path,
+    out_path: Path,
+    *,
+    start_s: float,
+    duration_s: float,
+    vf_chain: str,
+    stage: str,
+) -> None:
+    _run(
+        _cut_segment_command(
+            src,
+            out_path,
+            start_s=start_s,
+            duration_s=duration_s,
+            vf_chain=vf_chain,
+        ),
+        timeout_s=PER_SEGMENT_TIMEOUT_S,
+        stage=stage,
+    )
+
+
+def _source_motion_compensated_crop_path(
+    path: auto_reframe.CropPath,
+    src: Path,
+    *,
+    start_s: float,
+    gain: float,
+) -> auto_reframe.CropPath | None:
+    """Add high-frequency source translation to a smooth tracking crop path.
+
+    Smooth crop paths remove tracker/camera command jitter, but they also stop
+    following real hand-held high-frequency translation that should be cancelled
+    digitally. Estimate that source motion from the raw cut and add only its
+    high-frequency residual back to the crop window. Candidate rendering and
+    output scoring decide whether the correction actually helped.
+    """
+    if len(path.points) < 10:
+        return None
+    try:
+        import cv2
+        import numpy as np
+    except Exception as exc:  # pragma: no cover - dependency exists in worker image
+        logger.warning("tracking-source-stabilize: OpenCV unavailable: %s", exc)
+        return None
+
+    cap = cv2.VideoCapture(str(src))
+    if not cap.isOpened():
+        return None
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or path.src_w)
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or path.src_h)
+    if width <= 0 or height <= 0:
+        cap.release()
+        return None
+    scale = max(1.0, width / TRACKING_POST_STABILIZE_SCORE_WIDTH)
+    small_w = int(round(width / scale))
+    small_h = int(round(height / scale))
+    cap.set(cv2.CAP_PROP_POS_MSEC, max(0.0, start_s) * 1000.0)
+    calc_lk = cast(Any, cv2.calcOpticalFlowPyrLK)
+
+    cumulative: list[tuple[float, float]] = [(0.0, 0.0)]
+    prev_gray: Any | None = None
+    cum_x = 0.0
+    cum_y = 0.0
+    for i in range(len(path.points)):
+        ok, frame = cap.read()
+        if not ok:
+            break
+        if scale != 1.0:
+            frame = cv2.resize(frame, (small_w, small_h), interpolation=cv2.INTER_AREA)
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        if prev_gray is not None:
+            points = cv2.goodFeaturesToTrack(
+                prev_gray,
+                maxCorners=TRACKING_POST_STABILIZE_SCORE_MAX_CORNERS,
+                qualityLevel=0.01,
+                minDistance=8,
+                blockSize=7,
+            )
+            if points is not None and len(points) >= 12:
+                next_points, status, _err = calc_lk(
+                    prev_gray,
+                    gray,
+                    points,
+                    None,
+                    winSize=(21, 21),
+                    maxLevel=3,
+                    criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.01),
+                )
+                if next_points is not None and status is not None:
+                    good_prev = points[status.ravel() == 1].reshape(-1, 2)
+                    good_next = next_points[status.ravel() == 1].reshape(-1, 2)
+                    if len(good_prev) >= 12:
+                        affine, inliers = cv2.estimateAffinePartial2D(
+                            good_prev,
+                            good_next,
+                            method=cv2.RANSAC,
+                            ransacReprojThreshold=3.0,
+                            maxIters=2000,
+                            confidence=0.99,
+                            refineIters=10,
+                        )
+                        if affine is not None and (inliers is None or int(inliers.sum()) >= 12):
+                            cum_x += float(affine[0, 2] * scale)
+                            cum_y += float(affine[1, 2] * scale)
+        if i > 0:
+            cumulative.append((cum_x, cum_y))
+        prev_gray = gray
+    cap.release()
+
+    if len(cumulative) != len(path.points):
+        return None
+
+    half_window = max(1, int(round(TRACKING_SOURCE_COMPENSATION_WINDOW_S * VIDEO_FPS / 2.0)))
+    high_pass: list[tuple[float, float]] = []
+    for i, (dx, dy) in enumerate(cumulative):
+        start = max(0, i - half_window)
+        end = min(len(cumulative), i + half_window + 1)
+        window = cumulative[start:end]
+        mean_dx = float(np.mean([v[0] for v in window]))
+        mean_dy = float(np.mean([v[1] for v in window]))
+        high_pass.append((dx - mean_dx, dy - mean_dy))
+
+    max_x = max(0, path.src_w - path.crop_w)
+    max_y = max(0, path.src_h - path.crop_h)
+    compensated_points: list[tuple[float, int, int]] = []
+    for (time_s, x, y), (shake_x, shake_y) in zip(path.points, high_pass, strict=True):
+        next_x = int(round(max(0.0, min(float(max_x), float(x) + gain * shake_x))))
+        next_y = int(round(max(0.0, min(float(max_y), float(y) + gain * shake_y))))
+        compensated_points.append((time_s, next_x, next_y))
+    return auto_reframe.CropPath(
+        crop_w=path.crop_w,
+        crop_h=path.crop_h,
+        src_w=path.src_w,
+        src_h=path.src_h,
+        points=compensated_points,
+    )
+
+
+def _render_tracking_cut_with_source_candidates(
+    src: Path,
+    out_path: Path,
+    *,
+    cut_order: int,
+    start_s: float,
+    duration_s: float,
+    base_crop_path: auto_reframe.CropPath,
+    base_vf_chain: str,
+    sendcmd_dir: Path,
+    target_aspect: str,
+) -> None:
+    """Render baseline and source-motion-compensated tracking candidates."""
+    _render_cut_segment(
+        src,
+        out_path,
+        start_s=start_s,
+        duration_s=duration_s,
+        vf_chain=base_vf_chain,
+        stage=f"cut(seg={cut_order})",
+    )
+    base_score = _segment_high_frequency_motion_score(out_path)
+    if base_score is None:
+        return
+
+    target_w, target_h = ASPECT_DIMENSIONS[target_aspect]
+    best_path = out_path
+    best_score = base_score
+    for candidate_i, gain in enumerate(TRACKING_SOURCE_COMPENSATION_GAINS):
+        candidate_crop_path = _source_motion_compensated_crop_path(
+            base_crop_path,
+            src,
+            start_s=start_s,
+            gain=gain,
+        )
+        if candidate_crop_path is None:
+            continue
+        candidate_sendcmd = sendcmd_dir / f"reframe_seg_{cut_order:04d}.srcstab{candidate_i}.txt"
+        auto_reframe.write_sendcmd_file(candidate_crop_path, candidate_sendcmd)
+        candidate_chain = auto_reframe.build_filter_chain(
+            candidate_crop_path,
+            candidate_sendcmd,
+            target_w,
+            target_h,
+        )
+        candidate_path = out_path.with_name(f"{out_path.stem}.srcstab{candidate_i}.mp4")
+        _render_cut_segment(
+            src,
+            candidate_path,
+            start_s=start_s,
+            duration_s=duration_s,
+            vf_chain=candidate_chain,
+            stage=f"cut-source-stabilize(seg={cut_order},candidate={candidate_i})",
+        )
+        candidate_score = _segment_high_frequency_motion_score(candidate_path)
+        if candidate_score is not None and candidate_score < best_score:
+            best_path = candidate_path
+            best_score = candidate_score
+
+    required_score = base_score * (1.0 - TRACKING_SOURCE_COMPENSATION_MIN_IMPROVEMENT_RATIO)
+    if best_path != out_path and best_score <= required_score:
+        out_path.unlink(missing_ok=True)
+        shutil.move(str(best_path), str(out_path))
+        logger.info(
+            "tracking-source-stabilize: accepted seg_%04d (hf_p95 %.3f -> %.3f)",
+            cut_order,
+            base_score,
+            best_score,
+        )
+    else:
+        logger.info(
+            "tracking-source-stabilize: kept baseline seg_%04d (best hf_p95 %.3f -> %.3f)",
+            cut_order,
+            base_score,
+            best_score,
+        )
+
+
 def _cut_segment(
     src: Path,
     cut: CutPlanSegment,
@@ -783,41 +1052,33 @@ def _cut_segment(
         # aspect crop so the zoom centre is the cropped frame's centre
         # rather than the original asset's.
         vf_chain = f"{vf_chain},{_zoompan_filter(target_aspect, duration_s)}"
-    cmd = [
-        "ffmpeg",
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-y",
-        "-ss",
-        f"{start_s:.3f}",
-        "-i",
-        str(src),
-        "-t",
-        f"{duration_s:.3f}",
-        "-vf",
-        vf_chain,
-        "-r",
-        str(VIDEO_FPS),
-        "-c:v",
-        VIDEO_CODEC,
-        "-pix_fmt",
-        VIDEO_PIX_FMT,
-        "-preset",
-        VIDEO_PRESET,
-        "-crf",
-        str(VIDEO_CRF),
-        "-c:a",
-        AUDIO_CODEC,
-        "-b:a",
-        AUDIO_BITRATE,
-        "-ac",
-        "2",
-        "-movflags",
-        "+faststart",
-        str(out_path),
-    ]
-    _run(cmd, timeout_s=PER_SEGMENT_TIMEOUT_S, stage=f"cut(seg={cut.order})")
+    if (
+        explicit_tracking_requested
+        and stabilize_enabled
+        and sendcmd_dir is not None
+        and smart_chain is None
+        and isinstance(crop_path, auto_reframe.CropPath)
+    ):
+        _render_tracking_cut_with_source_candidates(
+            src,
+            out_path,
+            cut_order=cut.order,
+            start_s=start_s,
+            duration_s=duration_s,
+            base_crop_path=crop_path,
+            base_vf_chain=vf_chain,
+            sendcmd_dir=sendcmd_dir,
+            target_aspect=target_aspect,
+        )
+    else:
+        _render_cut_segment(
+            src,
+            out_path,
+            start_s=start_s,
+            duration_s=duration_s,
+            vf_chain=vf_chain,
+            stage=f"cut(seg={cut.order})",
+        )
     return crop_path is not None or smart_chain is not None
 
 

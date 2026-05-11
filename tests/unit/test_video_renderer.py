@@ -697,6 +697,82 @@ def test_custom_roi_overrides_smart_camera(tmp_path: Path, monkeypatch: pytest.M
     assert captured_filters == ["CUSTOM_ROI_CHAIN"]
 
 
+def test_explicit_tracking_uses_lower_jitter_source_compensated_candidate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    src = tmp_path / "asset.mp4"
+    src.write_bytes(b"fake")
+    plan = CutPlan(
+        schema_version="m5.cut-plan.v1",
+        target_duration_ms=1_000,
+        target_aspect_ratio="16:9",
+        profile_name="universal",
+        segments=(CutPlanSegment(0, 1, 0, 1_000, "improv", ""),),
+    )
+    base_path = video_renderer.auto_reframe.CropPath(
+        crop_w=960,
+        crop_h=540,
+        src_w=1920,
+        src_h=1080,
+        points=[(0.0, 100, 100), (0.0333, 102, 100), (0.0667, 104, 100)] * 4,
+    )
+
+    monkeypatch.setattr(
+        video_renderer.auto_reframe,
+        "compute_crop_path_from_point_track",
+        lambda *args, **kwargs: base_path,
+    )
+
+    def fake_build_filter_chain(crop_path: object, sendcmd_path: Path, *_args: object) -> str:
+        return f"CHAIN:{sendcmd_path.name}"
+
+    monkeypatch.setattr(video_renderer.auto_reframe, "build_filter_chain", fake_build_filter_chain)
+
+    def fake_source_compensated(
+        crop_path: video_renderer.auto_reframe.CropPath,
+        src_path: Path,
+        *,
+        start_s: float,
+        gain: float,
+    ) -> video_renderer.auto_reframe.CropPath:
+        return crop_path
+
+    monkeypatch.setattr(
+        video_renderer,
+        "_source_motion_compensated_crop_path",
+        fake_source_compensated,
+    )
+
+    def fake_score(path: Path) -> float:
+        if path.name.endswith("srcstab0.mp4"):
+            return 5.0
+        if path.name.endswith("srcstab1.mp4"):
+            return 7.0
+        return 8.0
+
+    monkeypatch.setattr(video_renderer, "_segment_high_frequency_motion_score", fake_score)
+
+    def fake_run(cmd: list[str], *, timeout_s: float, stage: str) -> None:
+        out = Path(cmd[-1])
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(cmd[cmd.index("-vf") + 1], encoding="utf-8")
+
+    monkeypatch.setattr(video_renderer, "_run", fake_run)
+
+    paths, reframed = video_renderer.cut_segments(
+        plan,
+        asset_paths={1: src},
+        intermediate_dir=tmp_path / "out",
+        target_aspect="16:9",
+        tracking_target_by_asset={1: -4},
+        point_track_by_asset={1: {"frames": [{"t_ms": 0, "x": 100, "y": 100}]}},
+        stabilize_enabled=True,
+    )
+
+    assert reframed == [True]
+    assert paths[0].read_text(encoding="utf-8") == "CHAIN:reframe_seg_0000.srcstab0.txt"
+
+
 def test_stabilize_segment_uses_stable_vidstab_options(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
