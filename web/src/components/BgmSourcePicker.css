@@ -152,6 +152,17 @@
   color: rgba(255, 255, 255, 0.85);
 }
 
+.bgm-picker__download {
+  align-self: flex-start;
+  color: rgba(132, 217, 196, 0.95);
+  font-size: 0.8rem;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+.bgm-picker__download:hover {
+  color: rgba(180, 245, 225, 1);
+}
+
 /* v0.21.2 — match / mismatch banner shown above the regenerate CTA.
    "Match" reads as quiet success (BGM is in sync with the preset);
    "mismatch" reads as a warning (preset moved, BGM is stale). */

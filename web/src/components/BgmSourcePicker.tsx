@@ -271,6 +271,7 @@ export default function BgmSourcePicker({
   // background suggestion fetch overwrite their text. Flips back to
   // false ONLY when they click "重新產生建議".
   const aiPromptUserEditedRef = useRef(false);
+  const aiPromptSuggestionKeyRef = useRef<string | null>(null);
 
   const loadAiSuggestion = useCallback(
     async (forceReplace: boolean) => {
@@ -281,6 +282,7 @@ export default function BgmSourcePicker({
         if (forceReplace || !aiPromptUserEditedRef.current) {
           setAiPrompt(s.description);
           setAiPromptUsedFallback(s.used_fallback);
+          aiPromptSuggestionKeyRef.current = `${projectId}|${stylePreset ?? "custom"}`;
           if (forceReplace) {
             aiPromptUserEditedRef.current = false;
           }
@@ -294,6 +296,17 @@ export default function BgmSourcePicker({
     [projectId, stylePreset],
   );
 
+  // v0.30.21 — warm the AI prompt as soon as the edit page mounts. The
+  // textarea remains the source of truth for generation, and the existing
+  // aiPromptUserEditedRef guard prevents this background response from
+  // overwriting text the user starts typing before the suggestion returns.
+  useEffect(() => {
+    const suggestionKey = `${projectId}|${stylePreset ?? "custom"}`;
+    if (aiPromptLoading || aiPromptUserEditedRef.current) return;
+    if (aiPrompt && aiPromptSuggestionKeyRef.current === suggestionKey) return;
+    void loadAiSuggestion(false);
+  }, [aiPrompt, aiPromptLoading, loadAiSuggestion, projectId, stylePreset]);
+
   const loadAiStatus = useCallback(async () => {
     try {
       const s = await apiClient.fetchProjectBgmStatus(projectId);
@@ -303,19 +316,12 @@ export default function BgmSourcePicker({
     }
   }, [projectId]);
 
-  // Lazy-load suggestion on first switch into "ai". For "preset" the
-  // prompt is the static preset hint; no suggestion fetch needed.
+  // When switching into "ai", refresh status immediately. Suggestion
+  // prefetch starts on mount above, so users usually don't wait here.
   useEffect(() => {
     if (source !== "ai") return;
-    if (
-      !aiPrompt &&
-      !aiPromptLoading &&
-      !aiPromptUserEditedRef.current
-    ) {
-      void loadAiSuggestion(false);
-    }
     void loadAiStatus();
-  }, [source, aiPrompt, aiPromptLoading, loadAiSuggestion, loadAiStatus]);
+  }, [source, loadAiStatus]);
 
   // For "preset", just keep the gen status fresh so the user sees
   // pending/running/done updates if they had a job in flight.
@@ -698,16 +704,25 @@ export default function BgmSourcePicker({
                   </span>
                 )}
                 {aiStatus.status === "done" && aiStatus.output_url && (
-                  <audio
-                    className={
-                      presetMismatch
-                        ? "bgm-library__audio bgm-picker__audio--stale"
-                        : "bgm-library__audio"
-                    }
-                    controls
-                    preload="none"
-                    src={aiStatus.output_url}
-                  />
+                  <>
+                    <audio
+                      className={
+                        presetMismatch
+                          ? "bgm-library__audio bgm-picker__audio--stale"
+                          : "bgm-library__audio"
+                      }
+                      controls
+                      preload="none"
+                      src={aiStatus.output_url}
+                    />
+                    <a
+                      className="bgm-picker__download mono"
+                      href={aiStatus.output_url}
+                      download
+                    >
+                      下載配樂
+                    </a>
+                  </>
                 )}
                 {aiStatus.error && (
                   <span className="bgm-picker__err mono">
@@ -761,6 +776,9 @@ export default function BgmSourcePicker({
                     preload="none"
                     src={item.url}
                   />
+                  <a className="bgm-picker__download mono" href={item.url} download>
+                    下載試聽檔
+                  </a>
                   <button
                     type="button"
                     className="cta cta--quiet"
@@ -852,12 +870,21 @@ export default function BgmSourcePicker({
                 狀態：{labelForGenStatus(aiStatus.status)}
               </span>
               {aiStatus.status === "done" && aiStatus.output_url && (
-                <audio
-                  className="bgm-library__audio"
-                  controls
-                  preload="none"
-                  src={aiStatus.output_url}
-                />
+                <>
+                  <audio
+                    className="bgm-library__audio"
+                    controls
+                    preload="none"
+                    src={aiStatus.output_url}
+                  />
+                  <a
+                    className="bgm-picker__download mono"
+                    href={aiStatus.output_url}
+                    download
+                  >
+                    下載配樂
+                  </a>
+                </>
               )}
               {aiStatus.error && (
                 <span className="bgm-picker__err mono">
