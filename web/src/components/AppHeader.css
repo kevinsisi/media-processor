@@ -145,6 +145,7 @@
     padding: 0 var(--space-2);
   }
   .app-header__version {
-    display: none;
+    font-size: 10px;
+    padding-left: 0;
   }
 }
