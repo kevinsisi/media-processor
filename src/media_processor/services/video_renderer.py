@@ -236,11 +236,25 @@ STABILIZE_STEPSIZE: int = 6  # search-step size in px
 STABILIZE_SMOOTHING: int = 10  # half-window of frames to smooth over
 STABILIZE_ZOOM: int = 0  # extra zoom % during transform; 0 = letterbox
 
-# v0.30.26 — explicit point / ROI / picked-object reframes still need real
+
+@dataclass(frozen=True)
+class StabilizePreset:
+    suffix: str
+    shakiness: int
+    accuracy: int
+    stepsize: int
+    smoothing: int
+    zoom: int
+    optzoom: bool
+
+
+# v0.30.26/v0.30.29 — explicit point / ROI / picked-object reframes still need real
 # digital stabilisation after tracking. Crop-path smoothing only removes camera
 # command jitter; it cannot correct the source footage's high-frequency
 # rotation/translation shake. Use a stronger post pass with zoom margin so the
-# final tracked shot feels closer to phone/gimbal digital stabilisation.
+# final tracked shot feels closer to phone/gimbal digital stabilisation. Some
+# cuts over-correct with the strong preset, so render measured presets and keep
+# the lowest actual output-jitter candidate per cut.
 TRACKING_POST_STABILIZE_SHAKINESS: int = 10
 TRACKING_POST_STABILIZE_ACCURACY: int = 15
 TRACKING_POST_STABILIZE_STEPSIZE: int = 4
@@ -249,6 +263,27 @@ TRACKING_POST_STABILIZE_ZOOM: int = 10
 TRACKING_POST_STABILIZE_MIN_IMPROVEMENT_RATIO: float = 0.05
 TRACKING_POST_STABILIZE_SCORE_WIDTH: int = 480
 TRACKING_POST_STABILIZE_SCORE_MAX_CORNERS: int = 800
+TRACKING_POST_STABILIZE_STEADY_SMOOTHING: int = 30
+TRACKING_POST_STABILIZE_PRESETS: tuple[StabilizePreset, ...] = (
+    StabilizePreset(
+        suffix="stab",
+        shakiness=TRACKING_POST_STABILIZE_SHAKINESS,
+        accuracy=TRACKING_POST_STABILIZE_ACCURACY,
+        stepsize=TRACKING_POST_STABILIZE_STEPSIZE,
+        smoothing=TRACKING_POST_STABILIZE_SMOOTHING,
+        zoom=TRACKING_POST_STABILIZE_ZOOM,
+        optzoom=True,
+    ),
+    StabilizePreset(
+        suffix="stab_steady",
+        shakiness=STABILIZE_SHAKINESS,
+        accuracy=STABILIZE_ACCURACY,
+        stepsize=STABILIZE_STEPSIZE,
+        smoothing=TRACKING_POST_STABILIZE_STEADY_SMOOTHING,
+        zoom=STABILIZE_ZOOM,
+        optzoom=True,
+    ),
+)
 
 # v0.30.28 — compose tracking with measured source shake instead of only
 # trying to rescue the already-cropped result. Explicit tracking now renders a
@@ -1355,30 +1390,51 @@ def _segment_high_frequency_motion_score(path: Path) -> float | None:
 
 def _select_tracking_post_stabilized_segment(src: Path, stabilized: Path) -> Path:
     """Choose the lower-jitter segment after a tracking post-stab attempt."""
+    return _select_best_tracking_post_stabilized_segment(src, [stabilized])
+
+
+def _select_best_tracking_post_stabilized_segment(src: Path, candidates: list[Path]) -> Path:
+    """Choose the best measured tracking post-stabilization candidate."""
     src_score = _segment_high_frequency_motion_score(src)
-    stabilized_score = _segment_high_frequency_motion_score(stabilized)
-    if src_score is None or stabilized_score is None:
+    if src_score is None:
         logger.info(
             "tracking-stabilize: jitter score unavailable for %s; using post-stabilized segment",
             src.name,
         )
-        return stabilized
+        return candidates[0]
+
+    best_path: Path | None = None
+    best_score: float | None = None
+    for candidate in candidates:
+        candidate_score = _segment_high_frequency_motion_score(candidate)
+        if candidate_score is None:
+            continue
+        if best_score is None or candidate_score < best_score:
+            best_path = candidate
+            best_score = candidate_score
+
+    if best_path is None or best_score is None:
+        logger.info(
+            "tracking-stabilize: candidate jitter scores unavailable for %s; using post-stabilized segment",
+            src.name,
+        )
+        return candidates[0]
 
     required_score = src_score * (1.0 - TRACKING_POST_STABILIZE_MIN_IMPROVEMENT_RATIO)
-    if stabilized_score <= required_score:
+    if best_score <= required_score:
         logger.info(
-            "tracking-stabilize: accepted %s (hf_p95 %.3f -> %.3f)",
-            stabilized.name,
+            "tracking-stabilize: accepted %s (best hf_p95 %.3f -> %.3f)",
+            best_path.name,
             src_score,
-            stabilized_score,
+            best_score,
         )
-        return stabilized
+        return best_path
 
     logger.info(
-        "tracking-stabilize: rejected %s (hf_p95 %.3f -> %.3f); keeping tracking crop",
-        stabilized.name,
+        "tracking-stabilize: rejected best candidate for %s (hf_p95 %.3f -> %.3f); keeping tracking crop",
+        src.name,
         src_score,
-        stabilized_score,
+        best_score,
     )
     return src
 
@@ -1407,10 +1463,11 @@ def stabilize_segments(
     Skipped segments are returned at their pre-stabilisation path so
     the concat list stays the same length and order.
 
-    ``tracking_post_indexes`` (v0.30.26/v0.30.27) are explicit user-tracking
+    ``tracking_post_indexes`` (v0.30.26/v0.30.27/v0.30.29) are explicit user-tracking
     cuts that should try a stronger post-stabilisation pass after tracking.
     v0.30.27 scores before/after jitter and keeps the original tracking crop
-    when post-stabilisation makes a short cut worse.
+    when post-stabilisation makes a short cut worse. v0.30.29 renders both
+    strong and steadier post-stab presets and keeps the best measured output.
     """
     _require_ffmpeg()
     skip = skip_indexes or set()
@@ -1423,18 +1480,22 @@ def stabilize_segments(
         else:
             stab_dst = intermediate_dir / f"{src.stem}.stab.mp4"
             if i in tracking_post:
-                _stabilize_segment(
-                    src,
-                    stab_dst,
-                    intermediate_dir,
-                    shakiness=TRACKING_POST_STABILIZE_SHAKINESS,
-                    accuracy=TRACKING_POST_STABILIZE_ACCURACY,
-                    stepsize=TRACKING_POST_STABILIZE_STEPSIZE,
-                    smoothing=TRACKING_POST_STABILIZE_SMOOTHING,
-                    zoom=TRACKING_POST_STABILIZE_ZOOM,
-                    optzoom=True,
-                )
-                stab_dst = _select_tracking_post_stabilized_segment(src, stab_dst)
+                candidates: list[Path] = []
+                for preset in TRACKING_POST_STABILIZE_PRESETS:
+                    candidate_dst = intermediate_dir / f"{src.stem}.{preset.suffix}.mp4"
+                    _stabilize_segment(
+                        src,
+                        candidate_dst,
+                        intermediate_dir,
+                        shakiness=preset.shakiness,
+                        accuracy=preset.accuracy,
+                        stepsize=preset.stepsize,
+                        smoothing=preset.smoothing,
+                        zoom=preset.zoom,
+                        optzoom=preset.optzoom,
+                    )
+                    candidates.append(candidate_dst)
+                stab_dst = _select_best_tracking_post_stabilized_segment(src, candidates)
             else:
                 _stabilize_segment(src, stab_dst, intermediate_dir)
             out.append(stab_dst)

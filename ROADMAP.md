@@ -2,7 +2,7 @@
 
 > **單一定位**：沒有剪輯背景的小白也能「拍完就上傳，AI 直接給大量 IG / FB 短影音」的工具。
 > 目標 UX：手機優先、繁體中文、高級感、最少手動編輯。
-> 目前版本：**0.30.28**（M9.15.28 — 使用者追蹤加入 source-motion-compensated crop 候選，直接壓制微抖動）
+> 目前版本：**0.30.29**（M9.15.29 — 使用者追蹤 post-stabilization 改為多 preset 實測擇優，避免強穩定器修壞微抖 cut）
 > 下一個 milestone：M10 — 多專案批次 + 社群直接發布 + AI 自動縮圖。
 
 ## Phase 進度速覽
@@ -64,6 +64,7 @@
 | **M9.15.26** | **使用者追蹤後追加 tracking-aware post-stabilization，修正 crop path 已平滑但輸出仍有來源手持高頻晃動** | ✅ done | **0.30.26** |
 | **M9.15.27** | **tracking-aware post-stabilization 加入 before/after jitter safeguard，只保留高頻晃動分數明確改善的 cut** | ✅ done | **0.30.27** |
 | **M9.15.28** | **explicit tracking 渲染 baseline + source-motion-compensated crop 候選，逐段選 output jitter 最低版本以壓制微抖動** | ✅ done | **0.30.28** |
+| **M9.15.29** | **explicit tracking post-stabilization 改為 strong / steady 多 preset 實測擇優，cut 7 這類強穩定器過度修正時可改用較穩的 steady 版本** | ✅ done | **0.30.29** |
 | M10 | 多專案批次 + 社群直接發布 + AI 自動縮圖 | 🔮 future | 0.31.x+ |
 
 ---
