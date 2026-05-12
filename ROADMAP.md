@@ -5,6 +5,8 @@
 > 目前版本：**0.30.22**（M9.15.22 — AI Smart Camera 明顯化：放大 zoom / pan 強度）
 > 下一個 milestone：M10 — 多專案批次 + 社群直接發布 + AI 自動縮圖。
 
+> **2026-05-12 production note**：`0.30.23` 到 `0.30.37` 的 camera-motion 修補已被否決，production 以 rollback commit `1e4bc82` 回到 `0.30.22`，並已用 `.22` 重新 render draft `49`。未來運鏡 / 焦點追蹤 / 數位防手震變更必須先遵守 `skills/video-camera-movement/SKILL.md`。
+
 ## Phase 進度速覽
 
 | Phase | 主題 | 狀態 | 版本 |
@@ -623,6 +625,14 @@ OpenSpec：`openspec/changes/ai-smart-camera/proposal.md` + `tasks.md`。
 
 ### 9.15.6 退場條件
 - 若實機跑下來推錯重點 / 跟 vidstab 打架太多 → 仿 M8.1 的退場流程：code 留 toggle default false、UI 拔 checkbox + 文件改「實驗性 / 已退場」，不需要破壞性 migration
+
+### 9.15.7 2026-05-12 rollback 教訓
+- `0.30.23` 到 `0.30.37` 的 camera-motion 修補在 draft `49` 上仍造成不可接受的抖動或 fallback regression，已回到 `0.30.22`。
+- 後續實作不可再把 Smart Camera、tracking crop、vidstab/post-stabilization 當成互相覆蓋的功能。正確分層是：使用者追蹤意圖 > 創作運鏡 > 平滑後的 tracking crop path > 只清高頻的數位防手震 > 最終裁切。
+- Smart Camera `none` 只代表不加 AI 運鏡，不代表強制靜止、不代表啟用 vidstab fallback、不代表覆蓋已測得可接受的 tracking fallback。
+- 焦點追蹤是構圖目標，不是 raw lock。必須先做 dead zone、低通、速度限制、加速度限制與 drift guard，再進 ffmpeg crop/sendcmd。
+- 防手震只能是最後清理層，不得反過來決定 framing，也不得製造單幀跳動。
+- 驗收必須包含 production-like render、worker log path 確認、localized adjacent-frame step metrics、以及 rendered MP4/contact sheet 自查；不能只看 whole-cut aggregate p95。
 
 ---
 
