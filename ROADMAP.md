@@ -2,7 +2,7 @@
 
 > **單一定位**：沒有剪輯背景的小白也能「拍完就上傳，AI 直接給大量 IG / FB 短影音」的工具。
 > 目標 UX：手機優先、繁體中文、高級感、最少手動編輯。
-> 目前版本：**0.30.38**（M9.15.38 — explicit tracking crop smoothing + zoompan mutex）
+> 目前版本：**0.30.22**（M9.15.22 — AI Smart Camera 明顯化：放大 zoom / pan 強度）
 > 下一個 milestone：M10 — 多專案批次 + 社群直接發布 + AI 自動縮圖。
 
 > **2026-05-12 production note**：`0.30.23` 到 `0.30.37` 的 camera-motion 修補已被否決，production 以 rollback commit `1e4bc82` 回到 `0.30.22`，並已用 `.22` 重新 render draft `49`。未來運鏡 / 焦點追蹤 / 數位防手震變更必須先遵守 `skills/video-camera-movement/SKILL.md`。
@@ -61,8 +61,6 @@
 | **M9.15.20** | **真正 BGM beat sync：Smart Camera 運鏡完成點吸附到配樂節拍，不改 cut 長度** | ✅ done | **0.30.20** |
 | **M9.15.21** | **AI 配樂 UX：進剪輯頁背景預抓建議，生成仍以欄位文字為準，AI / 音樂庫配樂可下載** | ✅ done | **0.30.21** |
 | **M9.15.22** | **AI Smart Camera 明顯化：新 directive 與舊 draft render-time 都放大 zoom / pan，讓運鏡肉眼可辨識** | ✅ done | **0.30.22** |
-| **M9.15.23** | **Smart Camera priority correction + `kind="none"` schema，移除 0.30.22 modulo fallback motion** | ✅ done | **0.30.23** |
-| **M9.15.38** | **Explicit tracking crop smoothing + zoompan mutex，避免 raw point-tracking 手震與 tracking 後疊 zoompan** | ✅ done | **0.30.38** |
 | M10 | 多專案批次 + 社群直接發布 + AI 自動縮圖 | 🔮 future | 0.31.x+ |
 
 ---

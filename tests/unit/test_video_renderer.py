@@ -244,8 +244,8 @@ def test_smart_camera_filter_pan_uses_constant_zoom() -> None:
     chain = video_renderer._smart_camera_filter(
         {
             "kind": "pan",
-            "from_rect": [0.0, 0.20, 0.606, 0.606],
-            "to_rect": [0.22, 0.20, 0.606, 0.606],
+            "from_rect": [0.0, 0.12, 0.78, 0.78],
+            "to_rect": [0.22, 0.12, 0.78, 0.78],
             "ease": "linear",
         },
         "16:9",
@@ -254,25 +254,23 @@ def test_smart_camera_filter_pan_uses_constant_zoom() -> None:
     assert chain is not None
     assert "zoompan=" in chain
     assert "s=1920x1080" in chain
-    assert "z='1.650165'" in chain
+    assert f"z='{video_renderer.SMART_CAMERA_VISIBLE_PAN_ZOOM_MIN:.6f}'" in chain
 
 
-def test_smart_camera_filter_returns_none_for_none_kind() -> None:
-    assert (
-        video_renderer._smart_camera_filter(
-            {"kind": "none", "from_rect": [0, 0, 1, 1], "to_rect": [0, 0, 1, 1]},
-            "16:9",
-            duration_s=3.0,
-        )
-        is None
+def test_smart_camera_filter_boosts_subtle_zoom_out() -> None:
+    chain = video_renderer._smart_camera_filter(
+        {
+            "kind": "zoom_out",
+            "from_rect": [0.07, 0.07, 0.86, 0.86],
+            "to_rect": [0.0, 0.0, 1.0, 1.0],
+            "ease": "linear",
+        },
+        "16:9",
+        duration_s=3.0,
     )
 
-
-def test_smart_camera_filter_treats_pre_v3_blob_as_none() -> None:
-    assert (
-        video_renderer._smart_camera_filter({"schema_version": "smart-camera.v2"}, "16:9", 3.0)
-        is None
-    )
+    assert chain is not None
+    assert f"{video_renderer.SMART_CAMERA_VISIBLE_ZOOM_OUT_MIN:.6f}" in chain
 
 
 def test_smart_camera_filter_rejects_malformed_directive() -> None:
@@ -427,45 +425,6 @@ def test_smart_camera_skips_later_vidstab_when_stabilize_active(tmp_path: Path) 
     assert reframed == [True]
 
 
-def test_kind_none_does_not_set_reframed_flag(tmp_path: Path) -> None:
-    src = tmp_path / "asset.mp4"
-    src.write_bytes(b"fake")
-    plan = CutPlan(
-        schema_version="m5.cut-plan.v1",
-        target_duration_ms=1_000,
-        target_aspect_ratio="9:16",
-        profile_name="universal",
-        segments=(
-            CutPlanSegment(
-                0,
-                1,
-                0,
-                1_000,
-                "improv",
-                "",
-                smart_camera_json={
-                    "schema_version": "smart-camera.v3",
-                    "kind": "none",
-                    "from_rect": [0.0, 0.0, 1.0, 1.0],
-                    "to_rect": [0.0, 0.0, 1.0, 1.0],
-                    "ease": "linear",
-                },
-            ),
-        ),
-    )
-
-    _paths, reframed = video_renderer.cut_segments(
-        plan,
-        asset_paths={1: src},
-        intermediate_dir=tmp_path / "out",
-        target_aspect="9:16",
-        smart_camera_enabled=True,
-        stabilize_enabled=True,
-    )
-
-    assert reframed == [False]
-
-
 def test_smart_camera_overrides_automatic_auto_reframe(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -534,10 +493,10 @@ def test_smart_camera_overrides_automatic_auto_reframe(
     assert captured_filters == ["SMART_CAMERA_CHAIN"]
 
 
-def test_explicit_tracking_overrides_smart_camera(
+def test_smart_camera_overrides_explicit_tracking(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Picked tracking targets are explicit user intent and override Smart Camera."""
+    """When Smart Camera is checked, even picked tracking targets must not mask it."""
     src = tmp_path / "asset.mp4"
     src.write_bytes(b"fake")
     plan = CutPlan(
@@ -599,64 +558,7 @@ def test_explicit_tracking_overrides_smart_camera(
     )
 
     assert reframed == [True]
-    assert captured_filters == ["EXPLICIT_TRACKING_CHAIN"]
-
-
-def test_tracking_crop_suppresses_emotion_zoompan(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Do not stack emotion zoompan on top of a tracking crop path."""
-    src = tmp_path / "asset.mp4"
-    src.write_bytes(b"fake")
-    plan = CutPlan(
-        schema_version="m5.cut-plan.v1",
-        target_duration_ms=1_000,
-        target_aspect_ratio="9:16",
-        profile_name="universal",
-        segments=(
-            CutPlanSegment(
-                0,
-                1,
-                0,
-                1_000,
-                "improv",
-                "",
-                dominant_emotion="happy",
-                dominant_motion="handheld",
-            ),
-        ),
-    )
-    captured_filters: list[str] = []
-
-    monkeypatch.setattr(
-        video_renderer.auto_reframe,
-        "compute_crop_path",
-        lambda *args, **kwargs: [(0, 0, 1080, 1920)],
-    )
-    monkeypatch.setattr(video_renderer.auto_reframe, "write_sendcmd_file", lambda *args: None)
-    monkeypatch.setattr(
-        video_renderer.auto_reframe,
-        "build_filter_chain",
-        lambda *args, **kwargs: "TRACKING_CHAIN",
-    )
-
-    def fake_run(cmd: list[str], *, timeout_s: float, stage: str) -> None:
-        captured_filters.append(cmd[cmd.index("-vf") + 1])
-        Path(cmd[-1]).parent.mkdir(parents=True, exist_ok=True)
-        Path(cmd[-1]).write_bytes(b"")
-
-    monkeypatch.setattr(video_renderer, "_run", fake_run)
-
-    _paths, reframed = video_renderer.cut_segments(
-        plan,
-        asset_paths={1: src},
-        intermediate_dir=tmp_path / "out",
-        target_aspect="9:16",
-        tracking_by_asset={1: {"frames": []}},
-    )
-
-    assert reframed == [True]
-    assert captured_filters == ["TRACKING_CHAIN"]
+    assert captured_filters == ["SMART_CAMERA_CHAIN"]
 
 
 def test_stabilize_segment_uses_stable_vidstab_options(
