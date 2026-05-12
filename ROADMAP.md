@@ -2,7 +2,7 @@
 
 > **單一定位**：沒有剪輯背景的小白也能「拍完就上傳，AI 直接給大量 IG / FB 短影音」的工具。
 > 目標 UX：手機優先、繁體中文、高級感、最少手動編輯。
-> 目前版本：**0.30.37**（M9.15.37 — 回收 no-move static fallback；只讓有效 Smart Camera movement directive 取代 tracking，避免 cut 0/2 static+vidstab 單幀跳）
+> 目前版本：**0.30.22**（M9.15.22 — AI Smart Camera 明顯化：放大 zoom / pan 強度）
 > 下一個 milestone：M10 — 多專案批次 + 社群直接發布 + AI 自動縮圖。
 
 ## Phase 進度速覽
@@ -59,20 +59,6 @@
 | **M9.15.20** | **真正 BGM beat sync：Smart Camera 運鏡完成點吸附到配樂節拍，不改 cut 長度** | ✅ done | **0.30.20** |
 | **M9.15.21** | **AI 配樂 UX：進剪輯頁背景預抓建議，生成仍以欄位文字為準，AI / 音樂庫配樂可下載** | ✅ done | **0.30.21** |
 | **M9.15.22** | **AI Smart Camera 明顯化：新 directive 與舊 draft render-time 都放大 zoom / pan，讓運鏡肉眼可辨識** | ✅ done | **0.30.22** |
-| **M9.15.24** | **AI Smart Camera 運鏡調教：使用者 point / ROI / 指定目標追蹤優先，Vision 無明確動機時記錄 no-move、不 fallback pan / zoom** | ✅ done | **0.30.24** |
-| **M9.15.25** | **使用者 point / ROI / 指定物件追蹤加入數位防手震平滑：保留 0.30.22 穩定手感，不恢復 Smart Camera 疊 tracking** | ✅ done | **0.30.25** |
-| **M9.15.26** | **使用者追蹤後追加 tracking-aware post-stabilization，修正 crop path 已平滑但輸出仍有來源手持高頻晃動** | ✅ done | **0.30.26** |
-| **M9.15.27** | **tracking-aware post-stabilization 加入 before/after jitter safeguard，只保留高頻晃動分數明確改善的 cut** | ✅ done | **0.30.27** |
-| **M9.15.28** | **explicit tracking 渲染 baseline + source-motion-compensated crop 候選，逐段選 output jitter 最低版本以壓制微抖動** | ✅ done | **0.30.28** |
-| **M9.15.29** | **explicit tracking post-stabilization 改為 strong / steady 多 preset 實測擇優，cut 7 這類強穩定器過度修正時可改用較穩的 steady 版本** | ✅ done | **0.30.29** |
-| **M9.15.30** | **explicit tracking 渲染 measured steady-crop 候選（更長 smoothing / deadband / 更低 max-delta），逐 cut 用實際 output jitter 決定是否採用** | ✅ done | **0.30.30** |
-| **M9.15.31** | **explicit tracking post-stab 也評估 cropsteady/srcstab sidecar，並用相鄰幀 step jitter 捕捉被整段 p95 稀釋的局部大幅抖動** | ✅ done | **0.30.31** |
-| **M9.15.32** | **tracking post-stab 接受門檻改為 measured score 只要變好就採用，避免 cut 2 的 13–14 秒局部大抖候選被 3% 門檻擋掉** | ✅ done | **0.30.32** |
-| **M9.15.33** | **停用 production tracking post-stab/source-compensation brute force，避免 1 分鐘影片跑 20+ 分鐘；motion score 加入 step p99，拒絕會製造單幀大跳的穩定化候選** | ✅ done | **0.30.33** |
-| **M9.15.34** | **measured steady tracking crop 改用更強低通來壓 13–14 秒規律上下跳，候選採用前檢查相對 baseline 的目標漂移不超限** | ✅ done | **0.30.34** |
-| **M9.15.35** | **Smart Camera 開啟時恢復 v0.30.22 replacement 互斥：不疊 tracking、不讓 explicit tracking crop 優先於 AI 運鏡，避免整片因 tracker/source motion 變抖** | ✅ done | **0.30.35** |
-| **M9.15.36** | **Smart Camera analysed no-move cut 視為最終 camera 決策：不 fallback explicit tracking，不觸發 emotion zoompan，讓該 cut 回到 static + vidstab** | ✅ done | **0.30.36** |
-| **M9.15.37** | **production metrics 證實 no-move static+vidstab 會讓 cut 0/2 產生大單幀跳；回到 only movement directives replace tracking，`kind="none"` 保留 tracking fallback** | ✅ done | **0.30.37** |
 | M10 | 多專案批次 + 社群直接發布 + AI 自動縮圖 | 🔮 future | 0.31.x+ |
 
 ---
@@ -617,7 +603,7 @@ OpenSpec：`openspec/changes/ai-smart-camera/proposal.md` + `tasks.md`。
 
 ### 9.15.2 互斥邏輯
 - vidstab on → smart-camera cut 回報 `reframed=True`，後續 vidstab 只跳過該 cut，不再整體壓掉智慧運鏡（v0.30.7）
-- v0.30.37 起，Smart Camera 開啟且 cut 有有效 movement directive（pan / zoom_in / zoom_out）時 → Smart Camera replacement 勝；`kind="none"` 不視為 replacement，保留既有 tracking/static fallback，因 production draft 49 證實強制 static+vidstab 會在 cut 0/2 製造大單幀跳。
+- explicit tracking（point / custom ROI / user-picked YOLO object）→ smart camera 跳過 + info log（使用者指定主體鎖定勝）
 - automatic YOLO auto-reframe + smart camera 同時觸發 → smart camera 勝，避免「AI 智慧運鏡」被預設自動跟主角路徑靜默遮蔽（v0.30.9）
 - emotion zoompan（M8.1） + smart camera 同時觸發 → smart camera 勝（focus_regions 是真正的視覺 saliency，比情緒推測準）
 - 單一 cut 的 smart camera filter 失敗 → catch + 退回原 cut，**不**讓單一 cut 把整個 render fail

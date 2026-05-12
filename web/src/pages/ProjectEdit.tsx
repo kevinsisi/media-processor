@@ -525,7 +525,7 @@ function RenderOptions({
       />
       <EditOptionToggle
         label="AI 智慧運鏡（實驗性）"
-        hint="啟用後重新產生時會多打一次 Gemini 規劃鏡頭運動。有明確追蹤目標時會優先跟住目標；Vision 不確定時不強迫運鏡。"
+        hint="啟用後重新產生時會多打一次 Gemini 規劃鏡頭運動。可能蓋過情緒縮放；與穩定畫面、跟住主角同時開啟時會自動退讓。"
         value={smartCamera}
         onChange={setSmartCamera}
         disabled={disabled}

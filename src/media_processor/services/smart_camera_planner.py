@@ -21,12 +21,11 @@ Design notes:
   doesn't need finer sampling than that and it keeps the per-cut cost
   bounded.
 * Failure semantics are partial-success: a Gemini quota error or a
-  malformed JSON parse on cut ``i`` records a ``kind="none"`` marker for
-  that cut, so the renderer keeps the static aspect crop (or explicit
-  tracking path) on that segment and the rest of the cuts can still get
-  their directive. The orchestrator treats the stage itself as ``done``
-  even when individual cuts failed (mirrors the BGM stage's partial-
-  success contract).
+  malformed JSON parse on cut ``i`` returns ``None`` for that cut, so
+  the renderer keeps the static aspect crop on that segment and the
+  rest of the cuts can still get their directive. The orchestrator
+  treats the stage itself as ``done`` even when individual cuts
+  failed (mirrors the BGM stage's partial-success contract).
 * The directive's ``from_rect`` / ``to_rect`` are normalised
   ``(x, y, w, h)`` 0..1 so the renderer can map them through any
   source resolution + target aspect without re-querying.
@@ -57,8 +56,7 @@ from media_processor.services.edit_planner import (
 logger = logging.getLogger(__name__)
 
 
-SMART_CAMERA_SCHEMA_VERSION = "smart-camera.v3"
-SMART_CAMERA_NO_MOVE_KIND = "none"
+SMART_CAMERA_SCHEMA_VERSION = "smart-camera.v2"
 
 # Per-cut frame sampling cap. 4 keyframes is enough to spot a
 # zoom_in / zoom_out / pan candidate without burning tokens — most
@@ -99,6 +97,9 @@ EDGE_TRIM_S: float = 0.05
 ZOOM_IN_END_SCALE: float = 1.85
 ZOOM_OUT_START_SCALE: float = 1.65
 PAN_SCALE: float = 1.65  # pan keeps a constant zoom factor; the move is the directive
+FALLBACK_ZOOM_IN_END_SCALE: float = 1.45
+FALLBACK_ZOOM_OUT_START_SCALE: float = 1.35
+FALLBACK_PAN_SCALE: float = 1.55
 
 _FENCE_RE = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.DOTALL)
 
@@ -521,8 +522,8 @@ def _derive_directive(
             clusters = [first + last]
         elif not _is_chronological_pan(first, last):
             # Disjoint but present at the same time (e.g. car + badge/text).
-            # Keep the dominant subject as the single-cluster candidate so the
-            # single-cluster zoom/no-op rules decide instead of a fake pan.
+            # Keep the dominant subject as the single-cluster candidate so a
+            # later fallback can do a gentle zoom instead of a fake pan.
             clusters = [clusters[0]]
         else:
             from_bbox = _cluster_bbox(first)
@@ -567,6 +568,63 @@ def _derive_directive(
             notes=f"zoom_out: mean_area={mean_area:.3f}",
         )
     return None
+
+
+def _fallback_directive_for_cut(
+    cut: CutPlanSegment,
+    *,
+    reason: str,
+) -> Directive:
+    """Return a visible deterministic move when Vision produces no directive.
+
+    The product contract for the toggle is now literal: enabling AI Smart
+    Camera must affect the render. Vision-derived focus still wins, but an
+    empty / failed / mid-band result no longer falls through to a static crop.
+    """
+    motion = getattr(cut, "dominant_motion", "static")
+    ease = "exp" if motion in DYNAMIC_MOTIONS else "linear"
+    order = int(getattr(cut, "order", 0))
+
+    if motion == "tilt":
+        top = _crop_window_around(0.5, 0.34 if order % 2 == 0 else 0.66, scale=FALLBACK_PAN_SCALE)
+        bottom = _crop_window_around(
+            0.5, 0.66 if order % 2 == 0 else 0.34, scale=FALLBACK_PAN_SCALE
+        )
+        return Directive(
+            kind="pan",
+            from_rect=top,
+            to_rect=bottom,
+            ease=ease,
+            notes=f"fallback tilt pan: {reason}",
+        )
+
+    if motion in {"pan", "handheld"} or order % 3 == 1:
+        left = _crop_window_around(0.36 if order % 2 == 0 else 0.64, 0.5, scale=FALLBACK_PAN_SCALE)
+        right = _crop_window_around(0.64 if order % 2 == 0 else 0.36, 0.5, scale=FALLBACK_PAN_SCALE)
+        return Directive(
+            kind="pan",
+            from_rect=left,
+            to_rect=right,
+            ease=ease,
+            notes=f"fallback lateral pan: {reason}",
+        )
+
+    if order % 3 == 2:
+        return Directive(
+            kind="zoom_out",
+            from_rect=_crop_window_around(0.5, 0.5, scale=FALLBACK_ZOOM_OUT_START_SCALE),
+            to_rect=(0.0, 0.0, 1.0, 1.0),
+            ease=ease,
+            notes=f"fallback zoom_out: {reason}",
+        )
+
+    return Directive(
+        kind="zoom_in",
+        from_rect=(0.0, 0.0, 1.0, 1.0),
+        to_rect=_crop_window_around(0.5, 0.5, scale=FALLBACK_ZOOM_IN_END_SCALE),
+        ease=ease,
+        notes=f"fallback zoom_in: {reason}",
+    )
 
 
 def _bbox_iou_clusters(a: Sequence[FocusRegion], b: Sequence[FocusRegion]) -> float:
@@ -625,38 +683,6 @@ def serialise_directive(
     return payload
 
 
-def serialise_no_move(
-    reason: str,
-    *,
-    focus_regions: Sequence[FocusRegion] | None = None,
-) -> dict[str, Any]:
-    """Record that Smart Camera analysed the cut and chose no motion.
-
-    A persisted no-op marker prevents skip-plan re-renders from repeatedly
-    re-calling Vision while still keeping the renderer on the static/tracking
-    path. ``smart_camera_json = None`` remains reserved for legacy or not-yet-
-    analysed plans.
-    """
-    payload: dict[str, Any] = {
-        "schema_version": SMART_CAMERA_SCHEMA_VERSION,
-        "kind": SMART_CAMERA_NO_MOVE_KIND,
-        "notes": reason,
-    }
-    if focus_regions is not None:
-        payload["focus_regions"] = [
-            {
-                "t_norm": round(r.t_norm, 4),
-                "x_norm": round(r.x_norm, 4),
-                "y_norm": round(r.y_norm, 4),
-                "w_norm": round(r.w_norm, 4),
-                "h_norm": round(r.h_norm, 4),
-                "salience": round(r.salience, 4),
-            }
-            for r in focus_regions
-        ]
-    return payload
-
-
 def deserialise_directive(blob: dict[str, Any] | None) -> Directive | None:
     """Inverse of ``serialise_directive`` — used by the renderer to
     pick the camera move out of ``CutPlanSegment.smart_camera_json``
@@ -664,8 +690,6 @@ def deserialise_directive(blob: dict[str, Any] | None) -> Directive | None:
     if not isinstance(blob, dict):
         return None
     kind = blob.get("kind")
-    if kind == SMART_CAMERA_NO_MOVE_KIND:
-        return None
     if kind not in ("zoom_in", "zoom_out", "pan"):
         return None
     try:
@@ -715,10 +739,12 @@ async def plan_smart_camera(
     """Run smart-camera analysis over every cut in ``plan``.
 
     Returns a mapping ``{segment.order: smart_camera_json}`` containing
-    either a motivated movement directive or a ``kind="none"`` marker. The
-    no-op marker is load-bearing: it means this cut was analysed and should
-    not be re-queried on skip-plan renders just because no movement was
-    appropriate.
+    the directive dicts for every cut where Gemini Vision returned
+    usable focus_regions AND ``_derive_directive`` produced a non-None
+    move. Cuts that failed the Vision call or fell through to ``None``
+    are simply absent from the dict — the orchestrator should treat
+    "missing key" as "no camera move on that cut" so a partial Gemini
+    failure doesn't block the whole stage.
 
     Per cut, we sample up to ``MAX_FRAMES_PER_CUT`` JPEGs into a
     scratch sub-dir and rmtree it afterwards regardless of success
@@ -740,7 +766,6 @@ async def plan_smart_camera(
                     cut.order,
                     cut.asset_id,
                 )
-                out[cut.order] = serialise_no_move("source missing")
                 continue
             cut_scratch = scratch_dir / f"cut_{cut.order:04d}"
             try:
@@ -764,14 +789,10 @@ async def plan_smart_camera(
                     dominant_motion=getattr(cut, "dominant_motion", "static"),
                 )
                 if directive is None:
-                    out[cut.order] = serialise_no_move(
-                        "vision returned no motivated move",
-                        focus_regions=regions,
-                    )
-                else:
-                    blob = serialise_directive(directive, focus_regions=regions)
-                    if blob is not None:
-                        out[cut.order] = blob
+                    directive = _fallback_directive_for_cut(cut, reason="vision returned no move")
+                blob = serialise_directive(directive, focus_regions=regions)
+                if blob is not None:
+                    out[cut.order] = blob
                 logger.info(
                     "smart-camera: cut order=%d asset=%d → %s",
                     cut.order,
@@ -785,29 +806,37 @@ async def plan_smart_camera(
                     cut.asset_id,
                     exc,
                 )
-                out[cut.order] = serialise_no_move(type(exc).__name__)
+                directive = _fallback_directive_for_cut(cut, reason=type(exc).__name__)
+                blob = serialise_directive(directive)
+                if blob is not None:
+                    out[cut.order] = blob
             except Exception:  # noqa: BLE001 — never bring down the stage.
                 logger.exception(
                     "smart-camera: cut order=%d asset=%d unexpected error",
                     cut.order,
                     cut.asset_id,
                 )
-                out[cut.order] = serialise_no_move("unexpected error")
+                directive = _fallback_directive_for_cut(cut, reason="unexpected error")
+                blob = serialise_directive(directive)
+                if blob is not None:
+                    out[cut.order] = blob
             finally:
                 shutil.rmtree(cut_scratch, ignore_errors=True)
     return out
 
 
 def build_fallback_directives(plan: CutPlan, *, reason: str) -> dict[int, dict[str, Any]]:
-    """Record no-move markers when Vision cannot make a motivated choice.
+    """Build smart-camera directives without a Vision call.
 
-    The legacy name is kept for existing callers, but fallback no longer means
-    synthetic pan/zoom. Missing keys, quota failures, and stage errors should
-    keep the cut static or on the user's tracking target.
+    Used when the toggle is enabled but API keys are missing/exhausted before
+    sampling starts. The render still gets visible camera motion instead of
+    silently becoming a static crop.
     """
     out: dict[int, dict[str, Any]] = {}
     for cut in plan.segments:
-        out[cut.order] = serialise_no_move(reason)
+        blob = serialise_directive(_fallback_directive_for_cut(cut, reason=reason))
+        if blob is not None:
+            out[cut.order] = blob
     return out
 
 
@@ -859,7 +888,6 @@ __all__ = [
     "PAN_SCALE",
     "PAN_MAX_TIME_OVERLAP",
     "PAN_MIN_MEAN_T_DELTA",
-    "SMART_CAMERA_NO_MOVE_KIND",
     "SMART_CAMERA_SCHEMA_VERSION",
     "TRANSITION_OVERLAP_MS",
     "ZOOM_IN_AREA_MAX",
@@ -877,5 +905,4 @@ __all__ = [
     "deserialise_directive",
     "plan_smart_camera",
     "serialise_directive",
-    "serialise_no_move",
 ]
