@@ -1111,7 +1111,8 @@ def _cut_segment(
     duration_s = max(0.001, (cut.asset_end_ms - cut.asset_start_ms) / 1000.0)
     smart_blob = getattr(cut, "smart_camera_json", None)
     smart_blob_dict = smart_blob if isinstance(smart_blob, dict) else None
-    smart_camera_controls_cut = smart_camera_enabled and smart_blob_dict is not None
+    smart_kind = smart_blob_dict.get("kind") if smart_blob_dict is not None else None
+    smart_camera_controls_cut = smart_camera_enabled and smart_kind in SMART_CAMERA_KINDS
 
     vf_chain = aspect_filter(target_aspect, crop_region=crop_region)
     # v0.17 — auto-reframe input picks between three sources:
@@ -1203,10 +1204,10 @@ def _cut_segment(
             target_w, target_h = ASPECT_DIMENSIONS[target_aspect]
             vf_chain = auto_reframe.build_filter_chain(crop_path, sendcmd_path, target_w, target_h)
 
-    # v0.30.36 — Smart Camera owns the camera path for analysed cuts. A
-    # directive renders as Smart Camera replacement; an analysed no-move marker
-    # stays static/stabilized instead of falling through to tracking jitter.
-    # The v0.30.23 regression was the stacked tracking+zoompan path; full
+    # v0.30.37 — valid Smart Camera movement directives own the camera path.
+    # Analysed no-move markers keep the existing tracking/static fallback;
+    # forcing static+vidstab there reintroduced single-frame jumps on draft 49.
+    # The v0.30.23 regression was the stacked tracking+zoompan path; movement
     # replacement keeps one final camera transform.
     #
     # Smart-camera cuts are reported as dynamically reframed so the later
@@ -1244,7 +1245,7 @@ def _cut_segment(
         # canvas, so the static aspect step is redundant. Replace
         # the chain entirely with the zoompan-driven crop.
         vf_chain = smart_chain
-    elif crop_path is None and not smart_camera_controls_cut and _should_zoompan(cut):
+    elif crop_path is None and _should_zoompan(cut):
         # zoompan operates on its own canvas, so we run it AFTER the
         # aspect crop so the zoom centre is the cropped frame's centre
         # rather than the original asset's.
@@ -2190,7 +2191,9 @@ def render(
 
     tracking_post_indexes: set[int] = set()
     for i, cut in enumerate(plan.segments):
-        if smart_camera_enabled and isinstance(getattr(cut, "smart_camera_json", None), dict):
+        smart_blob = getattr(cut, "smart_camera_json", None)
+        smart_kind = smart_blob.get("kind") if isinstance(smart_blob, dict) else None
+        if smart_camera_enabled and smart_kind in SMART_CAMERA_KINDS:
             continue
         target_idx = (tracking_target_by_asset or {}).get(cut.asset_id)
         has_point = target_idx == -4 and (point_track_by_asset or {}).get(cut.asset_id) is not None

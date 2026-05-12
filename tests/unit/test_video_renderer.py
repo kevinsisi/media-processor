@@ -697,10 +697,10 @@ def test_smart_camera_overrides_custom_roi(tmp_path: Path, monkeypatch: pytest.M
     assert captured_filters == ["SMART_CAMERA_CHAIN"]
 
 
-def test_smart_camera_no_move_suppresses_tracking_fallback(
+def test_smart_camera_no_move_keeps_tracking_fallback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """An analysed static Smart Camera cut should not fall back to tracking jitter."""
+    """No-move Smart Camera cuts keep the smoother existing tracking fallback."""
     src = tmp_path / "asset.mp4"
     src.write_bytes(b"fake")
     plan = CutPlan(
@@ -740,6 +740,12 @@ def test_smart_camera_no_move_suppresses_tracking_fallback(
         "compute_crop_path_from_point_track",
         fake_compute_point_path,
     )
+    monkeypatch.setattr(video_renderer.auto_reframe, "write_sendcmd_file", lambda *args: None)
+    monkeypatch.setattr(
+        video_renderer.auto_reframe,
+        "build_filter_chain",
+        lambda *args, **kwargs: "POINT_TRACKING_CHAIN",
+    )
 
     def fake_run(cmd: list[str], *, timeout_s: float, stage: str) -> None:
         captured_filters.append(cmd[cmd.index("-vf") + 1])
@@ -758,9 +764,9 @@ def test_smart_camera_no_move_suppresses_tracking_fallback(
         smart_camera_enabled=True,
     )
 
-    assert reframed == [False]
-    assert tracking_calls == []
-    assert captured_filters == [video_renderer.aspect_filter("9:16")]
+    assert reframed == [True]
+    assert len(tracking_calls) == 2
+    assert captured_filters == ["POINT_TRACKING_CHAIN"]
 
 
 def test_explicit_tracking_uses_lower_jitter_source_compensated_candidate(
@@ -1333,10 +1339,10 @@ def test_render_end_to_end_fake(tmp_path: Path) -> None:
     assert "subtitles" in stages
 
 
-def test_render_smart_camera_no_move_tracking_cut_still_reaches_vidstab(
+def test_render_smart_camera_no_move_tracking_cut_keeps_tracking_post_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """No-move Smart Camera replacement should be static and eligible for vidstab."""
+    """No-move Smart Camera cuts are not treated as Smart Camera replacement."""
     src = tmp_path / "asset.mp4"
     src.write_bytes(b"fake")
     plan = CutPlan(
@@ -1381,9 +1387,11 @@ def test_render_smart_camera_no_move_tracking_cut_still_reaches_vidstab(
         scratch_dir=tmp_path / "scratch",
         stabilize=True,
         tracking_target_by_asset={1: -4},
-        point_track_by_asset={1: {"frames": [{"t_ms": 0, "x": 100, "y": 100}]}},
+        point_track_by_asset={
+            1: {"src_w": 1920, "src_h": 1080, "frames": [{"t_ms": 0, "x": 100, "y": 100}]}
+        },
         smart_camera_enabled=True,
     )
 
     assert captured["skip_indexes"] == set()
-    assert captured["tracking_post_indexes"] == set()
+    assert captured["tracking_post_indexes"] == {0}

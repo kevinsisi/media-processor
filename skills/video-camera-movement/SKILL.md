@@ -43,7 +43,7 @@ Use this skill to decide whether a video cut should move at all, what kind of mo
 - Do not infer pan from multiple focus clusters unless their time order forms a meaningful visual sentence.
 - Do not zoom into low-salience background, walls, furniture, or interior details unless the script/user intent explicitly makes that detail important.
 - Do not amplify tiny crop deltas. If motion is below the threshold where it reads as intentional, keep it static rather than creating subtle drift.
-- Do not stack Smart Camera over tracking. When Smart Camera is enabled and a cut has analysed Smart Camera JSON, use that one final decision: movement directive = Smart Camera replacement; `kind="none"` = static/stabilized no-move.
+- Do not stack Smart Camera over tracking. When Smart Camera is enabled and a cut has a valid movement directive, use Smart Camera replacement. Treat `kind="none"` as no movement directive, not as a mandate to discard a smoother tracking fallback.
 - Do not run stabilization over already-reframed AI motion unless the stabilization step is proven not to counteract the intended move.
 - Explicit point / ROI / picked-object tracking must feel like digital stabilization, not raw tracker lock, when Smart Camera is not replacing it. Preserve viewer comfort by smoothing high-frequency crop-path jitter before writing per-frame crop commands.
 - If frame-by-frame output analysis still shows high-frequency background/rotation shake after crop-path smoothing, apply a tracking-aware post-stabilization pass to explicit tracking cuts instead of further increasing Smart Camera motion or raw tracker gain.
@@ -54,8 +54,8 @@ Use this skill to decide whether a video cut should move at all, what kind of mo
 
 ## Priority Rules
 
-- Smart Camera enabled with analysed Smart Camera JSON has highest priority for the final camera path; movement directives replace explicit tracking and `kind="none"` suppresses tracking fallback.
-- When Smart Camera is disabled or a cut has not been analysed, explicit point tracking, custom ROI, and user-picked object tracking have highest priority.
+- Smart Camera enabled with a valid movement directive has highest priority for the final camera path; movement directives replace explicit tracking.
+- When Smart Camera is disabled, a cut has not been analysed, or Smart Camera returned `kind="none"`, explicit point tracking, custom ROI, and user-picked object tracking have highest priority.
 - Automatic YOLO tracking is a helper. Smart Camera may override it when saliency and story evidence are stronger.
 - Static aspect crop has no temporal intent. Smart Camera may replace or adjust it when a motivated directive exists.
 - Emotion zoompan is weaker than explicit visual evidence. Smart Camera may replace it, but only with a motivated move.
@@ -75,7 +75,7 @@ Use this skill to decide whether a video cut should move at all, what kind of mo
 - Overlay the vision focus boxes, final render crop window, and user tracking point/ROI on the same cut frames.
 - Measure frame-to-frame crop center and zoom deltas; inspect spikes and low-amplitude jitter numerically.
 - Compare raw footage motion and output motion at the same scaled width before blaming the source asset.
-- Verify the implemented mutex order against the intended order: Smart Camera analysed decision when enabled; otherwise explicit tracking > automatic YOLO > emotion zoompan.
+- Verify the implemented mutex order against the intended order: valid Smart Camera movement directive when enabled; otherwise explicit tracking > automatic YOLO > emotion zoompan.
 - Confirm whether stabilization is skipped for dynamically reframed cuts.
 - For explicit tracking cuts, confirm crop-path smoothing/deadband is active if vidstab is skipped.
 - For explicit tracking cuts that receive post-stabilization, measure actual output optical-flow jitter and adjacent-frame step jitter, including p99/near-maximum spikes, not only crop-command deltas or whole-cut p95.
