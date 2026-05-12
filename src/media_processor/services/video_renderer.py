@@ -363,7 +363,7 @@ def _should_zoompan(cut: CutPlanSegment) -> bool:
 # duration. The expression is pure ffmpeg ``-vf`` syntax — no
 # sendcmd file needed for zoom_in / zoom_out, and pan re-uses the
 # same expression form (just different from/to rectangles).
-SMART_CAMERA_KINDS: frozenset[str] = frozenset({"zoom_in", "zoom_out", "pan"})
+SMART_CAMERA_KINDS: frozenset[str] = frozenset({"zoom_in", "zoom_out", "pan", "none"})
 SMART_CAMERA_VISIBLE_ZOOM_IN_MIN: float = 1.85
 SMART_CAMERA_VISIBLE_ZOOM_OUT_MIN: float = 1.65
 SMART_CAMERA_VISIBLE_PAN_ZOOM_MIN: float = 1.65
@@ -459,8 +459,10 @@ def _smart_camera_filter(
     duration_s = max(0.001, float(duration_s))
     total_frames = max(1, int(round(duration_s * VIDEO_FPS)))
 
-    kind = str(directive_blob.get("kind", ""))
+    kind = str(directive_blob.get("kind", "none"))
     if kind not in SMART_CAMERA_KINDS:
+        return None
+    if kind == "none":
         return None
     try:
         from_rect = tuple(float(v) for v in directive_blob["from_rect"])
@@ -670,8 +672,14 @@ def _cut_segment(
     #   custom_roi  → user-drawn ROI tracked through CSRT
     #   tracking + tracking_object_index  → user-picked YOLO track
     #   tracking only → dominant YOLO track (historic default)
+    smart_blob = getattr(cut, "smart_camera_json", None)
+    smart_kind = str(smart_blob.get("kind", "none")) if isinstance(smart_blob, dict) else "none"
+    smart_camera_no_move = (
+        smart_camera_enabled and isinstance(smart_blob, dict) and smart_kind == "none"
+    )
+
     crop_path = None
-    if sendcmd_dir is not None:
+    if sendcmd_dir is not None and not smart_camera_no_move:
         # v0.23 — point_track wins over custom_roi which wins over
         # YOLO tracking. The dispatch reads the same way as the
         # ``tracked_object_index`` sentinel order: -4 (point) → -1
@@ -714,7 +722,6 @@ def _cut_segment(
     # Smart-camera cuts are reported as dynamically reframed so the later
     # vidstab stage skips them. Running vidstab after zoompan can interpret
     # the intentional camera move as shake and create a mid-cut correction shove.
-    smart_blob = getattr(cut, "smart_camera_json", None)
     smart_chain: str | None = None
     if smart_camera_enabled and isinstance(smart_blob, dict):
         try:
@@ -731,9 +738,14 @@ def _cut_segment(
                 cut.order,
             )
             smart_chain = None
-        if smart_chain is None and smart_blob.get("kind") in SMART_CAMERA_KINDS:
+        if smart_chain is None and smart_kind in SMART_CAMERA_KINDS and smart_kind != "none":
             logger.info(
                 "smart-camera: cut %d directive present but filter rejected; static fallback",
+                cut.order,
+            )
+        if smart_camera_no_move:
+            logger.info(
+                "smart-camera: cut %d no-move directive suppresses tracking and zoompan",
                 cut.order,
             )
     if smart_chain is not None and crop_path is not None:
@@ -746,6 +758,11 @@ def _cut_segment(
         # canvas, so the static aspect step is redundant. Replace
         # the chain entirely with the zoompan-driven crop.
         vf_chain = smart_chain
+    elif smart_camera_no_move:
+        # ``kind=none`` is an explicit Smart Camera decision: no AI move
+        # and no persisted tracking crop. Leave the static aspect chain so
+        # the later vidstab cleanup may still run when stabilization is on.
+        pass
     elif _should_zoompan(cut):
         # zoompan operates on its own canvas, so we run it AFTER the
         # aspect crop so the zoom centre is the cropped frame's centre

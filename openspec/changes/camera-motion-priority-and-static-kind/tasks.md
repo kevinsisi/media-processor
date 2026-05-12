@@ -141,3 +141,10 @@ own commit with green CI; the bundled PR squashes them.
   - [ ] If any canary regresses, stop and roll back. Do NOT chase a
     fix through additional micro-versions (the 0.30.23–0.30.37
     anti-pattern).
+
+- [x] T9 — 0.30.39 failed-canary correction: suppress stale tracking on Smart `none`
+  - [x] Confirmed `0.30.38` worsened rendered-video high-frequency motion versus raw/0.30.23 on draft `49` (`cut2_late`, `cut7`).
+  - [x] Identified root cause: persisted asset-level point tracks (`tracked_object_index=-4`) were treated as current render intent for every cut, so Smart Camera `kind="none"` fell through to direct point-tracking crop.
+  - [x] Restored schema-v3 `kind="none"` as a real no-move directive instead of deterministic fallback motion.
+  - [x] Renderer now treats `kind="none"` as static Smart Camera composition and suppresses stale tracking crop + emotion zoompan for that cut.
+  - [x] `kind="none"` does not set the reframed flag; later vidstab may still run as cleanup when stabilization is enabled.

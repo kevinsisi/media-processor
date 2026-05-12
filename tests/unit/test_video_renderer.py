@@ -295,6 +295,22 @@ def test_smart_camera_filter_rejects_malformed_directive() -> None:
     )
 
 
+def test_smart_camera_filter_returns_none_for_none_kind() -> None:
+    assert (
+        video_renderer._smart_camera_filter(
+            {
+                "kind": "none",
+                "from_rect": [0.0, 0.0, 1.0, 1.0],
+                "to_rect": [0.0, 0.0, 1.0, 1.0],
+                "ease": "linear",
+            },
+            "16:9",
+            2.0,
+        )
+        is None
+    )
+
+
 def test_smart_camera_filter_uses_exp_ease_when_requested() -> None:
     """ease=exp injects an exp-shaped progress expression."""
     chain = video_renderer._smart_camera_filter(
@@ -559,6 +575,76 @@ def test_smart_camera_overrides_explicit_tracking(
 
     assert reframed == [True]
     assert captured_filters == ["SMART_CAMERA_CHAIN"]
+
+
+def test_smart_camera_none_suppresses_stale_point_tracking(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A no-move Smart Camera decision must not expose persisted point tracking.
+
+    Draft 49 had point tracks on every asset. When Smart Camera stores
+    ``kind=none`` for a cut, that means static composition; the old point-track
+    row is not enough evidence that this render wants a tracking crop.
+    """
+    src = tmp_path / "asset.mp4"
+    src.write_bytes(b"fake")
+    plan = CutPlan(
+        schema_version="m5.cut-plan.v1",
+        target_duration_ms=1_000,
+        target_aspect_ratio="16:9",
+        profile_name="universal",
+        segments=(
+            CutPlanSegment(
+                0,
+                1,
+                0,
+                1_000,
+                "improv",
+                "",
+                dominant_emotion="happy",
+                dominant_motion="pan",
+                smart_camera_json={
+                    "kind": "none",
+                    "from_rect": [0.0, 0.0, 1.0, 1.0],
+                    "to_rect": [0.0, 0.0, 1.0, 1.0],
+                    "ease": "linear",
+                },
+            ),
+        ),
+    )
+    captured_filters: list[str] = []
+
+    def fail_point_track(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+        raise AssertionError("point tracking crop should be suppressed")
+
+    monkeypatch.setattr(
+        video_renderer.auto_reframe,
+        "compute_crop_path_from_point_track",
+        fail_point_track,
+    )
+
+    def fake_run(cmd: list[str], *, timeout_s: float, stage: str) -> None:
+        captured_filters.append(cmd[cmd.index("-vf") + 1])
+        Path(cmd[-1]).parent.mkdir(parents=True, exist_ok=True)
+        Path(cmd[-1]).write_bytes(b"")
+
+    monkeypatch.setattr(video_renderer, "_run", fake_run)
+
+    _paths, reframed = video_renderer.cut_segments(
+        plan,
+        asset_paths={1: src},
+        intermediate_dir=tmp_path / "out",
+        target_aspect="16:9",
+        tracking_target_by_asset={1: -4},
+        point_track_by_asset={1: {"frames": [{"t_ms": 0, "x": 100, "y": 100}]}},
+        smart_camera_enabled=True,
+        stabilize_enabled=True,
+    )
+
+    assert reframed == [False]
+    assert len(captured_filters) == 1
+    assert "zoompan=" not in captured_filters[0]
+    assert "crop@reframe" not in captured_filters[0]
 
 
 def test_stabilize_segment_uses_stable_vidstab_options(

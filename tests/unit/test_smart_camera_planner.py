@@ -62,7 +62,7 @@ def test_derive_pan_for_two_disjoint_clusters() -> None:
     assert directive.from_rect[0] < directive.to_rect[0]
 
 
-def test_derive_does_not_pan_for_simultaneous_clusters() -> None:
+def test_derive_returns_none_kind_for_simultaneous_clusters() -> None:
     """Simultaneous saliency boxes are composition, not a camera move."""
     regions = [
         _r(0.0, 0.25, 0.25, 0.50, 0.50),
@@ -75,17 +75,21 @@ def test_derive_does_not_pan_for_simultaneous_clusters() -> None:
         _r(1.0, 0.43, 0.60, 0.14, 0.05),
     ]
 
-    assert scp._derive_directive(regions, dominant_motion="static") is None
+    directive = scp._derive_directive(regions, dominant_motion="static")
+    assert directive.kind == "none"
+    assert "simultaneous" in directive.notes
 
 
-def test_derive_returns_none_when_mid_band_area() -> None:
-    """A single cluster with mean_area between 0.25 and 0.60 → None."""
+def test_derive_returns_none_kind_when_mid_band_area() -> None:
+    """A single cluster with mean_area between 0.25 and 0.60 → no move."""
     regions = [_r(0.0, 0.25, 0.25, 0.50, 0.50)]
-    assert scp._derive_directive(regions, dominant_motion="static") is None
+    directive = scp._derive_directive(regions, dominant_motion="static")
+    assert directive.kind == "none"
+    assert "mid-band" in directive.notes
 
 
-def test_fallback_directives_cover_every_cut() -> None:
-    """When Smart Camera is enabled but Vision has no move, every cut still moves."""
+def test_no_move_directives_cover_every_cut() -> None:
+    """When Smart Camera cannot run, every cut records an intentional no-move."""
     plan = CutPlan(
         schema_version="m5.cut-plan.v1",
         target_duration_ms=3000,
@@ -98,15 +102,17 @@ def test_fallback_directives_cover_every_cut() -> None:
         ),
     )
 
-    directives = scp.build_fallback_directives(plan, reason="unit test")
+    directives = scp.build_no_move_directives(plan, reason="unit test")
 
     assert sorted(directives) == [0, 1, 2]
-    assert {directives[i]["kind"] for i in directives} <= {"zoom_in", "zoom_out", "pan"}
-    assert all("fallback" in directives[i]["notes"] for i in directives)
+    assert {directives[i]["kind"] for i in directives} == {"none"}
+    assert all("no-move" in directives[i]["notes"] for i in directives)
 
 
-def test_derive_returns_none_for_empty_regions() -> None:
-    assert scp._derive_directive([], dominant_motion="static") is None
+def test_derive_returns_none_kind_for_empty_regions() -> None:
+    directive = scp._derive_directive([], dominant_motion="static")
+    assert directive.kind == "none"
+    assert "empty" in directive.notes
 
 
 def test_derive_uses_exp_ease_for_dynamic_motion() -> None:
@@ -136,6 +142,19 @@ def test_serialise_directive_round_trip() -> None:
         assert abs(a - b) < 1e-3
 
 
+def test_serialise_round_trip_none_kind() -> None:
+    directive = scp._derive_directive([], dominant_motion="static")
+    blob = scp.serialise_directive(directive)
+
+    assert isinstance(blob, dict)
+    assert blob["kind"] == "none"
+    assert blob["from_rect"] == [0.0, 0.0, 1.0, 1.0]
+    assert blob["to_rect"] == [0.0, 0.0, 1.0, 1.0]
+    rebuilt = scp.deserialise_directive(blob)
+    assert rebuilt is not None
+    assert rebuilt.kind == "none"
+
+
 def test_serialise_directive_none_returns_none() -> None:
     assert scp.serialise_directive(None) is None
 
@@ -145,8 +164,8 @@ def test_deserialise_rejects_malformed_blob() -> None:
     fall-through to the static crop branch resilient against corrupt
     persisted plans."""
     assert scp.deserialise_directive(None) is None
-    assert scp.deserialise_directive({}) is None
-    assert scp.deserialise_directive({"kind": "wibble"}) is None
+    assert scp.deserialise_directive({}).kind == "none"
+    assert scp.deserialise_directive({"kind": "wibble"}).kind == "none"
     assert scp.deserialise_directive({"kind": "zoom_in", "from_rect": [0, 0, 1]}) is None
 
 
