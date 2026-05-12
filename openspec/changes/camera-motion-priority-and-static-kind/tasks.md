@@ -141,3 +141,11 @@ own commit with green CI; the bundled PR squashes them.
   - [ ] If any canary regresses, stop and roll back. Do NOT chase a
     fix through additional micro-versions (the 0.30.23–0.30.37
     anti-pattern).
+
+- [x] T9 — v0.30.38 failed-canary follow-up
+  - [x] Root-cause draft 49 as all-assets persisted point tracking
+    (`tracked_object_index=-4`) causing raw crop paths and vidstab skips.
+  - [x] Smooth explicit point/custom/picked-object tracking crop paths
+    instead of exposing tracker micro-jitter as camera motion.
+  - [x] Prevent emotion `zoompan` from stacking after any tracking crop
+    path.

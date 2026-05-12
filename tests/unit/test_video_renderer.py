@@ -602,6 +602,63 @@ def test_explicit_tracking_overrides_smart_camera(
     assert captured_filters == ["EXPLICIT_TRACKING_CHAIN"]
 
 
+def test_tracking_crop_suppresses_emotion_zoompan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Do not stack emotion zoompan on top of a tracking crop path."""
+    src = tmp_path / "asset.mp4"
+    src.write_bytes(b"fake")
+    plan = CutPlan(
+        schema_version="m5.cut-plan.v1",
+        target_duration_ms=1_000,
+        target_aspect_ratio="9:16",
+        profile_name="universal",
+        segments=(
+            CutPlanSegment(
+                0,
+                1,
+                0,
+                1_000,
+                "improv",
+                "",
+                dominant_emotion="happy",
+                dominant_motion="handheld",
+            ),
+        ),
+    )
+    captured_filters: list[str] = []
+
+    monkeypatch.setattr(
+        video_renderer.auto_reframe,
+        "compute_crop_path",
+        lambda *args, **kwargs: [(0, 0, 1080, 1920)],
+    )
+    monkeypatch.setattr(video_renderer.auto_reframe, "write_sendcmd_file", lambda *args: None)
+    monkeypatch.setattr(
+        video_renderer.auto_reframe,
+        "build_filter_chain",
+        lambda *args, **kwargs: "TRACKING_CHAIN",
+    )
+
+    def fake_run(cmd: list[str], *, timeout_s: float, stage: str) -> None:
+        captured_filters.append(cmd[cmd.index("-vf") + 1])
+        Path(cmd[-1]).parent.mkdir(parents=True, exist_ok=True)
+        Path(cmd[-1]).write_bytes(b"")
+
+    monkeypatch.setattr(video_renderer, "_run", fake_run)
+
+    _paths, reframed = video_renderer.cut_segments(
+        plan,
+        asset_paths={1: src},
+        intermediate_dir=tmp_path / "out",
+        target_aspect="9:16",
+        tracking_by_asset={1: {"frames": []}},
+    )
+
+    assert reframed == [True]
+    assert captured_filters == ["TRACKING_CHAIN"]
+
+
 def test_stabilize_segment_uses_stable_vidstab_options(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

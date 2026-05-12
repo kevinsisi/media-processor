@@ -670,13 +670,23 @@ def _cut_segment(
                 asset_end_ms=cut.asset_end_ms,
             )
         elif tracking:
+            user_picked_object = tracking_object_index is not None
             crop_path = auto_reframe.compute_crop_path(
                 tracking,
                 target_aspect=target_aspect,
                 asset_start_ms=cut.asset_start_ms,
                 asset_end_ms=cut.asset_end_ms,
                 object_index=tracking_object_index,
-                smooth_camera_path=tracking_object_index is None,
+                smooth_camera_path=True,
+                smoothing_window_s=auto_reframe.USER_TRACKING_SMOOTHING_WINDOW_S
+                if user_picked_object
+                else auto_reframe.CROP_PATH_SMOOTHING_WINDOW_S,
+                deadband_px=auto_reframe.USER_TRACKING_DEADBAND_PX
+                if user_picked_object
+                else auto_reframe.CROP_PATH_DEADBAND_PX,
+                max_delta_px_per_frame=auto_reframe.USER_TRACKING_MAX_DELTA_PX_PER_FRAME
+                if user_picked_object
+                else auto_reframe.MAX_DELTA_PX_PER_FRAME,
             )
         if crop_path is not None:
             sendcmd_path = sendcmd_dir / f"reframe_seg_{cut.order:04d}.txt"
@@ -728,7 +738,7 @@ def _cut_segment(
         # canvas, so the static aspect step is redundant. Replace
         # the chain entirely with the zoompan-driven crop.
         vf_chain = smart_chain
-    elif _should_zoompan(cut):
+    elif crop_path is None and _should_zoompan(cut):
         # zoompan operates on its own canvas, so we run it AFTER the
         # aspect crop so the zoom centre is the cropped frame's centre
         # rather than the original asset's.

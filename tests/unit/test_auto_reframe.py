@@ -83,6 +83,39 @@ def test_compute_crop_path_can_keep_explicit_subject_lock_unsmoothed() -> None:
     assert _path_x_range(locked) > _path_x_range(smoothed) * 2
 
 
+def test_point_tracking_defaults_to_smoothed_user_camera_path() -> None:
+    """Point tracking is user intent, but it must not expose tracker micro-jitter."""
+    frames = []
+    for i in range(60):
+        frames.append(
+            {
+                "t_ms": i * 33,
+                "x": 960 + (50 if i % 2 else -50),
+                "y": 540,
+                "lost": False,
+            }
+        )
+    point_track = {"src_w": 1920, "src_h": 1080, "frames": frames}
+
+    smoothed = auto_reframe.compute_crop_path_from_point_track(
+        point_track,
+        target_aspect="16:9",
+        asset_start_ms=0,
+        asset_end_ms=2_000,
+    )
+    raw = auto_reframe.compute_crop_path_from_point_track(
+        point_track,
+        target_aspect="16:9",
+        asset_start_ms=0,
+        asset_end_ms=2_000,
+        smooth_camera_path=False,
+    )
+
+    assert smoothed is not None
+    assert raw is not None
+    assert _path_x_range(smoothed) < _path_x_range(raw) * 0.5
+
+
 def test_compute_crop_path_keeps_slow_pan_after_smoothing() -> None:
     """The anti-jitter pass should preserve intentional slow lateral motion."""
     frames = []
