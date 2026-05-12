@@ -697,6 +697,72 @@ def test_smart_camera_overrides_custom_roi(tmp_path: Path, monkeypatch: pytest.M
     assert captured_filters == ["SMART_CAMERA_CHAIN"]
 
 
+def test_smart_camera_no_move_suppresses_tracking_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An analysed static Smart Camera cut should not fall back to tracking jitter."""
+    src = tmp_path / "asset.mp4"
+    src.write_bytes(b"fake")
+    plan = CutPlan(
+        schema_version="m5.cut-plan.v1",
+        target_duration_ms=1_000,
+        target_aspect_ratio="9:16",
+        profile_name="universal",
+        segments=(
+            CutPlanSegment(
+                0,
+                1,
+                0,
+                1_000,
+                "improv",
+                "",
+                dominant_emotion="happy",
+                has_face=True,
+                smart_camera_json={"kind": "none"},
+            ),
+        ),
+    )
+    tracking_calls: list[object] = []
+    captured_filters: list[str] = []
+
+    def fake_compute_point_path(*args: object, **kwargs: object) -> object:
+        tracking_calls.append((args, kwargs))
+        return video_renderer.auto_reframe.CropPath(
+            crop_w=960,
+            crop_h=540,
+            src_w=1920,
+            src_h=1080,
+            points=[(0.0, 0, 0)],
+        )
+
+    monkeypatch.setattr(
+        video_renderer.auto_reframe,
+        "compute_crop_path_from_point_track",
+        fake_compute_point_path,
+    )
+
+    def fake_run(cmd: list[str], *, timeout_s: float, stage: str) -> None:
+        captured_filters.append(cmd[cmd.index("-vf") + 1])
+        Path(cmd[-1]).parent.mkdir(parents=True, exist_ok=True)
+        Path(cmd[-1]).write_bytes(b"")
+
+    monkeypatch.setattr(video_renderer, "_run", fake_run)
+
+    _paths, reframed = video_renderer.cut_segments(
+        plan,
+        asset_paths={1: src},
+        intermediate_dir=tmp_path / "out",
+        target_aspect="9:16",
+        tracking_target_by_asset={1: -4},
+        point_track_by_asset={1: {"frames": [{"t_ms": 0, "x": 100, "y": 100}]}},
+        smart_camera_enabled=True,
+    )
+
+    assert reframed == [False]
+    assert tracking_calls == []
+    assert captured_filters == [video_renderer.aspect_filter("9:16")]
+
+
 def test_explicit_tracking_uses_lower_jitter_source_compensated_candidate(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1265,3 +1331,59 @@ def test_render_end_to_end_fake(tmp_path: Path) -> None:
     assert "cut" in stages
     assert "concat" in stages
     assert "subtitles" in stages
+
+
+def test_render_smart_camera_no_move_tracking_cut_still_reaches_vidstab(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No-move Smart Camera replacement should be static and eligible for vidstab."""
+    src = tmp_path / "asset.mp4"
+    src.write_bytes(b"fake")
+    plan = CutPlan(
+        schema_version="m5.cut-plan.v1",
+        target_duration_ms=1_000,
+        target_aspect_ratio="9:16",
+        profile_name="universal",
+        segments=(
+            CutPlanSegment(0, 1, 0, 1_000, "improv", "", smart_camera_json={"kind": "none"}),
+        ),
+    )
+    captured: dict[str, object] = {}
+    real_stabilize_segments = video_renderer.stabilize_segments
+
+    def capture_stabilize_segments(
+        intermediate_paths: list[Path],
+        intermediate_dir: Path,
+        *,
+        on_progress: object | None = None,
+        skip_indexes: set[int] | None = None,
+        tracking_post_indexes: set[int] | None = None,
+    ) -> list[Path]:
+        captured["skip_indexes"] = skip_indexes
+        captured["tracking_post_indexes"] = tracking_post_indexes
+        return real_stabilize_segments(
+            intermediate_paths,
+            intermediate_dir,
+            on_progress=on_progress,  # type: ignore[arg-type]
+            skip_indexes=skip_indexes,
+            tracking_post_indexes=tracking_post_indexes,
+        )
+
+    monkeypatch.setattr(video_renderer, "stabilize_segments", capture_stabilize_segments)
+
+    video_renderer.render(
+        plan,
+        draft_id=1,
+        target_aspect="9:16",
+        asset_paths={1: src},
+        output_path=tmp_path / "drafts" / "1" / "v1.mp4",
+        srt_path=None,
+        scratch_dir=tmp_path / "scratch",
+        stabilize=True,
+        tracking_target_by_asset={1: -4},
+        point_track_by_asset={1: {"frames": [{"t_ms": 0, "x": 100, "y": 100}]}},
+        smart_camera_enabled=True,
+    )
+
+    assert captured["skip_indexes"] == set()
+    assert captured["tracking_post_indexes"] == set()

@@ -1109,6 +1109,9 @@ def _cut_segment(
     out_path.parent.mkdir(parents=True, exist_ok=True)
     start_s = cut.asset_start_ms / 1000.0
     duration_s = max(0.001, (cut.asset_end_ms - cut.asset_start_ms) / 1000.0)
+    smart_blob = getattr(cut, "smart_camera_json", None)
+    smart_blob_dict = smart_blob if isinstance(smart_blob, dict) else None
+    smart_camera_controls_cut = smart_camera_enabled and smart_blob_dict is not None
 
     vf_chain = aspect_filter(target_aspect, crop_region=crop_region)
     # v0.17 — auto-reframe input picks between three sources:
@@ -1120,7 +1123,7 @@ def _cut_segment(
     explicit_tracking_requested = bool(
         point_track is not None or custom_roi is not None or tracking_object_index is not None
     )
-    if sendcmd_dir is not None:
+    if sendcmd_dir is not None and not smart_camera_controls_cut:
         # v0.23 — point_track wins over custom_roi which wins over
         # YOLO tracking. The dispatch reads the same way as the
         # ``tracked_object_index`` sentinel order: -4 (point) → -1
@@ -1200,21 +1203,21 @@ def _cut_segment(
             target_w, target_h = ASPECT_DIMENSIONS[target_aspect]
             vf_chain = auto_reframe.build_filter_chain(crop_path, sendcmd_path, target_w, target_h)
 
-    # v0.30.35 — restore the v0.30.22 mutex: when Smart Camera is enabled,
-    # it replaces tracking crops instead of composing with them or letting raw
-    # tracker/source jitter drive the final camera. The v0.30.23 regression was
-    # the stacked tracking+zoompan path; full replacement keeps the stable
-    # Smart Camera motion and still avoids double-camera transforms.
+    # v0.30.36 — Smart Camera owns the camera path for analysed cuts. A
+    # directive renders as Smart Camera replacement; an analysed no-move marker
+    # stays static/stabilized instead of falling through to tracking jitter.
+    # The v0.30.23 regression was the stacked tracking+zoompan path; full
+    # replacement keeps one final camera transform.
     #
     # Smart-camera cuts are reported as dynamically reframed so the later
     # vidstab stage skips them. Running vidstab after zoompan can interpret
     # the intentional camera move as shake and create a mid-cut correction shove.
-    smart_blob = getattr(cut, "smart_camera_json", None)
     smart_chain: str | None = None
-    if smart_camera_enabled and isinstance(smart_blob, dict):
+    if smart_camera_controls_cut:
+        assert smart_blob_dict is not None
         try:
             smart_chain = _smart_camera_filter(
-                smart_blob,
+                smart_blob_dict,
                 target_aspect,
                 duration_s,
                 timeline_start_s=timeline_start_s,
@@ -1226,7 +1229,7 @@ def _cut_segment(
                 cut.order,
             )
             smart_chain = None
-        if smart_chain is None and smart_blob.get("kind") in SMART_CAMERA_KINDS:
+        if smart_chain is None and smart_blob_dict.get("kind") in SMART_CAMERA_KINDS:
             logger.info(
                 "smart-camera: cut %d directive present but filter rejected; static fallback",
                 cut.order,
@@ -1241,7 +1244,7 @@ def _cut_segment(
         # canvas, so the static aspect step is redundant. Replace
         # the chain entirely with the zoompan-driven crop.
         vf_chain = smart_chain
-    elif crop_path is None and _should_zoompan(cut):
+    elif crop_path is None and not smart_camera_controls_cut and _should_zoompan(cut):
         # zoompan operates on its own canvas, so we run it AFTER the
         # aspect crop so the zoom centre is the cropped frame's centre
         # rather than the original asset's.
@@ -2187,6 +2190,8 @@ def render(
 
     tracking_post_indexes: set[int] = set()
     for i, cut in enumerate(plan.segments):
+        if smart_camera_enabled and isinstance(getattr(cut, "smart_camera_json", None), dict):
+            continue
         target_idx = (tracking_target_by_asset or {}).get(cut.asset_id)
         has_point = target_idx == -4 and (point_track_by_asset or {}).get(cut.asset_id) is not None
         has_custom_roi = (
