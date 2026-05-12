@@ -493,10 +493,10 @@ def test_smart_camera_overrides_automatic_auto_reframe(
     assert captured_filters == ["SMART_CAMERA_CHAIN"]
 
 
-def test_explicit_picked_tracking_overrides_smart_camera(
+def test_smart_camera_overrides_explicit_picked_tracking(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """User-picked tracking targets must keep priority over Smart Camera."""
+    """Smart Camera replaces explicit tracking rather than stacking with it."""
     src = tmp_path / "asset.mp4"
     src.write_bytes(b"fake")
     plan = CutPlan(
@@ -560,13 +560,13 @@ def test_explicit_picked_tracking_overrides_smart_camera(
     )
 
     assert reframed == [True]
-    assert captured_filters == ["EXPLICIT_TRACKING_CHAIN"]
+    assert captured_filters == ["SMART_CAMERA_CHAIN"]
 
 
-def test_point_tracking_overrides_smart_camera(
+def test_smart_camera_overrides_point_tracking(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A selected centre point is explicit operator intent."""
+    """v0.30.22-style Smart Camera output stays steadier than raw point tracking."""
     src = tmp_path / "asset.mp4"
     src.write_bytes(b"fake")
     plan = CutPlan(
@@ -628,11 +628,11 @@ def test_point_tracking_overrides_smart_camera(
     )
 
     assert reframed == [True]
-    assert captured_filters == ["POINT_TRACKING_CHAIN"]
+    assert captured_filters == ["SMART_CAMERA_CHAIN"]
 
 
-def test_custom_roi_overrides_smart_camera(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A drawn tracking region is explicit operator intent."""
+def test_smart_camera_overrides_custom_roi(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Smart Camera replacement avoids composing a ROI crop with AI camera motion."""
     src = tmp_path / "asset.mp4"
     src.write_bytes(b"fake")
     plan = CutPlan(
@@ -694,7 +694,7 @@ def test_custom_roi_overrides_smart_camera(tmp_path: Path, monkeypatch: pytest.M
     )
 
     assert reframed == [True]
-    assert captured_filters == ["CUSTOM_ROI_CHAIN"]
+    assert captured_filters == ["SMART_CAMERA_CHAIN"]
 
 
 def test_explicit_tracking_uses_lower_jitter_source_compensated_candidate(

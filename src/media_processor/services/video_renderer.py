@@ -1200,18 +1200,18 @@ def _cut_segment(
             target_w, target_h = ASPECT_DIMENSIONS[target_aspect]
             vf_chain = auto_reframe.build_filter_chain(crop_path, sendcmd_path, target_w, target_h)
 
-    # Smart Camera is allowed to replace automatic YOLO reframing, but not
-    # explicit operator intent. Point tracking, custom ROI, and user-picked
-    # YOLO targets define what the viewer expects to keep watching; if those
-    # are present, keep that crop path (or static fallback if tracking failed)
-    # rather than switching targets to an AI saliency box.
+    # v0.30.35 — restore the v0.30.22 mutex: when Smart Camera is enabled,
+    # it replaces tracking crops instead of composing with them or letting raw
+    # tracker/source jitter drive the final camera. The v0.30.23 regression was
+    # the stacked tracking+zoompan path; full replacement keeps the stable
+    # Smart Camera motion and still avoids double-camera transforms.
     #
     # Smart-camera cuts are reported as dynamically reframed so the later
     # vidstab stage skips them. Running vidstab after zoompan can interpret
     # the intentional camera move as shake and create a mid-cut correction shove.
     smart_blob = getattr(cut, "smart_camera_json", None)
     smart_chain: str | None = None
-    if smart_camera_enabled and isinstance(smart_blob, dict) and not explicit_tracking_requested:
+    if smart_camera_enabled and isinstance(smart_blob, dict):
         try:
             smart_chain = _smart_camera_filter(
                 smart_blob,
@@ -1231,11 +1231,6 @@ def _cut_segment(
                 "smart-camera: cut %d directive present but filter rejected; static fallback",
                 cut.order,
             )
-    if smart_camera_enabled and isinstance(smart_blob, dict) and explicit_tracking_requested:
-        logger.info(
-            "smart-camera: cut %d skipped because explicit tracking is active",
-            cut.order,
-        )
     if smart_chain is not None and crop_path is not None:
         logger.info(
             "smart-camera: cut %d overrides automatic auto-reframe",
