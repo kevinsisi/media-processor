@@ -577,14 +577,15 @@ def test_smart_camera_overrides_explicit_tracking(
     assert captured_filters == ["SMART_CAMERA_CHAIN"]
 
 
-def test_smart_camera_none_suppresses_stale_point_tracking(
+def test_smart_camera_none_suppresses_stale_point_tracking_and_vidstab(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A no-move Smart Camera decision must not expose persisted point tracking.
 
     Draft 49 had point tracks on every asset. When Smart Camera stores
-    ``kind=none`` for a cut, that means static composition; the old point-track
-    row is not enough evidence that this render wants a tracking crop.
+    ``kind=none`` for a cut, that means no extra correction; the old point-track
+    row is not enough evidence that this render wants a tracking crop, and
+    vidstab must not add its own compensation move afterward.
     """
     src = tmp_path / "asset.mp4"
     src.write_bytes(b"fake")
@@ -641,7 +642,7 @@ def test_smart_camera_none_suppresses_stale_point_tracking(
         stabilize_enabled=True,
     )
 
-    assert reframed == [False]
+    assert reframed == [True]
     assert len(captured_filters) == 1
     assert "zoompan=" not in captured_filters[0]
     assert "crop@reframe" not in captured_filters[0]

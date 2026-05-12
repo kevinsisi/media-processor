@@ -642,13 +642,11 @@ def _cut_segment(
 ) -> bool:
     """Cut + scale-and-crop one segment to a uniform intermediate mp4.
 
-    Returns ``True`` when a dynamic ``crop@reframe`` chain was applied
-    (i.e. the segment is now subject-centred via point/custom/YOLO
-    tracking), ``False`` when the static aspect crop was used. The
-    caller uses this signal to decide whether to also apply vidstab —
-    a dynamic-cropped segment is already subject-stabilised, so a
-    second vidstab pass would just translate the (now fixed) subject
-    back off-centre (v0.23.4 fix).
+    Returns ``True`` when the cut must skip the later vidstab pass:
+    either a dynamic ``crop@reframe`` / Smart Camera chain was applied,
+    or Smart Camera explicitly decided ``kind=none``. The latter is not
+    dynamic reframing; it is a no-extra-correction decision, so vidstab
+    must not add a compensation move on top of it.
 
     Phase 8.1: when the cut's ``dominant_emotion`` is in
     ``ZOOMPAN_EMOTIONS`` we tack a ``zoompan`` filter onto the chain so
@@ -760,8 +758,8 @@ def _cut_segment(
         vf_chain = smart_chain
     elif smart_camera_no_move:
         # ``kind=none`` is an explicit Smart Camera decision: no AI move
-        # and no persisted tracking crop. Leave the static aspect chain so
-        # the later vidstab cleanup may still run when stabilization is on.
+        # and no persisted tracking crop. Leave only the static aspect chain;
+        # the return flag below also blocks vidstab from adding its own move.
         pass
     elif _should_zoompan(cut):
         # zoompan operates on its own canvas, so we run it AFTER the
@@ -803,7 +801,7 @@ def _cut_segment(
         str(out_path),
     ]
     _run(cmd, timeout_s=PER_SEGMENT_TIMEOUT_S, stage=f"cut(seg={cut.order})")
-    return crop_path is not None or smart_chain is not None
+    return crop_path is not None or smart_chain is not None or smart_camera_no_move
 
 
 def cut_segments(
@@ -824,10 +822,9 @@ def cut_segments(
 ) -> tuple[list[Path], list[bool]]:
     """Cut every segment in the plan; return ``(paths, reframed_flags)``.
 
-    ``reframed_flags[i]`` is ``True`` when segment i was rendered with a
-    dynamic crop path (point / custom_roi / YOLO tracking, or AI Smart
-    Camera). Callers thread this into ``stabilize_segments`` so a segment
-    that's already camera-directed doesn't get a second vidstab pass.
+    ``reframed_flags[i]`` is ``True`` when segment i must skip vidstab:
+    dynamic crop path / AI Smart Camera, or an explicit Smart Camera
+    ``kind=none`` no-correction decision.
 
     ``tracking_by_asset`` (when supplied) maps ``asset_id`` to its
     ``Asset.tracking_json`` dict; segments backed by an asset present in

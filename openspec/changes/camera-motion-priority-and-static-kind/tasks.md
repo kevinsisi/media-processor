@@ -88,10 +88,9 @@ own commit with green CI; the bundled PR squashes them.
       crop_path is not None` (this is automatic YOLO + Smart Camera):
       Smart Camera still wins, preserving v0.30.9 behaviour. Log
       `INFO` "smart-camera overrides automatic auto-reframe".
-    - [ ] `reframed_flags` value for the cut: `True` iff the segment was
-      rendered with a tracking chain OR a non-`none` Smart Camera
-      directive. A `kind="none"` directive does NOT set the flag (the
-      cut is static and vidstab MAY run if enabled).
+    - [ ] `reframed_flags` value for the cut: `True` iff the segment must
+      skip vidstab: tracking chain, non-`none` Smart Camera directive, or
+      a Smart Camera `kind="none"` no-extra-correction decision.
   - [ ] `tests/unit/test_video_renderer.py`:
     - [ ] Rename `test_smart_camera_overrides_explicit_tracking` →
       `test_explicit_tracking_overrides_smart_camera` and flip the
@@ -101,8 +100,8 @@ own commit with green CI; the bundled PR squashes them.
       wrong direction.)
     - [ ] Keep `test_smart_camera_overrides_automatic_auto_reframe`
       unchanged — automatic YOLO is not explicit tracking.
-    - [ ] Add `test_kind_none_does_not_set_reframed_flag` asserting
-      vidstab WILL run on a `kind="none"` cut when stabilize is
+    - [ ] Add `test_kind_none_sets_stabilization_skip_flag` asserting
+      vidstab does NOT run on a `kind="none"` cut when stabilize is
       enabled and no tracking is set.
 
 - [ ] T5 — Skill / contract docs
@@ -147,4 +146,9 @@ own commit with green CI; the bundled PR squashes them.
   - [x] Identified root cause: persisted asset-level point tracks (`tracked_object_index=-4`) were treated as current render intent for every cut, so Smart Camera `kind="none"` fell through to direct point-tracking crop.
   - [x] Restored schema-v3 `kind="none"` as a real no-move directive instead of deterministic fallback motion.
   - [x] Renderer now treats `kind="none"` as static Smart Camera composition and suppresses stale tracking crop + emotion zoompan for that cut.
-  - [x] `kind="none"` does not set the reframed flag; later vidstab may still run as cleanup when stabilization is enabled.
+  - [x] `kind="none"` did not set the reframed flag in `0.30.39`; later vidstab still ran as cleanup when stabilization was enabled. Superseded by T10 after the 11s canary exposed vidstab-induced drift.
+
+- [x] T10 — 0.30.40 failed-canary correction: Smart `none` also skips vidstab
+  - [x] Confirmed draft `49` around timeline `11.0–12.0s` regressed after render even though the raw asset window was already stable (`raw hf_p95 ~= 0.52`, rendered hf_p95 ~= 5.14).
+  - [x] Identified root cause: `kind="none"` suppressed tracking/zoompan but still returned the static-crop flag, so the later vidstab pass added a compensation move on a low-texture/high-glare no-move cut.
+  - [x] Renderer now treats Smart Camera `kind="none"` as a no-extra-correction decision for the stabilization skip flag too.
