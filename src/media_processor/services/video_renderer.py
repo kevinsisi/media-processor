@@ -363,11 +363,7 @@ def _should_zoompan(cut: CutPlanSegment) -> bool:
 # duration. The expression is pure ffmpeg ``-vf`` syntax — no
 # sendcmd file needed for zoom_in / zoom_out, and pan re-uses the
 # same expression form (just different from/to rectangles).
-SMART_CAMERA_KINDS: frozenset[str] = frozenset({"zoom_in", "zoom_out", "pan"})
-SMART_CAMERA_VISIBLE_ZOOM_IN_MIN: float = 1.85
-SMART_CAMERA_VISIBLE_ZOOM_OUT_MIN: float = 1.65
-SMART_CAMERA_VISIBLE_PAN_ZOOM_MIN: float = 1.65
-SMART_CAMERA_VISIBLE_PAN_GAIN: float = 1.50
+SMART_CAMERA_KINDS: frozenset[str] = frozenset({"zoom_in", "zoom_out", "pan", "none"})
 SMART_CAMERA_BEAT_SYNC_START_RATIO: float = 0.35
 SMART_CAMERA_BEAT_SYNC_TARGET_RATIO: float = 0.80
 SMART_CAMERA_BEAT_SYNC_END_RATIO: float = 0.95
@@ -459,8 +455,10 @@ def _smart_camera_filter(
     duration_s = max(0.001, float(duration_s))
     total_frames = max(1, int(round(duration_s * VIDEO_FPS)))
 
-    kind = str(directive_blob.get("kind", ""))
+    kind = str(directive_blob.get("kind", "none"))
     if kind not in SMART_CAMERA_KINDS:
+        kind = "none"
+    if kind == "none":
         return None
     try:
         from_rect = tuple(float(v) for v in directive_blob["from_rect"])
@@ -486,25 +484,6 @@ def _smart_camera_filter(
     t_cy = ty + th / 2.0
     f_zoom = 1.0 / max(fw, fh)
     t_zoom = 1.0 / max(tw, th)
-
-    # v0.30.22 — make AI Smart Camera visibly different. Existing stored
-    # v2 directives are still valid, but several were too gentle (especially
-    # fallback zooms around 1.16x and short pans). Boost render-time zoom/pan
-    # while keeping the original focus centres and beat-sync timing.
-    if kind == "zoom_in":
-        t_zoom = max(t_zoom, SMART_CAMERA_VISIBLE_ZOOM_IN_MIN)
-    elif kind == "zoom_out":
-        f_zoom = max(f_zoom, SMART_CAMERA_VISIBLE_ZOOM_OUT_MIN)
-    elif kind == "pan":
-        mid_cx = (f_cx + t_cx) / 2.0
-        mid_cy = (f_cy + t_cy) / 2.0
-        f_cx = max(0.0, min(1.0, mid_cx + (f_cx - mid_cx) * SMART_CAMERA_VISIBLE_PAN_GAIN))
-        f_cy = max(0.0, min(1.0, mid_cy + (f_cy - mid_cy) * SMART_CAMERA_VISIBLE_PAN_GAIN))
-        t_cx = max(0.0, min(1.0, mid_cx + (t_cx - mid_cx) * SMART_CAMERA_VISIBLE_PAN_GAIN))
-        t_cy = max(0.0, min(1.0, mid_cy + (t_cy - mid_cy) * SMART_CAMERA_VISIBLE_PAN_GAIN))
-        pan_zoom = max(f_zoom, t_zoom, SMART_CAMERA_VISIBLE_PAN_ZOOM_MIN)
-        f_zoom = pan_zoom
-        t_zoom = pan_zoom
 
     ease = str(directive_blob.get("ease", "linear"))
     if ease not in ("linear", "exp"):
@@ -705,18 +684,15 @@ def _cut_segment(
             target_w, target_h = ASPECT_DIMENSIONS[target_aspect]
             vf_chain = auto_reframe.build_filter_chain(crop_path, sendcmd_path, target_w, target_h)
 
-    # v0.30.16 — opt-in smart camera is literal: when the operator turns
-    # it on and a directive exists, it overrides every tracking crop path
-    # (automatic YOLO, picked YOLO object, custom ROI, or point track) plus
-    # emotion zoompan. Explicit tracking is still useful when Smart Camera
-    # is off; with Smart Camera on, the camera move must be visible.
-    #
-    # Smart-camera cuts are reported as dynamically reframed so the later
-    # vidstab stage skips them. Running vidstab after zoompan can interpret
-    # the intentional camera move as shake and create a mid-cut correction shove.
+    has_explicit_tracking = (
+        point_track is not None
+        or custom_roi is not None
+        or (tracking is not None and tracking_object_index is not None)
+    )
     smart_blob = getattr(cut, "smart_camera_json", None)
     smart_chain: str | None = None
-    if smart_camera_enabled and isinstance(smart_blob, dict):
+    smart_kind = str(smart_blob.get("kind", "none")) if isinstance(smart_blob, dict) else "none"
+    if smart_camera_enabled and isinstance(smart_blob, dict) and not has_explicit_tracking:
         try:
             smart_chain = _smart_camera_filter(
                 smart_blob,
@@ -731,11 +707,17 @@ def _cut_segment(
                 cut.order,
             )
             smart_chain = None
-        if smart_chain is None and smart_blob.get("kind") in SMART_CAMERA_KINDS:
+        if smart_chain is None and smart_kind in SMART_CAMERA_KINDS and smart_kind != "none":
             logger.info(
                 "smart-camera: cut %d directive present but filter rejected; static fallback",
                 cut.order,
             )
+    elif smart_camera_enabled and isinstance(smart_blob, dict) and has_explicit_tracking:
+        logger.info(
+            "explicit-tracking overrides Smart Camera on cut %d",
+            cut.order,
+        )
+
     if smart_chain is not None and crop_path is not None:
         logger.info(
             "smart-camera: cut %d overrides automatic auto-reframe",
@@ -808,9 +790,10 @@ def cut_segments(
     """Cut every segment in the plan; return ``(paths, reframed_flags)``.
 
     ``reframed_flags[i]`` is ``True`` when segment i was rendered with a
-    dynamic crop path (point / custom_roi / YOLO tracking, or AI Smart
-    Camera). Callers thread this into ``stabilize_segments`` so a segment
-    that's already camera-directed doesn't get a second vidstab pass.
+    dynamic crop path (point / custom_roi / YOLO tracking, or a non-none
+    AI Smart Camera move). Callers thread this into ``stabilize_segments``
+    so a segment that's already camera-directed doesn't get a second
+    vidstab pass.
 
     ``tracking_by_asset`` (when supplied) maps ``asset_id`` to its
     ``Asset.tracking_json`` dict; segments backed by an asset present in
