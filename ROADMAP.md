@@ -2,7 +2,7 @@
 
 > **單一定位**：沒有剪輯背景的小白也能「拍完就上傳，AI 直接給大量 IG / FB 短影音」的工具。
 > 目標 UX：手機優先、繁體中文、高級感、最少手動編輯。
-> 目前版本：**0.30.31**（M9.15.31 — 使用者追蹤 post-stab 納入 crop sidecar 候選與相鄰幀 step jitter，修正 13–14 秒局部大幅上下抖）
+> 目前版本：**0.30.32**（M9.15.32 — tracking post-stab 只要 measured score 變好即採用，修正 13–14 秒候選被 3% 門檻拒絕）
 > 下一個 milestone：M10 — 多專案批次 + 社群直接發布 + AI 自動縮圖。
 
 ## Phase 進度速覽
@@ -67,6 +67,7 @@
 | **M9.15.29** | **explicit tracking post-stabilization 改為 strong / steady 多 preset 實測擇優，cut 7 這類強穩定器過度修正時可改用較穩的 steady 版本** | ✅ done | **0.30.29** |
 | **M9.15.30** | **explicit tracking 渲染 measured steady-crop 候選（更長 smoothing / deadband / 更低 max-delta），逐 cut 用實際 output jitter 決定是否採用** | ✅ done | **0.30.30** |
 | **M9.15.31** | **explicit tracking post-stab 也評估 cropsteady/srcstab sidecar，並用相鄰幀 step jitter 捕捉被整段 p95 稀釋的局部大幅抖動** | ✅ done | **0.30.31** |
+| **M9.15.32** | **tracking post-stab 接受門檻改為 measured score 只要變好就採用，避免 cut 2 的 13–14 秒局部大抖候選被 3% 門檻擋掉** | ✅ done | **0.30.32** |
 | M10 | 多專案批次 + 社群直接發布 + AI 自動縮圖 | 🔮 future | 0.31.x+ |
 
 ---
