@@ -700,6 +700,8 @@ def test_custom_roi_overrides_smart_camera(tmp_path: Path, monkeypatch: pytest.M
 def test_explicit_tracking_uses_lower_jitter_source_compensated_candidate(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr(video_renderer, "TRACKING_SOURCE_COMPENSATION_ENABLED", True)
+
     src = tmp_path / "asset.mp4"
     src.write_bytes(b"fake")
     plan = CutPlan(
@@ -882,6 +884,8 @@ def test_stabilize_segment_uses_stable_vidstab_options(
 def test_tracking_post_stabilize_uses_stronger_vidstab_options(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr(video_renderer, "TRACKING_POST_STABILIZE_ENABLED", True)
+
     src = tmp_path / "seg_0000.mp4"
     src.write_bytes(b"fake")
     filters: list[str] = []
@@ -915,6 +919,8 @@ def test_tracking_post_stabilize_uses_stronger_vidstab_options(
 def test_tracking_post_stabilize_rejects_worse_jitter_score(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr(video_renderer, "TRACKING_POST_STABILIZE_ENABLED", True)
+
     src = tmp_path / "seg_0000.mp4"
     src.write_bytes(b"fake")
 
@@ -939,9 +945,41 @@ def test_tracking_post_stabilize_rejects_worse_jitter_score(
     assert out == [src]
 
 
+def test_tracking_post_stabilize_disabled_skips_expensive_vidstab(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    src = tmp_path / "seg_0000.mp4"
+    src.write_bytes(b"fake")
+    calls: list[list[str]] = []
+
+    def fake_run(cmd: list[str], *, timeout_s: float, stage: str) -> None:
+        calls.append(cmd)
+
+    monkeypatch.setattr(video_renderer, "TRACKING_POST_STABILIZE_ENABLED", False)
+    monkeypatch.setattr(video_renderer, "_run", fake_run)
+
+    out = video_renderer.stabilize_segments(
+        [src],
+        tmp_path,
+        skip_indexes=set(),
+        tracking_post_indexes={0},
+    )
+
+    assert out == [src]
+    assert calls == []
+
+
+def test_tracking_motion_score_counts_single_frame_spikes() -> None:
+    score = video_renderer.TrackingMotionScore(hf_p95=2.0, step_p95=3.0, step_p99=24.0)
+
+    assert score.selection_score == 24.0
+
+
 def test_tracking_post_stabilize_selects_best_measured_preset(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr(video_renderer, "TRACKING_POST_STABILIZE_ENABLED", True)
+
     src = tmp_path / "seg_0000.mp4"
     src.write_bytes(b"fake")
 
@@ -975,6 +1013,8 @@ def test_tracking_post_stabilize_can_select_stabilized_crop_sidecar(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A crop candidate can be worse alone but best after steady post-stab."""
+    monkeypatch.setattr(video_renderer, "TRACKING_POST_STABILIZE_ENABLED", True)
+
     src = tmp_path / "seg_0000.mp4"
     src.write_bytes(b"fake")
     cropsteady = tmp_path / "seg_0000.cropsteady.mp4"

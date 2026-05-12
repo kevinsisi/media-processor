@@ -47,8 +47,9 @@ Use this skill to decide whether a video cut should move at all, what kind of mo
 - Do not run stabilization over already-reframed AI motion unless the stabilization step is proven not to counteract the intended move.
 - Explicit point / ROI / picked-object tracking must feel like digital stabilization, not raw tracker lock. Preserve the stable v0.30.22-like viewer comfort by smoothing high-frequency crop-path jitter before writing per-frame crop commands.
 - If frame-by-frame output analysis still shows high-frequency background/rotation shake after crop-path smoothing, apply a tracking-aware post-stabilization pass to explicit tracking cuts instead of further increasing Smart Camera motion or raw tracker gain.
-- Tracking-aware post-stabilization must be accepted per cut based on measured output jitter. Render multiple measured crop-path / post-stabilization presets when needed; evaluate crop sidecars after post-stabilization, because a crop path can be worse alone but best after a steady stabilizer pass. If no candidate has a lower measured score than the original tracking crop, keep the original tracking crop.
-- If post-stabilization still leaves visible micro-jitter, render measured source-motion-compensated crop candidates before concat and choose the lower-jitter candidate per cut. Prefer candidate selection over one global magic stabilizer setting.
+- Tracking-aware post-stabilization is an expensive fallback, not the default production path. Only enable it behind a bounded/focused gate; never brute-force every explicit tracking cut in a normal render.
+- Tracking-aware post-stabilization must be accepted per cut based on measured output jitter, including adjacent-frame high-percentile spike checks. Reject candidates that improve p95 but introduce a single-frame shove.
+- If post-stabilization still leaves visible micro-jitter, measured source-motion-compensated crop candidates may be tested offline or behind a bounded gate. Prefer candidate selection over one global magic stabilizer setting, but do not ship unbounded multi-candidate searches.
 
 ## Priority Rules
 
@@ -75,7 +76,7 @@ Use this skill to decide whether a video cut should move at all, what kind of mo
 - Verify the implemented mutex order against the intended order: explicit tracking > Smart Camera > automatic YOLO > emotion zoompan.
 - Confirm whether stabilization is skipped for dynamically reframed cuts.
 - For explicit tracking cuts, confirm crop-path smoothing/deadband is active if vidstab is skipped.
-- For explicit tracking cuts that receive post-stabilization, measure actual output optical-flow jitter and adjacent-frame step jitter, not only crop-command deltas or whole-cut p95.
+- For explicit tracking cuts that receive post-stabilization, measure actual output optical-flow jitter and adjacent-frame step jitter, including p99/near-maximum spikes, not only crop-command deltas or whole-cut p95.
 - For explicit tracking cuts with measured steady-crop candidates, verify the accepted path improves actual output jitter and still preserves the requested target.
 - For post-stabilized tracking cuts, compare before/after jitter per cut and reject regressions instead of relying only on aggregate draft improvement.
 - For multi-preset post-stabilized tracking cuts, verify logs show the accepted preset and compare actual output scores, not assumed stabilizer strength.

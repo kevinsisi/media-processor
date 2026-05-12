@@ -264,6 +264,11 @@ TRACKING_POST_STABILIZE_MIN_IMPROVEMENT_RATIO: float = 0.0
 TRACKING_POST_STABILIZE_SCORE_WIDTH: int = 480
 TRACKING_POST_STABILIZE_SCORE_MAX_CORNERS: int = 800
 TRACKING_POST_STABILIZE_STEADY_SMOOTHING: int = 30
+# v0.30.33 — the exhaustive post-stab candidate search can turn a one-minute
+# draft into a 20+ minute render and can hide a single-frame correction shove
+# behind p95 metrics. Keep the code path testable, but do not use it in normal
+# production renders until it is narrowed to a bounded focused pass.
+TRACKING_POST_STABILIZE_ENABLED: bool = False
 TRACKING_POST_STABILIZE_PRESETS: tuple[StabilizePreset, ...] = (
     StabilizePreset(
         suffix="stab",
@@ -291,6 +296,7 @@ TRACKING_POST_STABILIZE_PRESETS: tuple[StabilizePreset, ...] = (
 # measured output-jitter segment.
 TRACKING_SOURCE_COMPENSATION_WINDOW_S: float = 1.60
 TRACKING_SOURCE_COMPENSATION_MIN_IMPROVEMENT_RATIO: float = 0.03
+TRACKING_SOURCE_COMPENSATION_ENABLED: bool = False
 TRACKING_SOURCE_COMPENSATION_GAINS: tuple[float, ...] = (1.0, -1.0)
 TRACKING_CROP_CANDIDATE_LABELS: tuple[str, ...] = (
     "cropsteady",
@@ -302,10 +308,11 @@ TRACKING_CROP_CANDIDATE_LABELS: tuple[str, ...] = (
 class TrackingMotionScore:
     hf_p95: float
     step_p95: float
+    step_p99: float = 0.0
 
     @property
     def selection_score(self) -> float:
-        return max(self.hf_p95, self.step_p95)
+        return max(self.hf_p95, self.step_p95, self.step_p99)
 
 
 class VideoRenderError(RuntimeError):
@@ -932,40 +939,43 @@ def _render_tracking_cut_with_source_candidates(
             best_score = candidate_score
             best_label = label
 
-    for candidate_i, gain in enumerate(TRACKING_SOURCE_COMPENSATION_GAINS):
-        source_candidate_crop_path = _source_motion_compensated_crop_path(
-            base_crop_path,
-            src,
-            start_s=start_s,
-            gain=gain,
-        )
-        if source_candidate_crop_path is None:
-            continue
-        candidate_sendcmd = sendcmd_dir / f"reframe_seg_{cut_order:04d}.srcstab{candidate_i}.txt"
-        auto_reframe.write_sendcmd_file(source_candidate_crop_path, candidate_sendcmd)
-        candidate_chain = auto_reframe.build_filter_chain(
-            source_candidate_crop_path,
-            candidate_sendcmd,
-            target_w,
-            target_h,
-        )
-        candidate_path = out_path.with_name(f"{out_path.stem}.srcstab{candidate_i}.mp4")
-        _render_cut_segment(
-            src,
-            candidate_path,
-            start_s=start_s,
-            duration_s=duration_s,
-            vf_chain=candidate_chain,
-            stage=f"cut-source-stabilize(seg={cut_order},candidate={candidate_i})",
-        )
-        candidate_score = _segment_tracking_motion_score(candidate_path)
-        if (
-            candidate_score is not None
-            and candidate_score.selection_score < best_score.selection_score
-        ):
-            best_path = candidate_path
-            best_score = candidate_score
-            best_label = f"srcstab{candidate_i}"
+    if TRACKING_SOURCE_COMPENSATION_ENABLED:
+        for candidate_i, gain in enumerate(TRACKING_SOURCE_COMPENSATION_GAINS):
+            source_candidate_crop_path = _source_motion_compensated_crop_path(
+                base_crop_path,
+                src,
+                start_s=start_s,
+                gain=gain,
+            )
+            if source_candidate_crop_path is None:
+                continue
+            candidate_sendcmd = (
+                sendcmd_dir / f"reframe_seg_{cut_order:04d}.srcstab{candidate_i}.txt"
+            )
+            auto_reframe.write_sendcmd_file(source_candidate_crop_path, candidate_sendcmd)
+            candidate_chain = auto_reframe.build_filter_chain(
+                source_candidate_crop_path,
+                candidate_sendcmd,
+                target_w,
+                target_h,
+            )
+            candidate_path = out_path.with_name(f"{out_path.stem}.srcstab{candidate_i}.mp4")
+            _render_cut_segment(
+                src,
+                candidate_path,
+                start_s=start_s,
+                duration_s=duration_s,
+                vf_chain=candidate_chain,
+                stage=f"cut-source-stabilize(seg={cut_order},candidate={candidate_i})",
+            )
+            candidate_score = _segment_tracking_motion_score(candidate_path)
+            if (
+                candidate_score is not None
+                and candidate_score.selection_score < best_score.selection_score
+            ):
+                best_path = candidate_path
+                best_score = candidate_score
+                best_label = f"srcstab{candidate_i}"
 
     required_score = base_score.selection_score * (
         1.0 - TRACKING_SOURCE_COMPENSATION_MIN_IMPROVEMENT_RATIO
@@ -1486,8 +1496,10 @@ def _segment_tracking_motion_score(path: Path) -> TrackingMotionScore | None:
         for (prev_dx, prev_dy), (dx, dy) in zip(vectors, vectors[1:], strict=False)
     ]
     hf_p95 = float(np.percentile(np.array(residuals, dtype=float), 95))
-    step_p95 = float(np.percentile(np.array(steps, dtype=float), 95)) if steps else hf_p95
-    return TrackingMotionScore(hf_p95=hf_p95, step_p95=step_p95)
+    step_values = np.array(steps, dtype=float)
+    step_p95 = float(np.percentile(step_values, 95)) if steps else hf_p95
+    step_p99 = float(np.percentile(step_values, 99)) if steps else step_p95
+    return TrackingMotionScore(hf_p95=hf_p95, step_p95=step_p95, step_p99=step_p99)
 
 
 def _segment_high_frequency_motion_score(path: Path) -> float | None:
@@ -1588,10 +1600,10 @@ def stabilize_segments(
     the concat list stays the same length and order.
 
     ``tracking_post_indexes`` (v0.30.26/v0.30.27/v0.30.29) are explicit user-tracking
-    cuts that should try a stronger post-stabilisation pass after tracking.
-    v0.30.27 scores before/after jitter and keeps the original tracking crop
-    when post-stabilisation makes a short cut worse. v0.30.29 renders both
-    strong and steadier post-stab presets and keeps the best measured output.
+    cuts that can try a stronger post-stabilisation pass after tracking when
+    ``TRACKING_POST_STABILIZE_ENABLED`` is enabled. The production default keeps
+    these cuts at the already-rendered tracking crop because the exhaustive
+    candidate pass proved too slow and can introduce a single-frame shove.
     """
     _require_ffmpeg()
     skip = skip_indexes or set()
@@ -1603,7 +1615,13 @@ def stabilize_segments(
             out.append(src)
         else:
             stab_dst = intermediate_dir / f"{src.stem}.stab.mp4"
-            if i in tracking_post:
+            if i in tracking_post and not TRACKING_POST_STABILIZE_ENABLED:
+                logger.info(
+                    "tracking-stabilize: skipped seg_%04d because bounded post-stab is disabled",
+                    i,
+                )
+                stab_dst = src
+            elif i in tracking_post:
                 candidates: list[Path] = []
                 candidate_sources = [src, *_tracking_crop_candidate_sources(src)]
                 for candidate_src in candidate_sources:
