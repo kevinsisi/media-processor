@@ -75,15 +75,17 @@ MAX_DELTA_PX_PER_FRAME: float = 24.0
 # constants so "follow this point/ROI/object" still feels like digital
 # stabilisation instead of raw tracker jitter. v0.30.30 adds a steadier
 # measured candidate for cuts where the normal explicit path still follows
-# too much high-frequency point/crop movement.
+# too much high-frequency point/crop movement. v0.30.34 makes that measured
+# candidate much lower-pass; the renderer rejects it if the requested target
+# would drift too far from the normal tracking crop.
 CROP_PATH_SMOOTHING_WINDOW_S: float = 1.40
 CROP_PATH_DEADBAND_PX: float = 2.0
 USER_TRACKING_SMOOTHING_WINDOW_S: float = 2.40
 USER_TRACKING_DEADBAND_PX: float = 3.0
 USER_TRACKING_MAX_DELTA_PX_PER_FRAME: float = 12.0
-USER_TRACKING_STEADY_SMOOTHING_WINDOW_S: float = 4.00
-USER_TRACKING_STEADY_DEADBAND_PX: float = 4.0
-USER_TRACKING_STEADY_MAX_DELTA_PX_PER_FRAME: float = 8.0
+USER_TRACKING_STEADY_SMOOTHING_WINDOW_S: float = 10.00
+USER_TRACKING_STEADY_DEADBAND_PX: float = 8.0
+USER_TRACKING_STEADY_MAX_DELTA_PX_PER_FRAME: float = 3.0
 
 # v0.16.1 — fraction of the maximum target-aspect window we actually
 # use for the dynamic crop. Shrinking below 1.0 zooms the subject in

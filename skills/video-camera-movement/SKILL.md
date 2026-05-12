@@ -50,6 +50,7 @@ Use this skill to decide whether a video cut should move at all, what kind of mo
 - Tracking-aware post-stabilization is an expensive fallback, not the default production path. Only enable it behind a bounded/focused gate; never brute-force every explicit tracking cut in a normal render.
 - Tracking-aware post-stabilization must be accepted per cut based on measured output jitter, including adjacent-frame high-percentile spike checks. Reject candidates that improve p95 but introduce a single-frame shove.
 - If post-stabilization still leaves visible micro-jitter, measured source-motion-compensated crop candidates may be tested offline or behind a bounded gate. Prefer candidate selection over one global magic stabilizer setting, but do not ship unbounded multi-candidate searches.
+- Low-pass tracking crop candidates may improve viewer comfort, but must be bounded by a target-drift guard against the normal explicit-tracking crop so they do not quietly stop following the user's requested point/ROI/object.
 
 ## Priority Rules
 
@@ -78,6 +79,7 @@ Use this skill to decide whether a video cut should move at all, what kind of mo
 - For explicit tracking cuts, confirm crop-path smoothing/deadband is active if vidstab is skipped.
 - For explicit tracking cuts that receive post-stabilization, measure actual output optical-flow jitter and adjacent-frame step jitter, including p99/near-maximum spikes, not only crop-command deltas or whole-cut p95.
 - For explicit tracking cuts with measured steady-crop candidates, verify the accepted path improves actual output jitter and still preserves the requested target.
+- For low-pass tracking crop candidates, verify the target-drift guard against the baseline crop path before trusting output jitter alone.
 - For post-stabilized tracking cuts, compare before/after jitter per cut and reject regressions instead of relying only on aggregate draft improvement.
 - For multi-preset post-stabilized tracking cuts, verify logs show the accepted preset and compare actual output scores, not assumed stabilizer strength.
 - For source-motion-compensated tracking cuts, verify the accepted candidate through actual output jitter metrics and logs showing accepted/rejected candidates.

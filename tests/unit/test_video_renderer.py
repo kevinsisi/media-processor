@@ -855,6 +855,88 @@ def test_explicit_tracking_uses_lower_jitter_steady_crop_candidate(
     assert paths[0].read_text(encoding="utf-8") == "CHAIN:reframe_seg_0000.cropsteady.txt"
 
 
+def test_explicit_tracking_rejects_steady_crop_that_drifts_too_far(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    src = tmp_path / "asset.mp4"
+    src.write_bytes(b"fake")
+    plan = CutPlan(
+        schema_version="m5.cut-plan.v1",
+        target_duration_ms=1_000,
+        target_aspect_ratio="16:9",
+        profile_name="universal",
+        segments=(CutPlanSegment(0, 1, 0, 1_000, "improv", ""),),
+    )
+    base_path = video_renderer.auto_reframe.CropPath(
+        crop_w=960,
+        crop_h=540,
+        src_w=1920,
+        src_h=1080,
+        points=[(0.0, 100, 100), (0.0333, 100, 100), (0.0667, 100, 100)] * 4,
+    )
+    drifting_path = video_renderer.auto_reframe.CropPath(
+        crop_w=960,
+        crop_h=540,
+        src_w=1920,
+        src_h=1080,
+        points=[(0.0, 220, 220), (0.0333, 220, 220), (0.0667, 220, 220)] * 4,
+    )
+
+    def fake_compute_point_path(*args: object, **kwargs: object) -> object:
+        if (
+            kwargs.get("smoothing_window_s")
+            == video_renderer.auto_reframe.USER_TRACKING_STEADY_SMOOTHING_WINDOW_S
+        ):
+            return drifting_path
+        return base_path
+
+    monkeypatch.setattr(
+        video_renderer.auto_reframe,
+        "compute_crop_path_from_point_track",
+        fake_compute_point_path,
+    )
+    monkeypatch.setattr(
+        video_renderer,
+        "TRACKING_CROP_CANDIDATE_MAX_CENTER_ERROR_PX",
+        96.0,
+    )
+    monkeypatch.setattr(
+        video_renderer,
+        "_source_motion_compensated_crop_path",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        video_renderer.auto_reframe,
+        "build_filter_chain",
+        lambda crop_path, sendcmd_path, *_args: f"CHAIN:{sendcmd_path.name}",
+    )
+    monkeypatch.setattr(
+        video_renderer,
+        "_segment_tracking_motion_score",
+        lambda path: video_renderer.TrackingMotionScore(hf_p95=1.0, step_p95=1.0),
+    )
+
+    def fake_run(cmd: list[str], *, timeout_s: float, stage: str) -> None:
+        out = Path(cmd[-1])
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(cmd[cmd.index("-vf") + 1], encoding="utf-8")
+
+    monkeypatch.setattr(video_renderer, "_run", fake_run)
+
+    paths, reframed = video_renderer.cut_segments(
+        plan,
+        asset_paths={1: src},
+        intermediate_dir=tmp_path / "out",
+        target_aspect="16:9",
+        tracking_target_by_asset={1: -4},
+        point_track_by_asset={1: {"frames": [{"t_ms": 0, "x": 100, "y": 100}]}},
+        stabilize_enabled=True,
+    )
+
+    assert reframed == [True]
+    assert paths[0].read_text(encoding="utf-8") == "CHAIN:reframe_seg_0000.txt"
+
+
 def test_stabilize_segment_uses_stable_vidstab_options(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

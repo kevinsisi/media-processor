@@ -298,6 +298,7 @@ TRACKING_SOURCE_COMPENSATION_WINDOW_S: float = 1.60
 TRACKING_SOURCE_COMPENSATION_MIN_IMPROVEMENT_RATIO: float = 0.03
 TRACKING_SOURCE_COMPENSATION_ENABLED: bool = False
 TRACKING_SOURCE_COMPENSATION_GAINS: tuple[float, ...] = (1.0, -1.0)
+TRACKING_CROP_CANDIDATE_MAX_CENTER_ERROR_PX: float = 96.0
 TRACKING_CROP_CANDIDATE_LABELS: tuple[str, ...] = (
     "cropsteady",
     *(f"srcstab{i}" for i, _gain in enumerate(TRACKING_SOURCE_COMPENSATION_GAINS)),
@@ -882,6 +883,49 @@ def _source_motion_compensated_crop_path(
     )
 
 
+def _crop_path_candidate_center_error_px(
+    base: auto_reframe.CropPath,
+    candidate: auto_reframe.CropPath,
+    *,
+    target_w: int,
+    target_h: int,
+) -> float | None:
+    """Estimate how far a smoother crop lets the requested target drift.
+
+    The baseline explicit-tracking crop keeps the point/ROI/object near output
+    center. A lower-pass candidate is allowed to be steadier, but only while it
+    stays close enough to that baseline target lock.
+    """
+    if (
+        base.crop_w <= 0
+        or base.crop_h <= 0
+        or candidate.crop_w != base.crop_w
+        or candidate.crop_h != base.crop_h
+        or not base.points
+        or not candidate.points
+    ):
+        return None
+    scale_x = target_w / float(base.crop_w)
+    scale_y = target_h / float(base.crop_h)
+    distances: list[float] = []
+    for (_base_t, base_x, base_y), (_candidate_t, candidate_x, candidate_y) in zip(
+        base.points,
+        candidate.points,
+        strict=False,
+    ):
+        distances.append(
+            (
+                ((float(candidate_x - base_x) * scale_x) ** 2)
+                + ((float(candidate_y - base_y) * scale_y) ** 2)
+            )
+            ** 0.5
+        )
+    distances.sort()
+    if not distances:
+        return None
+    return distances[min(len(distances) - 1, int(round((len(distances) - 1) * 0.95)))]
+
+
 def _render_tracking_cut_with_source_candidates(
     src: Path,
     out_path: Path,
@@ -913,6 +957,24 @@ def _render_tracking_cut_with_source_candidates(
     best_score = base_score
     best_label = "baseline"
     for label, candidate_crop_path in crop_path_candidates or []:
+        center_error_px = _crop_path_candidate_center_error_px(
+            base_crop_path,
+            candidate_crop_path,
+            target_w=target_w,
+            target_h=target_h,
+        )
+        if (
+            center_error_px is not None
+            and center_error_px > TRACKING_CROP_CANDIDATE_MAX_CENTER_ERROR_PX
+        ):
+            logger.info(
+                "tracking-candidate: skipped %s seg_%04d because target drift %.1fpx exceeds %.1fpx",
+                label,
+                cut_order,
+                center_error_px,
+                TRACKING_CROP_CANDIDATE_MAX_CENTER_ERROR_PX,
+            )
+            continue
         candidate_sendcmd = sendcmd_dir / f"reframe_seg_{cut_order:04d}.{label}.txt"
         auto_reframe.write_sendcmd_file(candidate_crop_path, candidate_sendcmd)
         candidate_chain = auto_reframe.build_filter_chain(

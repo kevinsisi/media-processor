@@ -2,7 +2,7 @@
 
 > **單一定位**：沒有剪輯背景的小白也能「拍完就上傳，AI 直接給大量 IG / FB 短影音」的工具。
 > 目標 UX：手機優先、繁體中文、高級感、最少手動編輯。
-> 目前版本：**0.30.33**（M9.15.33 — 停用昂貴 tracking post-stab brute force，並用 step p99 spike guard 防止單幀大跳被 p95 掩蓋）
+> 目前版本：**0.30.34**（M9.15.34 — 加強 measured steady tracking crop 低通，並用 target-drift guard 防止穩定候選跟丟使用者指定目標）
 > 下一個 milestone：M10 — 多專案批次 + 社群直接發布 + AI 自動縮圖。
 
 ## Phase 進度速覽
@@ -69,6 +69,7 @@
 | **M9.15.31** | **explicit tracking post-stab 也評估 cropsteady/srcstab sidecar，並用相鄰幀 step jitter 捕捉被整段 p95 稀釋的局部大幅抖動** | ✅ done | **0.30.31** |
 | **M9.15.32** | **tracking post-stab 接受門檻改為 measured score 只要變好就採用，避免 cut 2 的 13–14 秒局部大抖候選被 3% 門檻擋掉** | ✅ done | **0.30.32** |
 | **M9.15.33** | **停用 production tracking post-stab/source-compensation brute force，避免 1 分鐘影片跑 20+ 分鐘；motion score 加入 step p99，拒絕會製造單幀大跳的穩定化候選** | ✅ done | **0.30.33** |
+| **M9.15.34** | **measured steady tracking crop 改用更強低通來壓 13–14 秒規律上下跳，候選採用前檢查相對 baseline 的目標漂移不超限** | ✅ done | **0.30.34** |
 | M10 | 多專案批次 + 社群直接發布 + AI 自動縮圖 | 🔮 future | 0.31.x+ |
 
 ---
