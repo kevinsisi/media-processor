@@ -2,8 +2,8 @@
 
 > **單一定位**：沒有剪輯背景的小白也能「拍完就上傳，AI 直接給大量 IG / FB 短影音」的工具。
 > 目標 UX：手機優先、繁體中文、高級感、最少手動編輯。
-> 目前版本：**0.41.2**（M9.17.2 — 分析頁直接告訴使用者現在該開始剪輯、預覽成品，還是等分析/防抖）
-> 下一個 milestone：M10 — 多專案批次 + 社群直接發布 + AI 自動縮圖。
+> 目前版本：**0.42.0**（M10.0 — 正式入口雙模式：一鍵自動產生 / 自己調素材與片段）
+> 下一個 milestone：M10.1 — 多專案批次 + 社群直接發布 + AI 自動縮圖。
 
 > **2026-05-13 camera-motion note**：`0.30.23` 到 `0.30.38` 的 camera-motion 修補已被否決；`0.30.39`/`0.30.40` 只保留 Smart Camera `none` 不套殘留 tracking / vidstab 的 no-extra-correction 修正。`0.40.0` 改走素材級 raw / stabilized 版本工作流，未來運鏡 / 焦點追蹤 / 數位防手震變更必須先遵守 `skills/video-camera-movement/SKILL.md`。
 
@@ -68,7 +68,8 @@
 | **M9.17** | **專案 fork：複製 project settings / script / assets / analysis metadata / source files，排除 rendered drafts，讓實驗不影響原專案** | ✅ done | **0.41.0** |
 | **M9.17.1** | **素材防抖批次送出：ProjectAnalysis 一鍵送出所有未完成/失敗素材的防抖處理，避免逐卡操作** | ✅ done | **0.41.1** |
 | **M9.17.2** | **分析頁下一步提示：直接告訴使用者現在可開始剪輯、可先預覽成品，或需等待分析完成；若防抖仍在跑也說清楚** | ✅ done | **0.41.2** |
-| M10 | 多專案批次 + 社群直接發布 + AI 自動縮圖 | 🔮 future | 0.31.x+ |
+| **M10.0** | **正式入口雙模式：ProjectList / Upload 直接提供一鍵自動產生與自己調素材 / 片段，並保留可互動 redesign prototype** | ✅ done | **0.42.0** |
+| M10.1 | 多專案批次 + 社群直接發布 + AI 自動縮圖 | 🔮 future | 0.42.x+ |
 
 ---
 

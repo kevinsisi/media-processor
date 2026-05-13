@@ -78,6 +78,8 @@ export default function Upload() {
   const [scriptDirty, setScriptDirty] = useState(false);
   const [scriptSaving, setScriptSaving] = useState(false);
   const [scriptError, setScriptError] = useState<string | null>(null);
+  const [autoTriggering, setAutoTriggering] = useState(false);
+  const [autoTriggerError, setAutoTriggerError] = useState<string | null>(null);
   const scriptDebounceRef = useRef<number | null>(null);
   const scriptSaveSeqRef = useRef(0);
   const latestScriptRef = useRef({
@@ -371,6 +373,36 @@ export default function Upload() {
     navigate(`/projects/${projectId}/assets`);
   };
 
+  const handleAutoGenerate = async (): Promise<void> => {
+    if (
+      assetCount === 0 ||
+      pendingUploadCount > 0 ||
+      scriptSaving ||
+      !scriptInitialLoaded ||
+      autoTriggering
+    ) {
+      return;
+    }
+    setAutoTriggering(true);
+    setAutoTriggerError(null);
+    try {
+      const saved = await saveScriptNow();
+      if (!saved) return;
+      await apiClient.triggerProjectEdit(projectId, {
+        stabilize: false,
+        subtitles: true,
+        transitions: true,
+        auto_reframe: true,
+        style_preset: "commercial",
+      });
+      navigate(`/projects/${projectId}/edit`);
+    } catch (err) {
+      setAutoTriggerError(err instanceof Error ? err.message : "一鍵產生失敗");
+    } finally {
+      setAutoTriggering(false);
+    }
+  };
+
   if (Number.isNaN(projectId)) {
     return (
       <main className="page upload">
@@ -549,6 +581,11 @@ export default function Upload() {
             {scriptError}
           </p>
         )}
+        {autoTriggerError && (
+          <p className="upload-error" role="alert">
+            一鍵產生失敗 · {autoTriggerError}
+          </p>
+        )}
       </section>
 
       {/* Summary */}
@@ -602,16 +639,29 @@ export default function Upload() {
               等待 {pendingUploadCount} 個影片上傳完成…
             </button>
           ) : (
-            <button
-              type="button"
-              className="cta cta--primary summary-next"
-              onClick={() => void handleNextStep()}
-              disabled={scriptSaving || !scriptInitialLoaded}
-            >
-              {scriptSaving
-                ? "正在保存腳本…"
-                : `下一步：查看素材檢查（${assetCount} 個素材）→`}
-            </button>
+            <div className="summary-path-actions">
+              <button
+                type="button"
+                className="cta cta--primary summary-next summary-next--auto"
+                onClick={() => void handleAutoGenerate()}
+                disabled={scriptSaving || !scriptInitialLoaded || autoTriggering}
+                aria-busy={autoTriggering}
+              >
+                {autoTriggering
+                  ? "一鍵排程中…"
+                  : `一鍵自動產生短影音（${assetCount} 個素材）→`}
+              </button>
+              <button
+                type="button"
+                className="summary-next summary-next--manual"
+                onClick={() => void handleNextStep()}
+                disabled={scriptSaving || !scriptInitialLoaded || autoTriggering}
+              >
+                {scriptSaving
+                  ? "正在保存腳本…"
+                  : "我要自己調素材與片段 →"}
+              </button>
+            </div>
           )}
         </div>
       </section>

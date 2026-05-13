@@ -51,14 +51,42 @@ function ForkButton({
   );
 }
 
+function AutoDraftButton({
+  generating,
+  disabled,
+  onAuto,
+  children = "一鍵自動產生 →",
+}: {
+  generating: boolean;
+  disabled?: boolean;
+  onAuto: () => void;
+  children?: string;
+}) {
+  return (
+    <button
+      type="button"
+      className="cta cta--primary cta--auto"
+      onClick={onAuto}
+      disabled={generating || disabled}
+      aria-busy={generating}
+    >
+      {generating ? "排程中…" : children}
+    </button>
+  );
+}
+
 function StatusCell({
   project,
   forking,
+  autoGenerating,
   onFork,
+  onAuto,
 }: {
   project: ProjectSummary;
   forking: boolean;
+  autoGenerating: boolean;
   onFork: () => void;
+  onAuto: () => void;
 }) {
   // v0.22 — drafted/approved both mean "there is at least one rendered
   // mp4 ready"; ProjectEdit is the page that actually plays it (the
@@ -76,6 +104,9 @@ function StatusCell({
         <Link to={`/projects/${project.id}/edit`} className="cta cta--primary">
           預覽 / 下載 →
         </Link>
+        <AutoDraftButton generating={autoGenerating} onAuto={onAuto}>
+          再一鍵產生 →
+        </AutoDraftButton>
         <ForkButton forking={forking} onFork={onFork} />
       </div>
     );
@@ -98,6 +129,9 @@ function StatusCell({
         <Link to={`/projects/${project.id}/assets`} className="cta cta--quiet">
           查看進度 →
         </Link>
+        <AutoDraftButton generating={autoGenerating} onAuto={onAuto}>
+          一鍵排成品 →
+        </AutoDraftButton>
         <ForkButton forking={forking} onFork={onFork} />
       </div>
     );
@@ -113,6 +147,25 @@ function StatusCell({
         <Link to={`/projects/${project.id}/edit`} className="cta cta--quiet">
           開啟 →
         </Link>
+        <AutoDraftButton generating={autoGenerating} onAuto={onAuto}>
+          再一鍵產生 →
+        </AutoDraftButton>
+        <ForkButton forking={forking} onFork={onFork} />
+      </div>
+    );
+  }
+
+  if (project.asset_count > 0) {
+    return (
+      <div className="status-cell status-cell--split">
+        <div className="status-line">
+          <span className="dot dot--gold" />
+          <span className="status-text">可以選自動或自己調素材</span>
+        </div>
+        <AutoDraftButton generating={autoGenerating} onAuto={onAuto} />
+        <Link to={`/projects/${project.id}/assets`} className="cta cta--quiet">
+          自己調素材 / 片段 →
+        </Link>
         <ForkButton forking={forking} onFork={onFork} />
       </div>
     );
@@ -126,6 +179,9 @@ function StatusCell({
           {STATUS_LABEL[project.status] ?? project.status}
         </span>
       </div>
+      <Link to={`/projects/${project.id}/upload`} className="cta cta--primary">
+        上傳素材 →
+      </Link>
       <ForkButton forking={forking} onFork={onFork} />
     </div>
   );
@@ -135,7 +191,9 @@ export default function ProjectList() {
   const { data: projects, error, loading, refetch } = useProjects();
   const navigate = useNavigate();
   const [forkingProjectId, setForkingProjectId] = useState<number | null>(null);
+  const [autoProjectId, setAutoProjectId] = useState<number | null>(null);
   const [forkError, setForkError] = useState<string | null>(null);
+  const [autoError, setAutoError] = useState<string | null>(null);
   const list = projects ?? [];
 
   const goToProject = (project: ProjectSummary, ev: React.SyntheticEvent) => {
@@ -174,6 +232,26 @@ export default function ProjectList() {
     }
   };
 
+  const autoGenerateProject = async (project: ProjectSummary) => {
+    if (autoProjectId !== null || project.asset_count === 0) return;
+    setAutoProjectId(project.id);
+    setAutoError(null);
+    try {
+      await apiClient.triggerProjectEdit(project.id, {
+        stabilize: false,
+        subtitles: true,
+        transitions: true,
+        auto_reframe: true,
+        style_preset: "commercial",
+      });
+      navigate(`/projects/${project.id}/edit`);
+    } catch (e) {
+      setAutoError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setAutoProjectId(null);
+    }
+  };
+
   return (
     <main className="page projects">
       <section className="hero">
@@ -209,6 +287,12 @@ export default function ProjectList() {
         {forkError && (
           <div className="board__notice" role="alert">
             <span className="mono">複製失敗 · {forkError}</span>
+          </div>
+        )}
+
+        {autoError && (
+          <div className="board__notice" role="alert">
+            <span className="mono">一鍵產生失敗 · {autoError}</span>
           </div>
         )}
 
@@ -267,7 +351,9 @@ export default function ProjectList() {
               <StatusCell
                 project={p}
                 forking={forkingProjectId === p.id}
+                autoGenerating={autoProjectId === p.id}
                 onFork={() => void forkProject(p)}
+                onAuto={() => void autoGenerateProject(p)}
               />
             </li>
           ))}

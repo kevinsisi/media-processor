@@ -2,7 +2,7 @@
 
 Content factory pipeline for novice-friendly Instagram and Facebook short-video production.
 
-**Status:** v0.30.19 / M9.15.19 — Smart Camera segments skip vidstab to prevent mid-cut correction shoves.
+**Status:** v0.42.0 / M10.0 — Production dual-path entry points plus interactive redesign prototype.
 
 ## Spec
 
