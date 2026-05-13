@@ -2,7 +2,7 @@
 
 Content factory pipeline for novice-friendly Instagram and Facebook short-video production.
 
-**Status:** v0.42.0 / M10.0 — Production dual-path entry points plus interactive redesign prototype.
+**Status:** v0.42.1 / M10.1 — ProjectAnalysis manual decision hub for material readiness and next actions.
 
 ## Spec
 

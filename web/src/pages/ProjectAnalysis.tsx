@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { ApiError, apiClient } from "../api/client";
 import type {
   AnalysisStep,
@@ -1054,6 +1054,7 @@ function AssetCard({
 
 export default function ProjectAnalysis() {
   const params = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const projectId = params.id ? Number(params.id) : NaN;
   const validProjectId = Number.isFinite(projectId) ? projectId : null;
   const { confirm, confirmDialog } = useConfirmDialog();
@@ -1063,6 +1064,7 @@ export default function ProjectAnalysis() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [batchRunning, setBatchRunning] = useState(false);
   const [batchStabilizing, setBatchStabilizing] = useState(false);
+  const [autoGenerating, setAutoGenerating] = useState(false);
   // v0.18 — track per-asset translate-button busy state. The job runs
   // on the worker (poll picks up the new ``secondary_subtitle_summary``
   // when done); the local set just keeps the button disabled long
@@ -1230,6 +1232,22 @@ export default function ProjectAnalysis() {
       assets.filter(
         (a) => !["done", "pending", "running"].includes(a.stabilization_status),
       ).length,
+    [assets],
+  );
+  const analyzedCount = useMemo(
+    () => assets.filter((a) => a.status === "analyzed").length,
+    [assets],
+  );
+  const activeStabilizedCount = useMemo(
+    () => assets.filter((a) => a.active_asset_variant === "stabilized").length,
+    [assets],
+  );
+  const stabilizedDoneCount = useMemo(
+    () => assets.filter((a) => a.stabilization_status === "done").length,
+    [assets],
+  );
+  const trackingReadyCount = useMemo(
+    () => assets.filter((a) => a.tracking_summary != null).length,
     [assets],
   );
 
@@ -1508,6 +1526,33 @@ export default function ProjectAnalysis() {
     return "產生短影音";
   }, [latestDraft]);
 
+  const handleAutoGenerate = useCallback(async () => {
+    if (validProjectId == null || assets.length === 0 || autoGenerating) return;
+    if (latestDraft?.status === "processing" || latestDraft?.status === "pending") {
+      navigate(`/projects/${validProjectId}/edit`);
+      return;
+    }
+    setAutoGenerating(true);
+    setTriggerError(null);
+    setStatusMessage(null);
+    try {
+      await apiClient.triggerProjectEdit(validProjectId, {
+        stabilize: false,
+        subtitles: true,
+        transitions: true,
+        auto_reframe: true,
+        style_preset: "commercial",
+      });
+      navigate(`/projects/${validProjectId}/edit`);
+    } catch (err) {
+      setTriggerError(
+        err instanceof Error ? `一鍵自動產生失敗：${err.message}` : String(err),
+      );
+    } finally {
+      setAutoGenerating(false);
+    }
+  }, [assets.length, autoGenerating, latestDraft, navigate, validProjectId]);
+
   return (
     <main className="page project-analysis">
       <header className="analysis-hero">
@@ -1577,6 +1622,90 @@ export default function ProjectAnalysis() {
       </header>
 
       <AnalysisProgressSummary assets={assets} />
+
+      {assets.length > 0 && (
+        <section className="analysis-decision-hub" aria-label="素材決策與剪輯入口">
+          <div className="analysis-decision-hub__head">
+            <div>
+              <p className="analysis-decision-hub__kicker">Manual Control Path</p>
+              <h2 className="analysis-decision-hub__title">
+                先決定素材，再進剪輯設定
+              </h2>
+            </div>
+            <div className="analysis-decision-hub__actions">
+              <button
+                type="button"
+                className="cta cta--primary analysis-decision-hub__auto"
+                onClick={() => void handleAutoGenerate()}
+                disabled={autoGenerating}
+                aria-busy={autoGenerating}
+              >
+                {autoGenerating ? "一鍵排程中…" : "一鍵自動產生短影音 →"}
+              </button>
+              <Link
+                to={`/projects/${validProjectId}/edit`}
+                className="cta cta--quiet"
+              >
+                確認素材，進入剪輯設定 →
+              </Link>
+            </div>
+          </div>
+
+          <div className="analysis-decision-grid">
+            <article className="analysis-decision-card analysis-decision-card--strong">
+              <span className="analysis-decision-card__step">01</span>
+              <h3>素材檢查</h3>
+              <strong>
+                {analyzedCount} / {assets.length}
+              </strong>
+              <p>
+                完成後 AI 才有足夠資訊挑片段。未完成素材仍可保留在清單中，但第一版品質會受影響。
+              </p>
+            </article>
+
+            <article className="analysis-decision-card">
+              <span className="analysis-decision-card__step">02</span>
+              <h3>防抖版本</h3>
+              <strong>
+                {activeStabilizedCount} 已使用 / {stabilizedDoneCount} 可用
+              </strong>
+              <p>
+                一鍵產生防抖版後，在各素材卡切換 raw 或 stabilized；切換會重新分析避免座標錯位。
+              </p>
+              <button
+                type="button"
+                className="cta cta--quiet analysis-decision-card__button"
+                onClick={() => void runBatchStabilize()}
+                disabled={batchStabilizeEligibleCount === 0 || batchStabilizing}
+              >
+                {batchStabilizing
+                  ? "送出防抖中…"
+                  : `補齊防抖版（${batchStabilizeEligibleCount}）`}
+              </button>
+            </article>
+
+            <article className="analysis-decision-card">
+              <span className="analysis-decision-card__step">03</span>
+              <h3>Tracking / 構圖</h3>
+              <strong>
+                {trackingReadyCount} / {assets.length}
+              </strong>
+              <p>
+                每張素材卡都能決定畫面要跟住誰。這一步會直接影響後續 AI 初稿的可用鏡頭。
+              </p>
+            </article>
+
+            <article className="analysis-decision-card analysis-decision-card--next">
+              <span className="analysis-decision-card__step">04</span>
+              <h3>下一步</h3>
+              <strong>{latestDraft ? `v${latestDraft.version}` : "第一版"}</strong>
+              <p>
+                手動路徑會帶著你選好的素材版本與 tracking 進剪輯設定；進階時間軸只留給最後細修。
+              </p>
+            </article>
+          </div>
+        </section>
+      )}
 
       {assets.length > 0 && (
         <div className="batch-toolbar" role="toolbar" aria-label="批次素材檢查">
