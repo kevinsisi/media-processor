@@ -8,4 +8,4 @@
 
 - [x] 2.1 Run frontend build.
 - [x] 2.2 Update roadmap/version docs and memory.
-- [ ] 2.3 Commit and push to main.
+- [x] 2.3 Commit and push to main.
