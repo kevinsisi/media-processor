@@ -35,6 +35,9 @@ from media_processor.api.schemas import (
     EmotionTagsOut,
     MotionSegmentOut,
     ProjectAnalysisOut,
+    ProjectAssetStabilizeBatchItem,
+    ProjectAssetStabilizeBatchRequest,
+    ProjectAssetStabilizeBatchResponse,
     ProjectCreate,
     ProjectDetail,
     ProjectSummary,
@@ -63,7 +66,7 @@ from media_processor.models import (
 from media_processor.services import asset_management as asset_mgmt
 from media_processor.services import asset_variants, project_fork
 from media_processor.services.object_tracking import aggregate_detected_classes
-from media_processor.services.queue import enqueue_project_edit
+from media_processor.services.queue import enqueue_asset_stabilization, enqueue_project_edit
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -1207,6 +1210,91 @@ async def batch_delete_project_assets(
         blocked_count=blocked,
         needs_force_count=needs_force,
         error_count=blocked - needs_force,
+        results=results,
+    )
+
+
+@router.post(
+    "/{project_id}/assets/stabilize",
+    response_model=ProjectAssetStabilizeBatchResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def batch_stabilize_project_assets(
+    project_id: int,
+    payload: ProjectAssetStabilizeBatchRequest,
+    session: SessionDep,
+) -> ProjectAssetStabilizeBatchResponse:
+    project = await session.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
+
+    assets = (
+        (
+            await session.execute(
+                select(Asset).where(Asset.project_id == project_id).order_by(Asset.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    results: list[ProjectAssetStabilizeBatchItem] = []
+    enqueued_count = 0
+    skipped_count = 0
+    failed_count = 0
+    skip_statuses = {
+        asset_variants.STABILIZATION_PENDING,
+        asset_variants.STABILIZATION_RUNNING,
+    }
+    if not payload.force:
+        skip_statuses.add(asset_variants.STABILIZATION_DONE)
+
+    for asset in assets:
+        current_status = asset_variants.stabilization_status(asset)
+        if current_status in skip_statuses:
+            skipped_count += 1
+            results.append(
+                ProjectAssetStabilizeBatchItem(
+                    asset_id=asset.id,
+                    status="skipped",
+                    reason=current_status,
+                )
+            )
+            continue
+
+        asset.stabilization_status = asset_variants.STABILIZATION_PENDING
+        asset.stabilization_error = None
+        asset.stabilized_path = str(asset_variants.stabilized_path_for_asset(asset))
+        await session.commit()
+        try:
+            job_id = enqueue_asset_stabilization(asset.id, force=payload.force)
+        except Exception as exc:  # noqa: BLE001 - continue with remaining assets.
+            asset.stabilization_status = asset_variants.STABILIZATION_FAILED
+            asset.stabilization_error = f"enqueue failed: {exc}"
+            await session.commit()
+            failed_count += 1
+            results.append(
+                ProjectAssetStabilizeBatchItem(
+                    asset_id=asset.id,
+                    status="failed",
+                    reason=asset.stabilization_error,
+                )
+            )
+            continue
+
+        enqueued_count += 1
+        results.append(
+            ProjectAssetStabilizeBatchItem(
+                asset_id=asset.id,
+                status="enqueued",
+                job_id=job_id,
+            )
+        )
+
+    return ProjectAssetStabilizeBatchResponse(
+        project_id=project_id,
+        enqueued_count=enqueued_count,
+        skipped_count=skipped_count,
+        failed_count=failed_count,
         results=results,
     )
 

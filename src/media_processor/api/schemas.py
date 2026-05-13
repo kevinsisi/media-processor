@@ -819,6 +819,27 @@ class AssetStabilizeResponse(BaseModel):
     stabilization_status: str
 
 
+class ProjectAssetStabilizeBatchRequest(BaseModel):
+    """Body for POST /projects/{id}/assets/stabilize."""
+
+    force: bool = False
+
+
+class ProjectAssetStabilizeBatchItem(BaseModel):
+    asset_id: int
+    status: str
+    job_id: str | None = None
+    reason: str | None = None
+
+
+class ProjectAssetStabilizeBatchResponse(BaseModel):
+    project_id: int
+    enqueued_count: int
+    skipped_count: int
+    failed_count: int
+    results: list[ProjectAssetStabilizeBatchItem]
+
+
 class AssetVariantPatch(BaseModel):
     """Body for PATCH /assets/{id}/variant.
 

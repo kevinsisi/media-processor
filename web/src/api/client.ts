@@ -38,6 +38,8 @@ import type {
   MusicLibraryResponse,
   MusicSuggestion,
   ProjectAnalysisOut,
+  ProjectAssetStabilizeBatchRequest,
+  ProjectAssetStabilizeBatchResponse,
   ProjectCreate,
   ProjectDetail,
   ProjectSummary,
@@ -139,6 +141,20 @@ export class ApiClient {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
+  }
+
+  stabilizeProjectAssets(
+    projectId: number,
+    payload: ProjectAssetStabilizeBatchRequest = {},
+  ): Promise<ProjectAssetStabilizeBatchResponse> {
+    return this.request<ProjectAssetStabilizeBatchResponse>(
+      `/projects/${projectId}/assets/stabilize`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      },
+    );
   }
 
   patchAssetVariant(

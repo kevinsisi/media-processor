@@ -2,7 +2,7 @@
 
 > **單一定位**：沒有剪輯背景的小白也能「拍完就上傳，AI 直接給大量 IG / FB 短影音」的工具。
 > 目標 UX：手機優先、繁體中文、高級感、最少手動編輯。
-> 目前版本：**0.41.0**（M9.17 — 專案可複製成獨立 fork，用來測試設定 / 素材版本 / render 而不影響原專案）
+> 目前版本：**0.41.1**（M9.17.1 — ProjectAnalysis 新增一鍵批次產生防抖版，不用逐個素材手動點）
 > 下一個 milestone：M10 — 多專案批次 + 社群直接發布 + AI 自動縮圖。
 
 > **2026-05-13 camera-motion note**：`0.30.23` 到 `0.30.38` 的 camera-motion 修補已被否決；`0.30.39`/`0.30.40` 只保留 Smart Camera `none` 不套殘留 tracking / vidstab 的 no-extra-correction 修正。`0.40.0` 改走素材級 raw / stabilized 版本工作流，未來運鏡 / 焦點追蹤 / 數位防手震變更必須先遵守 `skills/video-camera-movement/SKILL.md`。
@@ -66,6 +66,7 @@
 | **M9.16** | **素材級防抖版本工作流：每個素材保留 raw、可產生 stabilized derivative，素材卡可預覽/切換版本，分析 / 追蹤 / render 走同一 active variant** | ✅ done | **0.40.0** |
 | **M9.16.1** | **素材版本預覽 UX 修正：影片本體可點擊播放/暫停、可鍵盤操作，避免 native controls 不易點選** | ✅ done | **0.40.1** |
 | **M9.17** | **專案 fork：複製 project settings / script / assets / analysis metadata / source files，排除 rendered drafts，讓實驗不影響原專案** | ✅ done | **0.41.0** |
+| **M9.17.1** | **素材防抖批次送出：ProjectAnalysis 一鍵送出所有未完成/失敗素材的防抖處理，避免逐卡操作** | ✅ done | **0.41.1** |
 | M10 | 多專案批次 + 社群直接發布 + AI 自動縮圖 | 🔮 future | 0.31.x+ |
 
 ---
@@ -673,6 +674,12 @@ OpenSpec：`openspec/changes/ai-smart-camera/proposal.md` + `tasks.md`。
 - 不複製 Draft / DraftSegment / review / comment / subtitle cue / export rows，也不複製 rendered mp4/srt/zip；fork 第一次 render 會從 version 1 重新產生。
 - 若必要 source media 缺檔，API 回 409，DB rollback，並 best-effort 清掉已複製的檔案，避免半套 fork。
 - ProjectList 新增「複製測試」按鈕，含 loading/error 狀態；成功後刷新列表並導向 fork 專案。
+
+### 9.17.1 批次產生防抖版（0.41.1）
+- 新增 `POST /projects/{id}/assets/stabilize`，一次送出整個專案中所有 `not_started` / `failed` 素材的 source-level stabilization。
+- 預設略過 `pending` / `running` / `done`，避免重複排隊；`force=true` 時可重新送出已完成素材。
+- 單個素材 enqueue 失敗不會中斷整批，該素材會被標成 terminal `failed` 並保留錯誤訊息。
+- ProjectAnalysis 批次工具列新增「一鍵產生防抖版」，直接顯示送出/略過/失敗摘要，不再需要逐張素材卡手動點選。
 
 ---
 

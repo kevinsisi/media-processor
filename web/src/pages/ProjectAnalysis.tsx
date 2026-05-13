@@ -1062,6 +1062,7 @@ export default function ProjectAnalysis() {
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [batchRunning, setBatchRunning] = useState(false);
+  const [batchStabilizing, setBatchStabilizing] = useState(false);
   // v0.18 — track per-asset translate-button busy state. The job runs
   // on the worker (poll picks up the new ``secondary_subtitle_summary``
   // when done); the local set just keeps the button disabled long
@@ -1224,6 +1225,13 @@ export default function ProjectAnalysis() {
     () => assets.filter(isAssetUnanalyzed).map((a) => a.id),
     [assets],
   );
+  const batchStabilizeEligibleCount = useMemo(
+    () =>
+      assets.filter(
+        (a) => !["done", "pending", "running"].includes(a.stabilization_status),
+      ).length,
+    [assets],
+  );
 
   // Drop selection IDs that no longer exist in the current asset list (e.g.
   // after deletion / refresh) so "全選未分析" stays consistent.
@@ -1307,6 +1315,36 @@ export default function ProjectAnalysis() {
     },
     [selectedIds, polling, clearSelection, confirm],
   );
+
+  const runBatchStabilize = useCallback(async () => {
+    if (validProjectId == null || batchStabilizeEligibleCount === 0) return;
+    setBatchStabilizing(true);
+    setTriggerError(null);
+    setStatusMessage(null);
+    try {
+      const summary = await apiClient.stabilizeProjectAssets(validProjectId, {
+        force: false,
+      });
+      const parts = [`已送出 ${summary.enqueued_count} 個素材的防抖處理。`];
+      if (summary.skipped_count > 0) parts.push(`略過 ${summary.skipped_count} 個已完成或處理中的素材。`);
+      if (summary.failed_count > 0) parts.push(`失敗 ${summary.failed_count} 個。`);
+      setStatusMessage(parts.join(" "));
+      if (summary.failed_count > 0) {
+        const failedLines = summary.results
+          .filter((item) => item.status === "failed")
+          .slice(0, 3)
+          .map((item) => `素材 #${item.asset_id}：${item.reason ?? "送出失敗"}`);
+        setTriggerError(["部分素材防抖送出失敗：", ...failedLines].join("\n"));
+      }
+      polling.refresh();
+    } catch (err) {
+      setTriggerError(
+        `批次防抖送出失敗：${err instanceof Error ? err.message : String(err)}`,
+      );
+    } finally {
+      setBatchStabilizing(false);
+    }
+  }, [batchStabilizeEligibleCount, polling, validProjectId]);
 
   // v0.26.0 / v0.27.1 — bulk asset delete. Two-phase flow:
   //
@@ -1513,6 +1551,17 @@ export default function ProjectAnalysis() {
             已選 {selectedIds.size} / {assets.length}
           </span>
           <div className="batch-toolbar__actions">
+            <button
+              type="button"
+              className="cta"
+              onClick={() => void runBatchStabilize()}
+              disabled={batchStabilizeEligibleCount === 0 || batchStabilizing}
+              title="一次送出所有尚未完成或失敗的素材防抖處理。"
+            >
+              {batchStabilizing
+                ? "送出防抖中…"
+                : `一鍵產生防抖版（${batchStabilizeEligibleCount}）`}
+            </button>
             <button
               type="button"
               className="cta cta--quiet"

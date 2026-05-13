@@ -24,6 +24,7 @@ from media_processor.api.main import app as production_app
 from media_processor.api.routers import assets as assets_router
 from media_processor.api.routers import drafts as drafts_router
 from media_processor.api.routers import music as music_router
+from media_processor.api.routers import projects as projects_router
 from media_processor.models import (
     Asset,
     AssetSegment,
@@ -447,6 +448,90 @@ def test_post_asset_stabilize_marks_pending_and_enqueues(
     assert body["active_asset_variant"] == "raw"
     assert body["stabilization_status"] == "pending"
     assert body["stabilized_path"].endswith("1_foo.stab.mp4")
+
+
+def test_batch_stabilize_assets_skips_done_by_default(app: FastAPI) -> None:
+    client = TestClient(app)
+
+    resp = client.post("/projects/1/assets/stabilize", json={})
+
+    assert resp.status_code == 202, resp.text
+    assert resp.json() == {
+        "project_id": 1,
+        "enqueued_count": 0,
+        "skipped_count": 1,
+        "failed_count": 0,
+        "results": [
+            {
+                "asset_id": 1,
+                "status": "skipped",
+                "job_id": None,
+                "reason": "done",
+            }
+        ],
+    }
+
+
+def test_batch_stabilize_assets_force_enqueues_done(
+    app: FastAPI,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[int, bool]] = []
+
+    def fake_enqueue(asset_id: int, *, force: bool = False) -> str:
+        calls.append((asset_id, force))
+        return f"batch-stabilize-{asset_id}"
+
+    monkeypatch.setattr(projects_router, "enqueue_asset_stabilization", fake_enqueue)
+    client = TestClient(app)
+
+    resp = client.post("/projects/1/assets/stabilize", json={"force": True})
+
+    assert resp.status_code == 202, resp.text
+    assert calls == [(1, True)]
+    assert resp.json()["enqueued_count"] == 1
+    assert resp.json()["results"] == [
+        {
+            "asset_id": 1,
+            "status": "enqueued",
+            "job_id": "batch-stabilize-1",
+            "reason": None,
+        }
+    ]
+
+
+def test_batch_stabilize_assets_marks_enqueue_failure_terminal(
+    app: FastAPI,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_enqueue(asset_id: int, *, force: bool = False) -> str:
+        assert asset_id == 1
+        assert force is True
+        raise RuntimeError("redis down")
+
+    monkeypatch.setattr(projects_router, "enqueue_asset_stabilization", fail_enqueue)
+    client = TestClient(app)
+
+    resp = client.post("/projects/1/assets/stabilize", json={"force": True})
+
+    assert resp.status_code == 202, resp.text
+    body = resp.json()
+    assert body["enqueued_count"] == 0
+    assert body["failed_count"] == 1
+    assert body["results"][0]["status"] == "failed"
+    assert "redis down" in body["results"][0]["reason"]
+    detail = client.get("/assets/1")
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["stabilization_status"] == "failed"
+    assert "redis down" in detail.json()["stabilization_error"]
+
+
+def test_batch_stabilize_assets_404_for_missing_project(app: FastAPI) -> None:
+    client = TestClient(app)
+
+    resp = client.post("/projects/999/assets/stabilize", json={})
+
+    assert resp.status_code == 404
 
 
 def test_patch_asset_variant_clears_variant_dependent_state(

@@ -608,6 +608,25 @@ export interface AssetStabilizeResponse {
   stabilization_status: string;
 }
 
+export interface ProjectAssetStabilizeBatchRequest {
+  force?: boolean;
+}
+
+export interface ProjectAssetStabilizeBatchItem {
+  asset_id: number;
+  status: string;
+  job_id: string | null;
+  reason: string | null;
+}
+
+export interface ProjectAssetStabilizeBatchResponse {
+  project_id: number;
+  enqueued_count: number;
+  skipped_count: number;
+  failed_count: number;
+  results: ProjectAssetStabilizeBatchItem[];
+}
+
 export interface AssetVariantPatch {
   variant: AssetVariant;
   reanalyze?: boolean;
