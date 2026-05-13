@@ -2,7 +2,7 @@
 
 > **單一定位**：沒有剪輯背景的小白也能「拍完就上傳，AI 直接給大量 IG / FB 短影音」的工具。
 > 目標 UX：手機優先、繁體中文、高級感、最少手動編輯。
-> 目前版本：**0.40.0**（M9.16 — 素材級 raw / stabilized 版本切換，分析 / 追蹤 / render 使用同一份選定來源）
+> 目前版本：**0.40.1**（M9.16.1 — 素材版本影片可直接點擊播放/暫停，補足 raw/stabilized preview 可操作性）
 > 下一個 milestone：M10 — 多專案批次 + 社群直接發布 + AI 自動縮圖。
 
 > **2026-05-13 camera-motion note**：`0.30.23` 到 `0.30.38` 的 camera-motion 修補已被否決；`0.30.39`/`0.30.40` 只保留 Smart Camera `none` 不套殘留 tracking / vidstab 的 no-extra-correction 修正。`0.40.0` 改走素材級 raw / stabilized 版本工作流，未來運鏡 / 焦點追蹤 / 數位防手震變更必須先遵守 `skills/video-camera-movement/SKILL.md`。
@@ -64,6 +64,7 @@
 | **M9.15.39** | **Smart Camera `none` 明確代表靜態構圖：不再讓殘留 point/custom tracking 覆蓋 AI no-move 決策** | ✅ done | **0.30.39** |
 | **M9.15.40** | **Smart Camera `none` 明確代表不做額外修正：跳過 vidstab，避免低紋理/高反光 no-move cut 被補償成左右飄** | ✅ done | **0.30.40** |
 | **M9.16** | **素材級防抖版本工作流：每個素材保留 raw、可產生 stabilized derivative，素材卡可預覽/切換版本，分析 / 追蹤 / render 走同一 active variant** | ✅ done | **0.40.0** |
+| **M9.16.1** | **素材版本預覽 UX 修正：影片本體可點擊播放/暫停、可鍵盤操作，避免 native controls 不易點選** | ✅ done | **0.40.1** |
 | M10 | 多專案批次 + 社群直接發布 + AI 自動縮圖 | 🔮 future | 0.31.x+ |
 
 ---
@@ -652,6 +653,10 @@ OpenSpec：`openspec/changes/ai-smart-camera/proposal.md` + `tasks.md`。
 - ProjectAnalysis 素材卡提供 raw/stabilized preview、產生/重試 stabilized、以及「使用此版本」操作；polling 會追蹤 `pending` / `running` stabilization。
 - Stabilization enqueue 失敗必須寫成 terminal `failed` + error，不能讓 UI 永久停在 `pending`。
 - 驗證：`ruff check`、`ruff format --check`、`mypy`、`npm run build`、`pytest`（253 passed / 7 skipped）、`git diff --check`、alembic migration `py_compile`。
+
+### 9.16.1 素材版本預覽可點擊（0.40.1）
+- ProjectAnalysis 的 raw/stabilized preview 影片本體支援點擊播放/暫停，保留底部 native controls，並支援 Enter / Space 鍵盤操作。
+- 補 focus ring、pointer/touch affordance 與短提示，避免使用者看到影片但不知道要怎麼操作或點擊無反應。
 
 ---
 

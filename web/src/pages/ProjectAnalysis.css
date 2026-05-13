@@ -320,11 +320,33 @@
   gap: 2px;
 }
 
+.asset-variant-panel__video-wrap {
+  display: grid;
+  gap: var(--space-2);
+}
+
 .asset-variant-panel__video {
+  position: relative;
+  z-index: 1;
   width: 100%;
   max-height: 260px;
+  display: block;
   border-radius: 12px;
   background: #05070a;
+  cursor: pointer;
+  pointer-events: auto;
+  touch-action: manipulation;
+}
+
+.asset-variant-panel__video:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 3px;
+}
+
+.asset-variant-panel__video-hint {
+  margin: 0;
+  font-size: var(--t-xs);
+  color: var(--text-tertiary);
 }
 
 .asset-variant-panel__actions {

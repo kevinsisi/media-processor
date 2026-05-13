@@ -1,6 +1,6 @@
 # Tasks — asset-level-stabilized-variants
 
-Status: implemented locally for `0.40.0`; pending commit/push/deploy.
+Status: `0.40.0` deployed; `0.40.1` fixes preview video clickability.
 
 - [x] Add asset-level stabilized derivative metadata (`stabilized_path`, `stabilization_status`, `stabilization_error`, `active_asset_variant`).
 - [x] Add analysis-queue stabilization worker and API endpoints to generate a stabilized source variant.
@@ -11,3 +11,4 @@ Status: implemented locally for `0.40.0`; pending commit/push/deploy.
 - [x] Handle upload-time stabilization enqueue failures as terminal `failed` states instead of leaving assets stuck in `pending`.
 - [x] Add focused router coverage for stabilization enqueue, variant switching, and coordinate-dependent state clearing.
 - [x] Verify backend lint/format/type checks, frontend build, full tests, diff whitespace, and Alembic migration syntax.
+- [x] 0.40.1 UX correction: make the raw/stabilized preview video itself clickable/playable and keyboard-operable.

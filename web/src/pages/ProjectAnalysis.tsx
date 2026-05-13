@@ -670,6 +670,50 @@ function labelForStabilizationStatus(status: string): string {
 }
 
 
+function VariantPreviewVideo({ src }: { src: string }) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const togglePlayback = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (video.paused) {
+      void video.play();
+    } else {
+      video.pause();
+    }
+  }, []);
+  return (
+    <div className="asset-variant-panel__video-wrap">
+      <video
+        ref={videoRef}
+        className="asset-variant-panel__video"
+        src={src}
+        controls
+        playsInline
+        preload="metadata"
+        tabIndex={0}
+        aria-label="素材預覽影片，點一下可播放或暫停"
+        onClick={(event) => {
+          const video = event.currentTarget;
+          const controlsBandPx = 48;
+          if (event.nativeEvent.offsetY > video.clientHeight - controlsBandPx) {
+            return;
+          }
+          togglePlayback();
+        }}
+        onKeyDown={(event) => {
+          if (event.key !== "Enter" && event.key !== " ") return;
+          event.preventDefault();
+          togglePlayback();
+        }}
+      />
+      <p className="asset-variant-panel__video-hint">
+        點影片可播放 / 暫停，也可以用影片右下角全螢幕查看。
+      </p>
+    </div>
+  );
+}
+
+
 function AssetVariantControls({
   asset,
   onStabilize,
@@ -713,7 +757,7 @@ function AssetVariantControls({
           {labelForStabilizationStatus(asset.stabilization_status)}
         </span>
       </div>
-      <video className="asset-variant-panel__video" src={previewUrl} controls preload="metadata" />
+      <VariantPreviewVideo src={previewUrl} />
       <div className="asset-variant-panel__actions">
         <button type="button" className="cta cta--quiet" onClick={() => setPreviewVariant("raw")}>
           預覽原始
