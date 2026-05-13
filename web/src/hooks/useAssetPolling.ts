@@ -19,7 +19,12 @@ export interface UseAssetPolling {
 
 function isAnyAssetAnalyzing(data: ProjectAnalysisOut | null): boolean {
   if (!data) return false;
-  return data.assets.some((a) => a.status === "analyzing");
+  return data.assets.some(
+    (a) =>
+      a.status === "analyzing" ||
+      a.stabilization_status === "pending" ||
+      a.stabilization_status === "running",
+  );
 }
 
 export function useAssetPolling(projectId: number | null): UseAssetPolling {

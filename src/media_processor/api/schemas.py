@@ -49,6 +49,7 @@ SUBTITLE_COLOR_PATTERN = r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$"
 # v0.18 — clip-style preset that biases planner span / transition / BGM hint.
 ClipStylePresetLiteral = Literal["fast", "slow", "commercial", "artistic", "custom"]
 DraftExportStatusLiteral = Literal["queued", "running", "done", "failed"]
+AssetVariantLiteral = Literal["raw", "stabilized"]
 
 
 # v0.29.0 — static-crop anchor for source-orientation-mismatch renders.
@@ -718,6 +719,11 @@ class AssetDetail(BaseModel):
     id: int
     project_id: int
     file_path: str
+    active_asset_variant: AssetVariantLiteral = "raw"
+    stabilized_path: str | None = None
+    stabilization_status: str = "not_started"
+    stabilization_error: str | None = None
+    variant_urls: dict[str, str | None] = Field(default_factory=dict)
     duration_ms: int
     resolution: str | None
     fps: float | None
@@ -799,6 +805,36 @@ class AnalyzeResponse(BaseModel):
     job_id: str
     status: str
     analysis_steps: dict[str, str]
+
+
+class AssetStabilizeRequest(BaseModel):
+    """Body for POST /assets/{id}/stabilize."""
+
+    force: bool = False
+
+
+class AssetStabilizeResponse(BaseModel):
+    asset_id: int
+    job_id: str
+    stabilization_status: str
+
+
+class AssetVariantPatch(BaseModel):
+    """Body for PATCH /assets/{id}/variant.
+
+    ``reanalyze`` defaults true because tracking/scene/motion coordinates are
+    tied to the active source version.
+    """
+
+    variant: AssetVariantLiteral
+    reanalyze: bool = True
+
+
+class AssetVariantResponse(BaseModel):
+    asset_id: int
+    active_asset_variant: AssetVariantLiteral
+    analysis_job_id: str | None = None
+    analysis_steps: dict[str, str] | None = None
 
 
 # v0.18 — secondary-language subtitle (Whisper translate).
@@ -1016,6 +1052,11 @@ class AssetAnalysisItem(BaseModel):
     id: int
     file_path: str
     filename: str
+    active_asset_variant: AssetVariantLiteral = "raw"
+    stabilized_path: str | None = None
+    stabilization_status: str = "not_started"
+    stabilization_error: str | None = None
+    variant_urls: dict[str, str | None] = Field(default_factory=dict)
     duration_ms: int
     # v0.26.0 — surface the source resolution (already stored on
     # ``Asset.resolution`` from the upload-time ffprobe) and the

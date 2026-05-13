@@ -12,7 +12,11 @@ import type {
   AssetBatchDeleteOut,
   AssetDeleteOut,
   AssetDetail,
+  AssetStabilizeRequest,
+  AssetStabilizeResponse,
   AssetThumbnailsOut,
+  AssetVariantPatch,
+  AssetVariantResponse,
   BgmGenerationStatus,
   CropRegionPatch,
   DetectedClassOut,
@@ -118,6 +122,28 @@ export class ApiClient {
 
   fetchAssetThumbnails(assetId: number): Promise<AssetThumbnailsOut> {
     return this.get<AssetThumbnailsOut>(`/assets/${assetId}/thumbnails`);
+  }
+
+  stabilizeAsset(
+    assetId: number,
+    payload: AssetStabilizeRequest = {},
+  ): Promise<AssetStabilizeResponse> {
+    return this.request<AssetStabilizeResponse>(`/assets/${assetId}/stabilize`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  }
+
+  patchAssetVariant(
+    assetId: number,
+    payload: AssetVariantPatch,
+  ): Promise<AssetVariantResponse> {
+    return this.request<AssetVariantResponse>(`/assets/${assetId}/variant`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
   }
 
   postReview(payload: ReviewCreate): Promise<ReviewOut> {
@@ -688,7 +714,16 @@ export class ApiClient {
   // pull the last two path components ({project_id}/{filename}) and
   // bolt them onto ``/media/assets`` (which is StaticFiles-mounted by
   // api/main.py and reverse-proxied under ``/api`` in prod).
-  assetVideoUrl(asset: { file_path: string }): string {
+  assetVideoUrl(asset: {
+    file_path: string;
+    active_asset_variant?: string;
+    variant_urls?: Record<string, string | null>;
+  }): string {
+    const active = asset.active_asset_variant ?? "raw";
+    const variantUrl = asset.variant_urls?.[active];
+    if (variantUrl) {
+      return variantUrl.startsWith("/api/") ? variantUrl : `${this.baseUrl}${variantUrl}`;
+    }
     const parts = asset.file_path.replace(/\\/g, "/").split("/").filter(Boolean);
     const tail = parts.slice(-2).join("/");
     return `${this.baseUrl}/media/assets/${tail}`;

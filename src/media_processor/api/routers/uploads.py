@@ -31,9 +31,10 @@ from media_processor.models import (
     UploadSession,
     UploadStatus,
 )
+from media_processor.services import asset_variants
 from media_processor.services import thumbnails as thumbnails_svc
 from media_processor.services import uploads as upload_svc
-from media_processor.services.queue import enqueue_asset_analysis
+from media_processor.services.queue import enqueue_asset_analysis, enqueue_asset_stabilization
 
 SCRIPT_MAX_BYTES = 1_048_576
 
@@ -304,6 +305,26 @@ async def _finalize_video(row: UploadSession, session: AsyncSession, expected: i
             exc,
         )
 
+    # v0.40.0 — prepare a source-level stabilized derivative for side-by-side
+    # preview. Raw remains the active variant until the operator switches.
+    try:
+        asset_loaded.stabilization_status = asset_variants.STABILIZATION_PENDING
+        asset_loaded.stabilized_path = str(asset_variants.stabilized_path_for_asset(asset_loaded))
+        asset_loaded.stabilization_error = None
+        await session.commit()
+        enqueue_asset_stabilization(asset_id)
+    except Exception as exc:  # noqa: BLE001 — raw workflow remains available.
+        import logging
+
+        asset_loaded.stabilization_status = asset_variants.STABILIZATION_FAILED
+        asset_loaded.stabilization_error = f"enqueue failed: {exc}"
+        await session.commit()
+        logging.getLogger(__name__).warning(
+            "failed to enqueue stabilization for asset %d: %s — operator can retry",
+            asset_id,
+            exc,
+        )
+
     return _asset_to_detail(asset_loaded)
 
 
@@ -347,6 +368,11 @@ def _asset_to_detail(asset: Asset) -> AssetDetail:
         id=asset.id,
         project_id=asset.project_id,
         file_path=asset.file_path,
+        active_asset_variant=asset_variants.active_variant(asset),
+        stabilized_path=getattr(asset, "stabilized_path", None),
+        stabilization_status=asset_variants.stabilization_status(asset),
+        stabilization_error=getattr(asset, "stabilization_error", None),
+        variant_urls=asset_variants.variant_urls(asset),
         duration_ms=asset.duration_ms,
         resolution=asset.resolution,
         fps=asset.fps,

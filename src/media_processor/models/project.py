@@ -234,6 +234,22 @@ class Asset(Base):
         index=True,
     )
     file_path: Mapped[str] = mapped_column(String(1024), nullable=False)
+    # v0.40.0 — optional source-level stabilized derivative. Raw source is
+    # always preserved in ``file_path``; operators can preview/select the
+    # stabilized variant before analysis/tracking/render so downstream
+    # coordinates stay tied to one source version.
+    stabilized_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    stabilization_status: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="not_started",
+    )
+    stabilization_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    active_asset_variant: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="raw",
+    )
     duration_ms: Mapped[int] = mapped_column(Integer, nullable=False)
     resolution: Mapped[str | None] = mapped_column(String(32), nullable=True)
     fps: Mapped[float | None] = mapped_column(Float, nullable=True)

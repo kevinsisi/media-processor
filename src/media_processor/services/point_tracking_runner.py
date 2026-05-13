@@ -30,13 +30,13 @@ that just runs ``asyncio.run(run_point_tracking(...))``.
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select
 
 from media_processor.core.db import async_session_maker
 from media_processor.models import Asset
+from media_processor.services import asset_variants
 from media_processor.services import point_tracking as point_tracking_svc
 
 logger = logging.getLogger(__name__)
@@ -102,7 +102,7 @@ async def run_point_tracking(
         ):
             logger.info("run_point_tracking: asset %d intent is stale; skipping", asset_id)
             return {"asset_id": asset_id, "status": "skipped", "reason": "stale_intent"}
-        media_path = Path(asset.file_path)
+        media_path = asset_variants.selected_media_path(asset)
         duration_ms = asset.duration_ms
 
     # The cv2 work happens outside the DB session — we don't want to

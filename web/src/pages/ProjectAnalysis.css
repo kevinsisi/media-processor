@@ -298,6 +298,73 @@
   color: var(--status-down, #b34b3a);
 }
 
+.asset-variant-panel {
+  display: grid;
+  gap: var(--space-3);
+  margin: var(--space-4) 0;
+  padding: var(--space-3);
+  border: 1px solid var(--ink-line);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.asset-variant-panel__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.asset-variant-panel__head > div {
+  display: grid;
+  gap: 2px;
+}
+
+.asset-variant-panel__video {
+  width: 100%;
+  max-height: 260px;
+  border-radius: 12px;
+  background: #05070a;
+}
+
+.asset-variant-panel__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.asset-variant-status {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
+  color: var(--text-tertiary);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.asset-variant-status--done {
+  color: var(--status-up);
+  background: rgba(77, 179, 111, 0.16);
+}
+
+.asset-variant-status--failed {
+  color: var(--status-down, #b34b3a);
+  background: rgba(179, 75, 58, 0.16);
+}
+
+.asset-variant-status--pending,
+.asset-variant-status--running {
+  color: var(--gold);
+  background: rgba(209, 174, 91, 0.16);
+}
+
+.asset-variant-panel__error {
+  margin: 0;
+  color: var(--status-down, #b34b3a);
+  font-size: var(--t-sm);
+}
+
 /* ---- v0.20.2 — top-of-page analysis progress summary ---- */
 
 .analysis-progress-summary {

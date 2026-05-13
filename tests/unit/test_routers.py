@@ -86,12 +86,16 @@ async def _seed(session_maker: async_sessionmaker[AsyncSession]) -> None:
         a = Asset(
             project_id=p.id,
             file_path="/mnt/assets/foo.mp4",
+            stabilized_path="/mnt/assets/_stabilized/1_foo.stab.mp4",
+            stabilization_status="done",
             duration_ms=5000,
             resolution="3840x2160",
             fps=30.0,
             codec="h264",
             sha256="a" * 64,
             status="analyzed",
+            analysis_steps_json={"scene": "done", "tracking": "done"},
+            tracked_object_index=0,
             tracking_json={
                 "src_w": 3840,
                 "src_h": 2160,
@@ -123,6 +127,13 @@ async def _seed(session_maker: async_sessionmaker[AsyncSession]) -> None:
                     tag_name="logo_close_up",
                     confidence=0.6,
                     source_model="clip",
+                ),
+                AssetTag(
+                    asset_id=a.id,
+                    tag_type="scene",
+                    tag_name="showroom",
+                    confidence=0.1,
+                    source_model="gemini",
                 ),
             ]
         )
@@ -408,6 +419,65 @@ def test_get_asset_with_tags_sorted(app: FastAPI) -> None:
     confidences = [t["confidence"] for t in body["tags"]]
     assert confidences == sorted(confidences, reverse=True)
     assert confidences[0] == 0.95
+
+
+def test_post_asset_stabilize_marks_pending_and_enqueues(
+    app: FastAPI,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_enqueue(asset_id: int, *, force: bool = False) -> str:
+        assert asset_id == 1
+        assert force is True
+        return "fake-stabilize-1"
+
+    monkeypatch.setattr(assets_router, "enqueue_asset_stabilization", fake_enqueue)
+    client = TestClient(app)
+
+    resp = client.post("/assets/1/stabilize", json={"force": True})
+
+    assert resp.status_code == 202, resp.text
+    assert resp.json() == {
+        "asset_id": 1,
+        "job_id": "fake-stabilize-1",
+        "stabilization_status": "pending",
+    }
+    detail = client.get("/assets/1")
+    assert detail.status_code == 200, detail.text
+    body = detail.json()
+    assert body["active_asset_variant"] == "raw"
+    assert body["stabilization_status"] == "pending"
+    assert body["stabilized_path"].endswith("1_foo.stab.mp4")
+
+
+def test_patch_asset_variant_clears_variant_dependent_state(
+    app: FastAPI,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_enqueue(asset_id: int, *, force: bool = False) -> str:
+        assert asset_id == 1
+        assert force is True
+        return "fake-analysis-1"
+
+    monkeypatch.setattr(assets_router.Path, "is_file", lambda _path: True)
+    monkeypatch.setattr(assets_router, "enqueue_asset_analysis", fake_enqueue)
+    client = TestClient(app)
+
+    resp = client.patch("/assets/1/variant", json={"variant": "stabilized"})
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["analysis_job_id"] == "fake-analysis-1"
+    assert resp.json()["active_asset_variant"] == "stabilized"
+
+    detail = client.get("/assets/1")
+    assert detail.status_code == 200, detail.text
+    body = detail.json()
+    assert body["active_asset_variant"] == "stabilized"
+    assert body["status"] == "pending"
+    assert body["analysis_steps"] is None
+    assert [tag["tag_type"] for tag in body["tags"]] == ["object", "visual"]
+
+    tracking = client.get("/assets/1/tracking")
+    assert tracking.status_code == 404
 
 
 def test_post_review_approve(app: FastAPI) -> None:

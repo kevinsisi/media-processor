@@ -2,10 +2,10 @@
 
 > **單一定位**：沒有剪輯背景的小白也能「拍完就上傳，AI 直接給大量 IG / FB 短影音」的工具。
 > 目標 UX：手機優先、繁體中文、高級感、最少手動編輯。
-> 目前版本：**0.30.40**（M9.15.40 — Smart Camera `none` 連 vidstab 也跳過，避免 no-move cut 被後製補償拉出左右飄）
+> 目前版本：**0.40.0**（M9.16 — 素材級 raw / stabilized 版本切換，分析 / 追蹤 / render 使用同一份選定來源）
 > 下一個 milestone：M10 — 多專案批次 + 社群直接發布 + AI 自動縮圖。
 
-> **2026-05-12 production note**：`0.30.23` 到 `0.30.37` 的 camera-motion 修補已被否決，production 以 rollback commit `1e4bc82` 回到 `0.30.22`，並已用 `.22` 重新 render draft `49`。未來運鏡 / 焦點追蹤 / 數位防手震變更必須先遵守 `skills/video-camera-movement/SKILL.md`。
+> **2026-05-13 camera-motion note**：`0.30.23` 到 `0.30.38` 的 camera-motion 修補已被否決；`0.30.39`/`0.30.40` 只保留 Smart Camera `none` 不套殘留 tracking / vidstab 的 no-extra-correction 修正。`0.40.0` 改走素材級 raw / stabilized 版本工作流，未來運鏡 / 焦點追蹤 / 數位防手震變更必須先遵守 `skills/video-camera-movement/SKILL.md`。
 
 ## Phase 進度速覽
 
@@ -63,6 +63,7 @@
 | **M9.15.22** | **AI Smart Camera 明顯化：新 directive 與舊 draft render-time 都放大 zoom / pan，讓運鏡肉眼可辨識** | ✅ done | **0.30.22** |
 | **M9.15.39** | **Smart Camera `none` 明確代表靜態構圖：不再讓殘留 point/custom tracking 覆蓋 AI no-move 決策** | ✅ done | **0.30.39** |
 | **M9.15.40** | **Smart Camera `none` 明確代表不做額外修正：跳過 vidstab，避免低紋理/高反光 no-move cut 被補償成左右飄** | ✅ done | **0.30.40** |
+| **M9.16** | **素材級防抖版本工作流：每個素材保留 raw、可產生 stabilized derivative，素材卡可預覽/切換版本，分析 / 追蹤 / render 走同一 active variant** | ✅ done | **0.40.0** |
 | M10 | 多專案批次 + 社群直接發布 + AI 自動縮圖 | 🔮 future | 0.31.x+ |
 
 ---
@@ -635,6 +636,22 @@ OpenSpec：`openspec/changes/ai-smart-camera/proposal.md` + `tasks.md`。
 - 焦點追蹤是構圖目標，不是 raw lock。必須先做 dead zone、低通、速度限制、加速度限制與 drift guard，再進 ffmpeg crop/sendcmd。
 - 防手震只能是最後清理層，不得反過來決定 framing，也不得製造單幀跳動。
 - 驗收必須包含 production-like render、worker log path 確認、localized adjacent-frame step metrics、以及 rendered MP4/contact sheet 自查；不能只看 whole-cut aggregate p95。
+
+---
+
+## ✅ Phase 9.16（M9.16）— 素材級 raw / stabilized 版本工作流（已完成 0.40.0）
+
+主題：**把防手震從 render-time 補償改成素材級可選版本**，避免 no-move / 低紋理 footage 被 cut-level vidstab 重新帶出左右飄。
+
+詳細 OpenSpec：`openspec/changes/asset-level-stabilized-variants/`。
+
+- `Asset.file_path` 永遠是 raw upload；新增 `stabilized_path` / `stabilization_status` / `stabilization_error` / `active_asset_variant`（alembic 0028）。
+- `services.asset_variants.selected_media_path(asset)` 是 source path 單一入口；analysis、point tracking、render input gathering、asset size display 都使用 active variant。
+- `POST /assets/{id}/stabilize` 在 worker-analysis enqueue full-source two-pass vidstab；upload 完成後也 best-effort 預排 stabilization，但 raw 仍是 active variant。
+- `PATCH /assets/{id}/variant` 切 raw/stabilized；切換時清掉依賴 source coordinates 的 scene/motion/emotion tags、coverage、tracking_json、custom ROI、point tracking、tracking target、analysis steps，預設重新分析。
+- ProjectAnalysis 素材卡提供 raw/stabilized preview、產生/重試 stabilized、以及「使用此版本」操作；polling 會追蹤 `pending` / `running` stabilization。
+- Stabilization enqueue 失敗必須寫成 terminal `failed` + error，不能讓 UI 永久停在 `pending`。
+- 驗證：`ruff check`、`ruff format --check`、`mypy`、`npm run build`、`pytest`（253 passed / 7 skipped）、`git diff --check`、alembic migration `py_compile`。
 
 ---
 

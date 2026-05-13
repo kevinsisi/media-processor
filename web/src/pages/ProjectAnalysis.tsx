@@ -4,6 +4,7 @@ import { ApiError, apiClient } from "../api/client";
 import type {
   AnalysisStep,
   AssetAnalysisItem,
+  AssetVariant,
   TranscriptOut,
   TranscriptSegmentIn,
   TranscriptSegmentOut,
@@ -643,9 +644,122 @@ interface AssetCardProps {
   retryingStep: AnalysisStep | null;
   onTranslate: (assetId: number) => void;
   translating: boolean;
+  onStabilize: (assetId: number, force: boolean) => void;
+  onSelectVariant: (assetId: number, variant: AssetVariant) => void;
+  stabilizing: boolean;
+  switchingVariant: boolean;
   selected: boolean;
   onToggleSelect: (assetId: number, next: boolean) => void;
   confirmAction: ConfirmFn;
+}
+
+
+function labelForStabilizationStatus(status: string): string {
+  switch (status) {
+    case "pending":
+      return "防抖排隊中";
+    case "running":
+      return "防抖處理中";
+    case "done":
+      return "防抖版已就緒";
+    case "failed":
+      return "防抖失敗";
+    default:
+      return "尚未產生防抖版";
+  }
+}
+
+
+function AssetVariantControls({
+  asset,
+  onStabilize,
+  onSelectVariant,
+  stabilizing,
+  switchingVariant,
+}: {
+  asset: AssetAnalysisItem;
+  onStabilize: (assetId: number, force: boolean) => void;
+  onSelectVariant: (assetId: number, variant: AssetVariant) => void;
+  stabilizing: boolean;
+  switchingVariant: boolean;
+}) {
+  const [previewVariant, setPreviewVariant] = useState<AssetVariant>(
+    asset.active_asset_variant,
+  );
+  useEffect(() => {
+    setPreviewVariant(asset.active_asset_variant);
+  }, [asset.active_asset_variant]);
+  const rawUrl =
+    asset.variant_urls?.raw ??
+    apiClient.assetVideoUrl({
+      file_path: asset.file_path,
+      active_asset_variant: "raw",
+      variant_urls: asset.variant_urls,
+    });
+  const stabilizedReady = asset.stabilization_status === "done";
+  const stabilizedUrl = asset.variant_urls?.stabilized ?? null;
+  const previewUrl =
+    previewVariant === "stabilized" && stabilizedUrl ? stabilizedUrl : rawUrl;
+  const canGenerate =
+    !stabilizing && !["pending", "running"].includes(asset.stabilization_status);
+  return (
+    <div className="asset-variant-panel">
+      <div className="asset-variant-panel__head">
+        <div>
+          <strong>素材版本</strong>
+          <span className="mono">目前使用：{asset.active_asset_variant === "stabilized" ? "防抖版" : "原始"}</span>
+        </div>
+        <span className={`asset-variant-status asset-variant-status--${asset.stabilization_status}`}>
+          {labelForStabilizationStatus(asset.stabilization_status)}
+        </span>
+      </div>
+      <video className="asset-variant-panel__video" src={previewUrl} controls preload="metadata" />
+      <div className="asset-variant-panel__actions">
+        <button type="button" className="cta cta--quiet" onClick={() => setPreviewVariant("raw")}>
+          預覽原始
+        </button>
+        <button
+          type="button"
+          className="cta cta--quiet"
+          onClick={() => setPreviewVariant("stabilized")}
+          disabled={!stabilizedReady || !stabilizedUrl}
+          title={stabilizedReady ? "預覽防抖版" : "防抖版尚未完成"}
+        >
+          預覽防抖
+        </button>
+        <button
+          type="button"
+          className="cta"
+          onClick={() => onStabilize(asset.id, asset.stabilization_status === "failed")}
+          disabled={!canGenerate}
+        >
+          {stabilizing ? "送出中…" : stabilizedReady ? "重新產生防抖" : "產生防抖版"}
+        </button>
+      </div>
+      <div className="asset-variant-panel__actions">
+        <button
+          type="button"
+          className="cta cta--quiet"
+          onClick={() => onSelectVariant(asset.id, "raw")}
+          disabled={switchingVariant || asset.active_asset_variant === "raw"}
+        >
+          使用原始
+        </button>
+        <button
+          type="button"
+          className="cta cta--primary"
+          onClick={() => onSelectVariant(asset.id, "stabilized")}
+          disabled={switchingVariant || !stabilizedReady || asset.active_asset_variant === "stabilized"}
+          title="切換後會清除座標相關分析與追蹤，並重新檢查。"
+        >
+          使用防抖版
+        </button>
+      </div>
+      {asset.stabilization_error && (
+        <p className="asset-variant-panel__error">{asset.stabilization_error}</p>
+      )}
+    </div>
+  );
 }
 
 interface SecondarySubtitleToggleProps {
@@ -705,6 +819,10 @@ function AssetCard({
   retryingStep,
   onTranslate,
   translating,
+  onStabilize,
+  onSelectVariant,
+  stabilizing,
+  switchingVariant,
   selected,
   onToggleSelect,
   confirmAction,
@@ -788,6 +906,14 @@ function AssetCard({
           thumbnailUrl={asset.thumbnail_urls[0] ?? null}
         />
       )}
+
+      <AssetVariantControls
+        asset={asset}
+        onStabilize={onStabilize}
+        onSelectVariant={onSelectVariant}
+        stabilizing={stabilizing}
+        switchingVariant={switchingVariant}
+      />
 
       <div className="asset-card__transcript-toggle">
         <button
@@ -897,6 +1023,8 @@ export default function ProjectAnalysis() {
   // when done); the local set just keeps the button disabled long
   // enough to communicate "queued" to the user.
   const [translatingIds, setTranslatingIds] = useState<Set<number>>(new Set());
+  const [stabilizingIds, setStabilizingIds] = useState<Set<number>>(new Set());
+  const [variantSwitchingIds, setVariantSwitchingIds] = useState<Set<number>>(new Set());
   // v0.20.2 — track per-asset per-step retry. Map assetId -> step name
   // currently being retried. Lets the AssetCard show the spinner on
   // exactly the right step button without leaking state across cards.
@@ -979,6 +1107,70 @@ export default function ProjectAnalysis() {
       }
     },
     [polling],
+  );
+
+  const handleStabilize = useCallback(
+    async (assetId: number, force: boolean) => {
+      setStatusMessage(null);
+      setTriggerError(null);
+      setStabilizingIds((prev) => new Set(prev).add(assetId));
+      try {
+        await apiClient.stabilizeAsset(assetId, { force });
+        setStatusMessage("已送出防抖處理；完成後可在素材卡預覽防抖版。");
+        polling.refresh();
+      } catch (err) {
+        setTriggerError(
+          err instanceof Error ? `防抖處理送出失敗：${err.message}` : String(err),
+        );
+      } finally {
+        window.setTimeout(() => {
+          setStabilizingIds((prev) => {
+            if (!prev.has(assetId)) return prev;
+            const out = new Set(prev);
+            out.delete(assetId);
+            return out;
+          });
+        }, 1500);
+      }
+    },
+    [polling],
+  );
+
+  const handleSelectVariant = useCallback(
+    async (assetId: number, variant: AssetVariant) => {
+      const ok = await confirm({
+        title: variant === "stabilized" ? "改用防抖版？" : "改回原始版？",
+        message:
+          "切換素材版本會清除畫面座標相關分析與追蹤，並重新檢查這個素材，確保後續剪輯使用同一份影片。",
+        confirmLabel: "切換並重新檢查",
+        tone: "default",
+      });
+      if (!ok) return;
+      setStatusMessage(null);
+      setTriggerError(null);
+      setVariantSwitchingIds((prev) => new Set(prev).add(assetId));
+      try {
+        await apiClient.patchAssetVariant(assetId, { variant, reanalyze: true });
+        setStatusMessage(
+          variant === "stabilized"
+            ? "已改用防抖版，並重新送出素材檢查。"
+            : "已改回原始版，並重新送出素材檢查。",
+        );
+        polling.refresh();
+      } catch (err) {
+        setTriggerError(
+          err instanceof Error ? `切換素材版本失敗：${err.message}` : String(err),
+        );
+      } finally {
+        setVariantSwitchingIds((prev) => {
+          if (!prev.has(assetId)) return prev;
+          const out = new Set(prev);
+          out.delete(assetId);
+          return out;
+        });
+      }
+    },
+    [confirm, polling],
   );
 
   const project = polling.data?.project;
@@ -1338,6 +1530,10 @@ export default function ProjectAnalysis() {
             retryingStep={retryingMap[asset.id] ?? null}
             onTranslate={handleTranslate}
             translating={translatingIds.has(asset.id)}
+            onStabilize={handleStabilize}
+            onSelectVariant={handleSelectVariant}
+            stabilizing={stabilizingIds.has(asset.id)}
+            switchingVariant={variantSwitchingIds.has(asset.id)}
             selected={selectedIds.has(asset.id)}
             onToggleSelect={toggleSelect}
             confirmAction={confirm}

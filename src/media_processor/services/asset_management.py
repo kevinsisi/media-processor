@@ -305,8 +305,13 @@ def _delete_on_disk(asset: Asset) -> None:
     and swallowed because the DB row is the canonical record; an
     orphan file is a smaller leak than an orphan row.
     """
-    src = Path(asset.file_path) if asset.file_path else None
-    if src is not None and src.is_file():
+    paths = [Path(asset.file_path)] if asset.file_path else []
+    stabilized = getattr(asset, "stabilized_path", None)
+    if stabilized:
+        paths.append(Path(stabilized))
+    for src in paths:
+        if not src.is_file():
+            continue
         try:
             src.unlink()
         except OSError as exc:

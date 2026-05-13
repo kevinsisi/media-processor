@@ -30,6 +30,7 @@ from media_processor.models import (
     ScriptCoverage,
 )
 from media_processor.services import (
+    asset_variants,
     camera_motion,
     emotion,
     object_tracking,
@@ -156,7 +157,7 @@ async def _run_stt(
         logger.info("asset %d transcript edited=true, skipping STT (force=False)", asset.id)
         return "done"
 
-    media_path = Path(asset.file_path)
+    media_path = asset_variants.selected_media_path(asset)
     result = await asyncio.to_thread(whisper_stt.transcribe, media_path)
     segments_json = [
         {"idx": s.idx, "start_ms": s.start_ms, "end_ms": s.end_ms, "text": s.text}
@@ -195,7 +196,7 @@ async def _run_scene(
         raise scene_tagging.SceneTaggingError("LLM_API_KEYS not configured")
 
     scratch = Path(settings.analysis_dir) / str(asset.id) / "scene"
-    media_path = Path(asset.file_path)
+    media_path = asset_variants.selected_media_path(asset)
     result = await scene_tagging.classify_asset(
         media_path,
         asset.duration_ms,
@@ -252,7 +253,7 @@ async def _run_motion(
     force: bool,
 ) -> str:
     scratch = Path(settings.analysis_dir) / str(asset.id) / "motion"
-    media_path = Path(asset.file_path)
+    media_path = asset_variants.selected_media_path(asset)
     segments = await asyncio.to_thread(camera_motion.detect_motion, media_path, scratch)
 
     source_model = "opencv-optical-flow"
@@ -314,7 +315,7 @@ async def _run_emotion(
     so the planner can fetch it cheaply without reducing ranges every
     call.
     """
-    media_path = Path(asset.file_path)
+    media_path = asset_variants.selected_media_path(asset)
     result = await asyncio.to_thread(emotion.classify_asset, media_path, asset.duration_ms)
 
     source_model = "mediapipe-face-landmarker"
@@ -411,7 +412,7 @@ async def _run_tracking(
         logger.info("asset %d already has tracking_json; skipping (force=False)", asset.id)
         return "done"
 
-    media_path = Path(asset.file_path)
+    media_path = asset_variants.selected_media_path(asset)
     result = await asyncio.to_thread(object_tracking.detect, media_path, asset.duration_ms or 0)
     try:
         asset.tracking_json = object_tracking.serialise(result)
@@ -606,7 +607,7 @@ async def run_translate_subtitle(asset_id: int, *, lang: str = "en") -> dict[str
         asset = await session.get(Asset, asset_id)
         if asset is None:
             raise RuntimeError(f"asset {asset_id} not found")
-        media_path = Path(asset.file_path)
+        media_path = asset_variants.selected_media_path(asset)
 
     result = await asyncio.to_thread(whisper_stt.translate, media_path, target_lang=lang)
     segments_json = [

@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -20,8 +20,12 @@ from media_processor.api.schemas import (
     AnalyzeResponse,
     AssetDeleteOut,
     AssetDetail,
+    AssetStabilizeRequest,
+    AssetStabilizeResponse,
     AssetTagOut,
     AssetThumbnailsOut,
+    AssetVariantPatch,
+    AssetVariantResponse,
     CoverageMatchOut,
     ScriptCoverageOut,
     ThumbnailUrl,
@@ -35,12 +39,13 @@ from media_processor.api.schemas import (
     TranslateSubtitleRequest,
     TranslateSubtitleResponse,
 )
-from media_processor.models import Asset, AssetTranscript, ScriptCoverage
+from media_processor.models import Asset, AssetTag, AssetTranscript, ScriptCoverage
 from media_processor.services import asset_management as asset_mgmt
-from media_processor.services import object_tracking
+from media_processor.services import asset_variants, object_tracking
 from media_processor.services import thumbnails as thumbnails_svc
 from media_processor.services.queue import (
     enqueue_asset_analysis,
+    enqueue_asset_stabilization,
     enqueue_asset_translate,
     enqueue_point_tracking,
 )
@@ -81,6 +86,11 @@ def _serialise_asset(asset: Asset) -> AssetDetail:
         id=asset.id,
         project_id=asset.project_id,
         file_path=asset.file_path,
+        active_asset_variant=asset_variants.active_variant(asset),
+        stabilized_path=getattr(asset, "stabilized_path", None),
+        stabilization_status=asset_variants.stabilization_status(asset),
+        stabilization_error=getattr(asset, "stabilization_error", None),
+        variant_urls=asset_variants.variant_urls(asset),
         duration_ms=asset.duration_ms,
         resolution=asset.resolution,
         fps=asset.fps,
@@ -103,6 +113,100 @@ async def get_asset(
     if asset is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="asset not found")
     return _serialise_asset(asset)
+
+
+async def _clear_variant_dependent_state(session: AsyncSession, asset: Asset) -> None:
+    """Clear analysis/tracking data whose coordinates depend on the source variant."""
+    await session.execute(
+        delete(AssetTag)
+        .where(AssetTag.asset_id == asset.id)
+        .where(AssetTag.tag_type.in_(["scene", "motion", "emotion"]))
+    )
+    await session.execute(delete(ScriptCoverage).where(ScriptCoverage.asset_id == asset.id))
+    asset.analysis_steps_json = None
+    asset.status = "pending"
+    asset.tracking_json = None
+    asset.tracked_object_index = None
+    asset.custom_roi_json = None
+    asset.point_tracking_json = None
+    asset.point_tracking_origin = None
+    asset.point_tracking_status = None
+    asset.point_tracking_error = None
+
+
+@router.post("/{asset_id}/stabilize", response_model=AssetStabilizeResponse)
+async def stabilize_asset(
+    asset_id: int,
+    payload: AssetStabilizeRequest,
+    session: SessionDep,
+    response: Response,
+) -> AssetStabilizeResponse:
+    asset = await session.get(Asset, asset_id)
+    if asset is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="asset not found")
+    asset.stabilization_status = asset_variants.STABILIZATION_PENDING
+    asset.stabilization_error = None
+    asset.stabilized_path = str(asset_variants.stabilized_path_for_asset(asset))
+    await session.commit()
+    try:
+        job_id = enqueue_asset_stabilization(asset_id, force=payload.force)
+    except Exception as exc:  # noqa: BLE001 — do not leave pending forever.
+        asset.stabilization_status = asset_variants.STABILIZATION_FAILED
+        asset.stabilization_error = f"enqueue failed: {exc}"
+        await session.commit()
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"asset stabilization enqueue failed: {exc}",
+        ) from exc
+    response.status_code = status.HTTP_202_ACCEPTED
+    return AssetStabilizeResponse(
+        asset_id=asset_id,
+        job_id=job_id,
+        stabilization_status=asset.stabilization_status,
+    )
+
+
+@router.patch("/{asset_id}/variant", response_model=AssetVariantResponse)
+async def patch_asset_variant(
+    asset_id: int,
+    payload: AssetVariantPatch,
+    session: SessionDep,
+) -> AssetVariantResponse:
+    asset = await session.get(Asset, asset_id)
+    if asset is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="asset not found")
+    if payload.variant == asset_variants.STABILIZED_VARIANT:
+        if asset_variants.stabilization_status(asset) != asset_variants.STABILIZATION_DONE:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="stabilized variant is not ready",
+            )
+        if not asset.stabilized_path or not Path(asset.stabilized_path).is_file():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="stabilized file is missing",
+            )
+    changed = asset_variants.active_variant(asset) != payload.variant
+    asset.active_asset_variant = payload.variant
+    analysis_job_id: str | None = None
+    if changed:
+        await _clear_variant_dependent_state(session, asset)
+    await session.commit()
+    if changed and payload.reanalyze:
+        try:
+            analysis_job_id = enqueue_asset_analysis(asset_id, force=True)
+        except Exception as exc:  # noqa: BLE001 — surface but keep variant switch.
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"variant switched but analysis enqueue failed: {exc}",
+            ) from exc
+    await session.refresh(asset)
+    return AssetVariantResponse(
+        asset_id=asset.id,
+        active_asset_variant=asset_variants.active_variant(asset),
+        analysis_job_id=analysis_job_id,
+        analysis_steps=dict(asset.analysis_steps_json or {}) or None,
+    )
 
 
 # v0.26.0 / v0.27.1 — single-asset deletion. Wipes the on-disk
@@ -565,7 +669,7 @@ async def patch_asset_tracking_target(
                 detail=f"custom_roi must contain integer x,y,w,h: {exc}",
             ) from exc
         init_t_ms = int(payload.custom_roi.get("source_t_ms") or 0)
-        media_path = Path(asset.file_path)
+        media_path = asset_variants.selected_media_path(asset)
         # CSRT can be slow on long clips (real-time-ish), but the user
         # is waiting on this single asset — run inline. asyncio.to_thread
         # keeps the event loop responsive.

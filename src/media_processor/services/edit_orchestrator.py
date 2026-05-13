@@ -36,6 +36,7 @@ from media_processor.models import (
 )
 from media_processor.profile.loader import ProfileSpec, load_profile
 from media_processor.services import (
+    asset_variants,
     beat_sync,
     bgm_mixer,
     edit_planner,
@@ -469,7 +470,7 @@ async def _gather_render_inputs(
             .scalars()
             .all()
         )
-        asset_paths = {a.id: Path(a.file_path) for a in assets}
+        asset_paths = {a.id: asset_variants.selected_media_path(a) for a in assets}
         # v0.16 — tracking_json. v0.17 added per-asset ``tracked_object_index``
         # + ``custom_roi_json`` so the user can pick a non-dominant
         # object (or draw a custom ROI) on the analysis page.

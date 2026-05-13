@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 JOB_TIMEOUT_SECONDS = 60 * 60 * 2  # 2 h ceiling for the whole pipeline.
 EDIT_JOB_TIMEOUT_SECONDS = 60 * 60  # 1 h ceiling for the M5 render pipeline.
 ANALYZE_ASSET_FN = "media_processor.workers.analysis_jobs.analyze_asset"
+STABILIZE_ASSET_FN = "media_processor.workers.asset_stabilization_jobs.stabilize_asset"
 TRANSLATE_ASSET_FN = "media_processor.workers.analysis_jobs.translate_asset_subtitle"
 TRANSLATE_JOB_TIMEOUT_SECONDS = 60 * 30  # 30 min — single Whisper pass
 RENDER_DRAFT_FN = "media_processor.workers.edit_jobs.render_draft"
@@ -43,6 +44,7 @@ BGM_JOB_TIMEOUT_SECONDS = 60 * 15  # 15 min — small MusicGen + IO
 # as a defence-in-depth ceiling; whichever fires first wins.
 TRACK_POINT_FN = "media_processor.workers.point_tracking_jobs.track_point_job"
 TRACK_POINT_JOB_TIMEOUT_SECONDS = 60 * 30  # 30 min
+STABILIZE_ASSET_JOB_TIMEOUT_SECONDS = 60 * 60  # 1 h — full-source vidstab pass
 
 
 def _redis() -> Redis:
@@ -69,6 +71,24 @@ def enqueue_asset_analysis(
         "enqueued analyze_asset(asset_id=%d, steps=%s, force=%s) as job %s",
         asset_id,
         steps if steps is not None else "all",
+        force,
+        job.id,
+    )
+    return job.id
+
+
+def enqueue_asset_stabilization(asset_id: int, *, force: bool = False) -> str:
+    """Schedule source-level stabilization for one asset on the analysis queue."""
+
+    queue = Queue(
+        ANALYSIS_QUEUE,
+        connection=_redis(),
+        default_timeout=STABILIZE_ASSET_JOB_TIMEOUT_SECONDS,
+    )
+    job = queue.enqueue(STABILIZE_ASSET_FN, args=(asset_id,), kwargs={"force": force})
+    logger.info(
+        "enqueued stabilize_asset(asset_id=%d, force=%s) as job %s",
+        asset_id,
         force,
         job.id,
     )

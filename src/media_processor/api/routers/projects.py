@@ -61,6 +61,7 @@ from media_processor.models import (
     ScriptCoverage,
 )
 from media_processor.services import asset_management as asset_mgmt
+from media_processor.services import asset_variants
 from media_processor.services.object_tracking import aggregate_detected_classes
 from media_processor.services.queue import enqueue_project_edit
 
@@ -1251,7 +1252,7 @@ async def list_project_assets_with_analysis(
         file_size_bytes: int | None = None
         if asset.file_path:
             try:
-                file_size_bytes = Path(asset.file_path).stat().st_size
+                file_size_bytes = asset_variants.selected_media_path(asset).stat().st_size
             except OSError:
                 file_size_bytes = None
         items.append(
@@ -1259,6 +1260,11 @@ async def list_project_assets_with_analysis(
                 id=asset.id,
                 file_path=asset.file_path,
                 filename=_filename_from_path(asset.file_path),
+                active_asset_variant=asset_variants.active_variant(asset),
+                stabilized_path=getattr(asset, "stabilized_path", None),
+                stabilization_status=asset_variants.stabilization_status(asset),
+                stabilization_error=getattr(asset, "stabilization_error", None),
+                variant_urls=asset_variants.variant_urls(asset),
                 duration_ms=asset.duration_ms,
                 resolution=asset.resolution,
                 file_size_bytes=file_size_bytes,

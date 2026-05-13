@@ -495,6 +495,11 @@ export interface AssetDetail {
   id: number;
   project_id: number;
   file_path: string;
+  active_asset_variant: AssetVariant;
+  stabilized_path: string | null;
+  stabilization_status: string;
+  stabilization_error: string | null;
+  variant_urls: Record<AssetVariant, string | null>;
   duration_ms: number;
   resolution: string | null;
   fps: number | null;
@@ -591,6 +596,30 @@ export interface AnalyzeResponse {
   analysis_steps: Record<string, string>;
 }
 
+export type AssetVariant = "raw" | "stabilized";
+
+export interface AssetStabilizeRequest {
+  force?: boolean;
+}
+
+export interface AssetStabilizeResponse {
+  asset_id: number;
+  job_id: string;
+  stabilization_status: string;
+}
+
+export interface AssetVariantPatch {
+  variant: AssetVariant;
+  reanalyze?: boolean;
+}
+
+export interface AssetVariantResponse {
+  asset_id: number;
+  active_asset_variant: AssetVariant;
+  analysis_job_id: string | null;
+  analysis_steps: Record<string, string> | null;
+}
+
 // v0.18 — secondary-language subtitle (Whisper translate). ``lang`` is
 // constrained to "en" today because Whisper's translate task always
 // emits English; widen this union once additional models land.
@@ -641,6 +670,11 @@ export interface AssetAnalysisItem {
   id: number;
   file_path: string;
   filename: string;
+  active_asset_variant: AssetVariant;
+  stabilized_path: string | null;
+  stabilization_status: string;
+  stabilization_error: string | null;
+  variant_urls: Record<AssetVariant, string | null>;
   duration_ms: number;
   // v0.26.0 — surface source resolution + on-disk byte size so the
   // analysis-page card can render a one-line spec underneath the
