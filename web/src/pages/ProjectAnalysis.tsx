@@ -1453,12 +1453,51 @@ export default function ProjectAnalysis() {
 
   // M5 — 開始剪輯 / 預覽剪輯 CTA state.
   const latestDraft = polling.data?.latest_draft ?? null;
+  const stabilizationInFlightCount = useMemo(
+    () =>
+      assets.filter((a) => ["pending", "running"].includes(a.stabilization_status)).length,
+    [assets],
+  );
   const allAssetsTerminal = useMemo(() => {
     if (assets.length === 0) return false;
     return assets.every(
       (a) => a.status === "analyzed" || a.status === "analysis_failed",
     );
   }, [assets]);
+  const nextStepInfo = useMemo(() => {
+    if (assets.length === 0) return null;
+    const stabilizationSuffix =
+      stabilizationInFlightCount > 0
+        ? ` 另外還有 ${stabilizationInFlightCount} 個素材的防抖版處理中；你可以現在先剪，也可以等它們完成後再切換到防抖版。`
+        : "";
+
+    if (latestDraft?.status === "ready_for_review" || latestDraft?.status === "approved") {
+      return {
+        tone: "ready",
+        title: "現在可以先預覽成品",
+        message: `目前已有可預覽的短影音版本。${stabilizationSuffix}`.trim(),
+      };
+    }
+    if (latestDraft?.status === "processing" || latestDraft?.status === "pending") {
+      return {
+        tone: "wait",
+        title: "目前已有短影音在製作中",
+        message: "你可以先查看製作進度，完成後再決定是否要重新剪輯。",
+      };
+    }
+    if (allAssetsTerminal) {
+      return {
+        tone: "ready",
+        title: "現在可以開始製作剪輯",
+        message: `素材檢查已完成，可以直接開始產生短影音。${stabilizationSuffix}`.trim(),
+      };
+    }
+    return {
+      tone: "wait",
+      title: "先等素材檢查完成",
+      message: "還有素材在檢查中；等全部檢查完成後，再開始製作第一支短影音。",
+    };
+  }, [allAssetsTerminal, assets.length, latestDraft, stabilizationInFlightCount]);
   const editLabel = useMemo(() => {
     if (!latestDraft) return "產生短影音";
     if (latestDraft.status === "processing" || latestDraft.status === "pending") {
@@ -1510,6 +1549,15 @@ export default function ProjectAnalysis() {
             尚未設定腳本 — 腳本對照會自動略過。
             <Link to={`/projects/${validProjectId}/upload`}>前往設定 →</Link>
           </p>
+        )}
+        {nextStepInfo && (
+          <section
+            className={`analysis-next-step analysis-next-step--${nextStepInfo.tone}`}
+            aria-label="下一步提示"
+          >
+            <h2 className="analysis-next-step__title">{nextStepInfo.title}</h2>
+            <p className="analysis-next-step__body">{nextStepInfo.message}</p>
+          </section>
         )}
         {triggerError && (
           <p className="analysis-error" role="alert">

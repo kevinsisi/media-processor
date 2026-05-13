@@ -2,7 +2,7 @@
 
 > **單一定位**：沒有剪輯背景的小白也能「拍完就上傳，AI 直接給大量 IG / FB 短影音」的工具。
 > 目標 UX：手機優先、繁體中文、高級感、最少手動編輯。
-> 目前版本：**0.41.1**（M9.17.1 — ProjectAnalysis 新增一鍵批次產生防抖版，不用逐個素材手動點）
+> 目前版本：**0.41.2**（M9.17.2 — 分析頁直接告訴使用者現在該開始剪輯、預覽成品，還是等分析/防抖）
 > 下一個 milestone：M10 — 多專案批次 + 社群直接發布 + AI 自動縮圖。
 
 > **2026-05-13 camera-motion note**：`0.30.23` 到 `0.30.38` 的 camera-motion 修補已被否決；`0.30.39`/`0.30.40` 只保留 Smart Camera `none` 不套殘留 tracking / vidstab 的 no-extra-correction 修正。`0.40.0` 改走素材級 raw / stabilized 版本工作流，未來運鏡 / 焦點追蹤 / 數位防手震變更必須先遵守 `skills/video-camera-movement/SKILL.md`。
@@ -67,6 +67,7 @@
 | **M9.16.1** | **素材版本預覽 UX 修正：影片本體可點擊播放/暫停、可鍵盤操作，避免 native controls 不易點選** | ✅ done | **0.40.1** |
 | **M9.17** | **專案 fork：複製 project settings / script / assets / analysis metadata / source files，排除 rendered drafts，讓實驗不影響原專案** | ✅ done | **0.41.0** |
 | **M9.17.1** | **素材防抖批次送出：ProjectAnalysis 一鍵送出所有未完成/失敗素材的防抖處理，避免逐卡操作** | ✅ done | **0.41.1** |
+| **M9.17.2** | **分析頁下一步提示：直接告訴使用者現在可開始剪輯、可先預覽成品，或需等待分析完成；若防抖仍在跑也說清楚** | ✅ done | **0.41.2** |
 | M10 | 多專案批次 + 社群直接發布 + AI 自動縮圖 | 🔮 future | 0.31.x+ |
 
 ---
@@ -680,6 +681,10 @@ OpenSpec：`openspec/changes/ai-smart-camera/proposal.md` + `tasks.md`。
 - 預設略過 `pending` / `running` / `done`，避免重複排隊；`force=true` 時可重新送出已完成素材。
 - 單個素材 enqueue 失敗不會中斷整批，該素材會被標成 terminal `failed` 並保留錯誤訊息。
 - ProjectAnalysis 批次工具列新增「一鍵產生防抖版」，直接顯示送出/略過/失敗摘要，不再需要逐張素材卡手動點選。
+
+### 9.17.2 下一步提示（0.41.2）
+- ProjectAnalysis hero 新增「下一步提示」，直接告訴使用者目前應該「開始製作剪輯」、「先預覽成品」或「先等素材檢查完成」。
+- 若素材分析已完成但仍有 `stabilization_status in {pending, running}`，提示會明說：可以現在先剪，但等防抖完成後會有更多防抖版可選，不再讓使用者猜要不要等。
 
 ---
 
