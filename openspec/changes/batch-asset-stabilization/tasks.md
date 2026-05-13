@@ -11,5 +11,5 @@
 
 ## 3. Completion
 
-- [ ] 3.1 Update roadmap and memory.
-- [ ] 3.2 Run validation, commit, push, deploy, and smoke test production.
+- [x] 3.1 Update roadmap and memory.
+- [x] 3.2 Run validation, commit, push, deploy, and smoke test production.
