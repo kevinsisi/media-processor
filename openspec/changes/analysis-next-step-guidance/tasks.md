@@ -5,5 +5,5 @@
 
 ## 2. Completion
 
-- [ ] 2.1 Update roadmap and memory for the guidance change.
-- [ ] 2.2 Run validation, commit, push, deploy, and smoke check production.
+- [x] 2.1 Update roadmap and memory for the guidance change.
+- [x] 2.2 Run validation, commit, push, deploy, and smoke check production.
