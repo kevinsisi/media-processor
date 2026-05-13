@@ -2,7 +2,7 @@
 
 Content factory pipeline for novice-friendly Instagram and Facebook short-video production.
 
-**Status:** v0.42.1 / M10.1 — ProjectAnalysis manual decision hub for material readiness and next actions.
+**Status:** v0.42.2 / M10.1.1 — Mobile asset preview playback and one-click stability defaults hotfix.
 
 ## Spec
 

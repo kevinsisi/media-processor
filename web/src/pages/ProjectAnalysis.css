@@ -478,14 +478,29 @@
   display: block;
   border-radius: 12px;
   background: #05070a;
-  cursor: pointer;
+  cursor: default;
   pointer-events: auto;
-  touch-action: manipulation;
 }
 
 .asset-variant-panel__video:focus-visible {
   outline: 2px solid var(--gold);
   outline-offset: 3px;
+}
+
+.asset-variant-panel__play-button {
+  justify-self: start;
+  min-height: 40px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--ink-line-strong);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
+  letter-spacing: 0.12em;
+}
+
+.asset-variant-panel__play-button:hover {
+  border-color: var(--gold);
+  color: var(--gold);
 }
 
 .asset-variant-panel__video-hint {

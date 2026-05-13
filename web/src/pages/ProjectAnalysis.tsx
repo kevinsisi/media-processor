@@ -692,22 +692,21 @@ function VariantPreviewVideo({ src }: { src: string }) {
         preload="metadata"
         tabIndex={0}
         aria-label="素材預覽影片，點一下可播放或暫停"
-        onClick={(event) => {
-          const video = event.currentTarget;
-          const controlsBandPx = 48;
-          if (event.nativeEvent.offsetY > video.clientHeight - controlsBandPx) {
-            return;
-          }
-          togglePlayback();
-        }}
         onKeyDown={(event) => {
           if (event.key !== "Enter" && event.key !== " ") return;
           event.preventDefault();
           togglePlayback();
         }}
       />
+      <button
+        type="button"
+        className="asset-variant-panel__play-button"
+        onClick={togglePlayback}
+      >
+        播放 / 暫停
+      </button>
       <p className="asset-variant-panel__video-hint">
-        點影片可播放 / 暫停，也可以用影片右下角全螢幕查看。
+        使用影片原生控制列播放 / 暫停，也可以用右下角全螢幕查看。
       </p>
     </div>
   );
@@ -1540,7 +1539,7 @@ export default function ProjectAnalysis() {
         stabilize: false,
         subtitles: true,
         transitions: true,
-        auto_reframe: true,
+        auto_reframe: false,
         style_preset: "commercial",
       });
       navigate(`/projects/${validProjectId}/edit`);

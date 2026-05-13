@@ -392,7 +392,7 @@ export default function Upload() {
         stabilize: false,
         subtitles: true,
         transitions: true,
-        auto_reframe: true,
+        auto_reframe: false,
         style_preset: "commercial",
       });
       navigate(`/projects/${projectId}/edit`);
