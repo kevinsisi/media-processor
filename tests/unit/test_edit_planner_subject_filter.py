@@ -13,12 +13,15 @@ a "presence range" covering the floor-only stretch in between.
 
 from __future__ import annotations
 
-from media_processor.models import Asset
+from media_processor.models import Asset, AssetTag
 from media_processor.services.edit_planner import (
     SUBJECT_GAP_TOLERANCE_MS,
+    SUBJECT_MIN_TRACK_CONFIDENCE,
+    SUBJECT_MIN_TRACK_FRAMES,
     SUBJECT_MIN_WINDOW_MS,
     _apply_subject_filter,
     _AssetScore,
+    _avoid_unstable_opening_span,
     _subject_presence_range_ms,
     _subject_presence_windows_ms,
 )
@@ -145,6 +148,41 @@ def test_windows_returns_empty_when_class_absent() -> None:
         tracking_json={"tracks": [{"cls_name": "person", "frames": _dense_frames(0, 5_000)}]}
     )
     assert _subject_presence_windows_ms(asset, "dog") == []
+
+
+def test_windows_drops_short_noise_track_even_if_padded_window_is_long_enough() -> None:
+    asset = _asset(
+        duration_ms=10_000,
+        tracking_json={
+            "tracks": [
+                {
+                    "cls_name": "car",
+                    "confidence": 0.9,
+                    "frames": _dense_frames(2_000, 2_600),
+                }
+            ]
+        },
+    )
+
+    assert len(_dense_frames(2_000, 2_600)) < SUBJECT_MIN_TRACK_FRAMES
+    assert _subject_presence_windows_ms(asset, "car") == []
+
+
+def test_windows_drops_low_confidence_subject_track() -> None:
+    asset = _asset(
+        duration_ms=10_000,
+        tracking_json={
+            "tracks": [
+                {
+                    "cls_name": "car",
+                    "confidence": SUBJECT_MIN_TRACK_CONFIDENCE - 0.01,
+                    "frames": _dense_frames(2_000, 5_000),
+                }
+            ]
+        },
+    )
+
+    assert _subject_presence_windows_ms(asset, "car") == []
 
 
 def test_windows_returns_empty_when_no_tracking() -> None:
@@ -324,6 +362,38 @@ def test_apply_subject_filter_bug_report_floor_only_middle() -> None:
     assert (new_start, new_end) != (4_000, 8_000)
     valid_windows = [(0, 1_900), (9_500, 11_900)]
     assert (new_start, new_end) in valid_windows
+
+
+def test_avoid_unstable_opening_span_skips_initial_handheld_setup() -> None:
+    asset = _asset(duration_ms=8_000)
+    asset.tags = [
+        AssetTag(
+            asset_id=asset.id,
+            tag_type="motion",
+            tag_name="handheld",
+            confidence=1.0,
+            source_model="test",
+            time_ranges_ms=[[0, 1_000]],
+        )
+    ]
+
+    assert _avoid_unstable_opening_span(asset, (0, 5_000)) == (1_000, 5_000)
+
+
+def test_avoid_unstable_opening_span_keeps_later_handheld_motion() -> None:
+    asset = _asset(duration_ms=8_000)
+    asset.tags = [
+        AssetTag(
+            asset_id=asset.id,
+            tag_type="motion",
+            tag_name="handheld",
+            confidence=1.0,
+            source_model="test",
+            time_ranges_ms=[[3_000, 4_000]],
+        )
+    ]
+
+    assert _avoid_unstable_opening_span(asset, (0, 5_000)) == (0, 5_000)
 
 
 def test_subject_gap_tolerance_constant_is_realistic_for_5fps_yolo() -> None:

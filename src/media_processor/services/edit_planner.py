@@ -657,6 +657,22 @@ SUBJECT_GAP_TOLERANCE_MS: int = 1500
 # flicker doesn't become a 200 ms cut. 1500 ms ≈ the planner's
 # minimum span across all style presets.
 SUBJECT_MIN_WINDOW_MS: int = 1500
+# v0.42.3 — do not let YOLO noise satisfy a project subject filter.
+# Object tracking already hides tracks shorter than 5 sampled frames from
+# user-facing pickers; the planner should apply the same floor before it
+# trusts a class-specific presence window for one-click auto edits.
+SUBJECT_MIN_TRACK_FRAMES: int = 5
+# A 0.30 detection can be useful for manual review, but auto planning
+# should not treat a barely-there class as proof that the requested
+# subject was visible. Keep this below the real-car examples around
+# 0.44 while rejecting the 0.35-ish noise clips seen in production.
+SUBJECT_MIN_TRACK_CONFIDENCE: float = 0.40
+
+# If the model picks the very start of an asset and that first beat is
+# handheld setup movement, begin after that setup whenever enough clip
+# remains. This avoids opening a cut on the operator lifting/reframing
+# the camera while preserving deliberate pan/tilt motion later in the cut.
+UNSTABLE_OPENING_MOTION_SKIP_MS: int = 2_000
 
 
 def _subject_presence_windows_ms(asset: Asset, subject_class: str) -> list[tuple[int, int]]:
@@ -687,14 +703,20 @@ def _subject_presence_windows_ms(asset: Asset, subject_class: str) -> list[tuple
                 continue
             if t.get("cls_name") != subject_class:
                 continue
-            for f in t.get("frames", []) or []:
+            frames = t.get("frames", []) or []
+            if not _is_reliable_subject_track(t, frames):
+                continue
+            for f in frames:
                 if not isinstance(f, dict):
                     continue
                 t_ms = f.get("t_ms")
                 if isinstance(t_ms, int):
                     matched.append(t_ms)
     if not matched and tracking.get("subject_class") == subject_class:
-        for f in tracking.get("frames", []) or []:
+        frames = tracking.get("frames", []) or []
+        if not _is_reliable_subject_track(tracking, frames):
+            return []
+        for f in frames:
             if not isinstance(f, dict):
                 continue
             t_ms = f.get("t_ms")
@@ -721,6 +743,59 @@ def _subject_presence_windows_ms(asset: Asset, subject_class: str) -> list[tuple
         if e - s >= SUBJECT_MIN_WINDOW_MS:
             out.append((s, e))
     return out
+
+
+def _is_reliable_subject_track(track: dict[str, Any], frames: Any) -> bool:
+    """Return True when a tracking row is strong enough for auto planning.
+
+    Missing ``confidence`` is treated as legacy data and allowed; present
+    confidence below the auto floor is treated as YOLO noise.
+    """
+    if not isinstance(frames, list) or len(frames) < SUBJECT_MIN_TRACK_FRAMES:
+        return False
+    conf = track.get("confidence")
+    if conf is None:
+        return True
+    try:
+        return float(conf) >= SUBJECT_MIN_TRACK_CONFIDENCE
+    except (TypeError, ValueError):
+        return False
+
+
+def _avoid_unstable_opening_span(
+    asset: Asset,
+    span_ms: tuple[int, int],
+) -> tuple[int, int]:
+    """Move a cut start past initial handheld setup movement when possible."""
+    span_start, span_end = span_ms
+    if span_start < 0 or span_end <= span_start:
+        return span_ms
+    new_start = span_start
+    for tag in asset.tags:
+        if tag.tag_type != "motion" or tag.tag_name != "handheld":
+            continue
+        for r in tag.time_ranges_ms or []:
+            if not isinstance(r, list | tuple) or len(r) != 2:
+                continue
+            try:
+                motion_start = int(r[0])
+                motion_end = int(r[1])
+            except (TypeError, ValueError):
+                continue
+            if motion_start > 0 or motion_end > UNSTABLE_OPENING_MOTION_SKIP_MS:
+                continue
+            if span_start < motion_end and span_end - motion_end >= MIN_SPAN_MS:
+                new_start = max(new_start, motion_end)
+    if new_start != span_start:
+        logger.info(
+            "unstable-opening-filter: asset=%d span=(%d,%d) -> (%d,%d)",
+            asset.id,
+            span_start,
+            span_end,
+            new_start,
+            span_end,
+        )
+    return new_start, span_end
 
 
 def _subject_presence_range_ms(asset: Asset, subject_class: str) -> tuple[int, int] | None:
@@ -797,6 +872,7 @@ def _apply_subject_filter(
             longest = max(windows, key=lambda w: w[1] - w[0])
             new_start, new_end = longest
             action = "snap-longest"
+        new_start, new_end = _avoid_unstable_opening_span(asset, (new_start, new_end))
         logger.info(
             "subject-filter: %s asset=%d windows=%s llm_span=(%d,%d) -> (%d,%d)",
             action,
@@ -1433,16 +1509,18 @@ async def _score_one_asset(
                 asset_duration_ms=int(asset.duration_ms),
                 style=style,
             )
+            best_span_ms = _avoid_unstable_opening_span(asset, parsed.best_span_ms)
             # Attach motion + emotion context for rhythm-aware assembly
             # and renderer-side zoompan / transition decisions. We do
             # this server-side rather than asking Gemini to echo back
             # the tags so the model can't accidentally rewrite them.
             return replace(
                 parsed,
-                dominant_motion=_dominant_motion_for_span(asset, parsed.best_span_ms),
+                best_span_ms=best_span_ms,
+                dominant_motion=_dominant_motion_for_span(asset, best_span_ms),
                 dominant_emotion=_dominant_emotion_for_asset(asset),
                 asset_duration_ms=int(asset.duration_ms),
-                has_face=_has_face_in_span(asset, parsed.best_span_ms),
+                has_face=_has_face_in_span(asset, best_span_ms),
             )
         except EditPlanInvalidError as exc:
             last_invalid = exc
@@ -1629,7 +1707,7 @@ async def heuristic_fallback(
             if end > mid:
                 clamped = _clamp_to_presence(mid, end, presence)
                 if clamped is not None:
-                    cs, ce = clamped
+                    cs, ce = _avoid_unstable_opening_span(asset, clamped)
                     segments.append(
                         CutPlanSegment(
                             order=order,
@@ -1654,7 +1732,7 @@ async def heuristic_fallback(
                 clamped = _clamp_to_presence(start, end, presence)
                 if clamped is None:
                     continue
-                cs, ce = clamped
+                cs, ce = _avoid_unstable_opening_span(asset, clamped)
                 segments.append(
                     CutPlanSegment(
                         order=order,
