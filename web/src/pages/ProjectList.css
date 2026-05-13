@@ -308,6 +308,15 @@
   color: var(--text-secondary);
 }
 
+.cta--fork {
+  min-width: 132px;
+}
+
+.cta:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
 .progress-track {
   width: 220px;
   height: 2px;

@@ -1,5 +1,7 @@
 import type React from "react";
+import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { apiClient } from "../api/client";
 import type { ProjectSummary } from "../api/types";
 import { useProjects } from "../hooks";
 import "./ProjectList.css";
@@ -29,7 +31,35 @@ const STATUS_LABEL: Record<string, string> = {
   pending: "等待上傳素材",
 };
 
-function StatusCell({ project }: { project: ProjectSummary }) {
+function ForkButton({
+  forking,
+  onFork,
+}: {
+  forking: boolean;
+  onFork: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="cta cta--quiet cta--fork"
+      onClick={onFork}
+      disabled={forking}
+      aria-busy={forking}
+    >
+      {forking ? "複製中…" : "複製測試 →"}
+    </button>
+  );
+}
+
+function StatusCell({
+  project,
+  forking,
+  onFork,
+}: {
+  project: ProjectSummary;
+  forking: boolean;
+  onFork: () => void;
+}) {
   // v0.22 — drafted/approved both mean "there is at least one rendered
   // mp4 ready"; ProjectEdit is the page that actually plays it (the
   // legacy /review route still exists but renders a placeholder). Send
@@ -46,6 +76,7 @@ function StatusCell({ project }: { project: ProjectSummary }) {
         <Link to={`/projects/${project.id}/edit`} className="cta cta--primary">
           預覽 / 下載 →
         </Link>
+        <ForkButton forking={forking} onFork={onFork} />
       </div>
     );
   }
@@ -67,6 +98,7 @@ function StatusCell({ project }: { project: ProjectSummary }) {
         <Link to={`/projects/${project.id}/assets`} className="cta cta--quiet">
           查看進度 →
         </Link>
+        <ForkButton forking={forking} onFork={onFork} />
       </div>
     );
   }
@@ -81,6 +113,7 @@ function StatusCell({ project }: { project: ProjectSummary }) {
         <Link to={`/projects/${project.id}/edit`} className="cta cta--quiet">
           開啟 →
         </Link>
+        <ForkButton forking={forking} onFork={onFork} />
       </div>
     );
   }
@@ -93,13 +126,16 @@ function StatusCell({ project }: { project: ProjectSummary }) {
           {STATUS_LABEL[project.status] ?? project.status}
         </span>
       </div>
+      <ForkButton forking={forking} onFork={onFork} />
     </div>
   );
 }
 
 export default function ProjectList() {
-  const { data: projects, error, loading } = useProjects();
+  const { data: projects, error, loading, refetch } = useProjects();
   const navigate = useNavigate();
+  const [forkingProjectId, setForkingProjectId] = useState<number | null>(null);
+  const [forkError, setForkError] = useState<string | null>(null);
   const list = projects ?? [];
 
   const goToProject = (project: ProjectSummary, ev: React.SyntheticEvent) => {
@@ -121,6 +157,21 @@ export default function ProjectList() {
       return;
     }
     navigate(`/projects/${project.id}/assets`);
+  };
+
+  const forkProject = async (project: ProjectSummary) => {
+    if (forkingProjectId !== null) return;
+    setForkingProjectId(project.id);
+    setForkError(null);
+    try {
+      const fork = await apiClient.forkProject(project.id);
+      refetch();
+      navigate(`/projects/${fork.id}/edit`);
+    } catch (e) {
+      setForkError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setForkingProjectId(null);
+    }
   };
 
   return (
@@ -152,6 +203,12 @@ export default function ProjectList() {
         {error && (
           <div className="board__notice" role="alert">
             <span className="mono">服務錯誤 · {error.message}</span>
+          </div>
+        )}
+
+        {forkError && (
+          <div className="board__notice" role="alert">
+            <span className="mono">複製失敗 · {forkError}</span>
           </div>
         )}
 
@@ -207,7 +264,11 @@ export default function ProjectList() {
                 </div>
               </div>
 
-              <StatusCell project={p} />
+              <StatusCell
+                project={p}
+                forking={forkingProjectId === p.id}
+                onFork={() => void forkProject(p)}
+              />
             </li>
           ))}
         </ol>

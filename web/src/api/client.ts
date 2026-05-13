@@ -108,6 +108,12 @@ export class ApiClient {
     return this.get<ProjectDetail>(`/projects/${id}`);
   }
 
+  forkProject(id: number): Promise<ProjectDetail> {
+    return this.request<ProjectDetail>(`/projects/${id}/fork`, {
+      method: "POST",
+    });
+  }
+
   fetchProjectDrafts(id: number): Promise<DraftSummary[]> {
     return this.get<DraftSummary[]>(`/projects/${id}/drafts`);
   }

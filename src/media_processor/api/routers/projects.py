@@ -61,7 +61,7 @@ from media_processor.models import (
     ScriptCoverage,
 )
 from media_processor.services import asset_management as asset_mgmt
-from media_processor.services import asset_variants
+from media_processor.services import asset_variants, project_fork
 from media_processor.services.object_tracking import aggregate_detected_classes
 from media_processor.services.queue import enqueue_project_edit
 
@@ -269,6 +269,49 @@ async def get_project(
         project,
         asset_count=int(asset_count or 0),
         draft_count=int(draft_count or 0),
+    )
+
+
+@router.post(
+    "/{project_id}/fork",
+    response_model=ProjectDetail,
+    status_code=status.HTTP_201_CREATED,
+)
+async def fork_project(
+    project_id: int,
+    session: SessionDep,
+) -> ProjectDetail:
+    try:
+        fork = await project_fork.fork_project(session, project_id)
+        fork_id = fork.id
+        await session.commit()
+    except project_fork.ProjectForkNotFoundError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except project_fork.ProjectForkMediaMissingError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except project_fork.ProjectForkCopyFailedError as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        ) from exc
+
+    fork_after_commit = await session.get(Project, fork_id)
+    if (
+        fork_after_commit is None
+    ):  # pragma: no cover - commit succeeded but row vanished concurrently.
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="forked project not found"
+        )
+    asset_count = await session.scalar(
+        select(func.count(Asset.id)).where(Asset.project_id == fork_id)
+    )
+    return _project_detail(
+        fork_after_commit,
+        asset_count=int(asset_count or 0),
+        draft_count=0,
     )
 
 
