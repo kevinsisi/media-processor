@@ -21,6 +21,9 @@ export default function AppHeader() {
           <NavLink to="/settings" className="nav-link nav-link--quiet">
             設定
           </NavLink>
+          <NavLink to="/prototype/redesign" className="nav-link nav-link--quiet">
+            新版流程
+          </NavLink>
           <NavLink to="/health" className="nav-link nav-link--quiet">
             系統狀態
           </NavLink>

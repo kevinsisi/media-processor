@@ -2,7 +2,7 @@
 
 Content factory pipeline for novice-friendly Instagram and Facebook short-video production.
 
-**Status:** v0.30.15 / M9.15.15 — Automatic YOLO crop path smoothing reduces handheld left/right shake without dropping selected clips.
+**Status:** v0.40.0 / M10.0 — Interactive dual-path redesign prototype for one-click auto flow and manual cut planning review.
 
 ## Spec
 
