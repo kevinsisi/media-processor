@@ -5,6 +5,7 @@ import NewProject from "./pages/NewProject";
 import ProjectAnalysis from "./pages/ProjectAnalysis";
 import ProjectEdit from "./pages/ProjectEdit";
 import ProjectList from "./pages/ProjectList";
+import RedesignPrototype from "./pages/RedesignPrototype";
 import Settings from "./pages/Settings";
 import TimelineEditor from "./pages/TimelineEditor";
 import Upload from "./pages/Upload";
@@ -29,6 +30,7 @@ export default function App() {
           element={<TimelineEditor />}
         />
         <Route path="/projects/:id/review" element={<LegacyReviewRedirect />} />
+        <Route path="/prototype/redesign" element={<RedesignPrototype />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/health" element={<Health />} />
       </Routes>
