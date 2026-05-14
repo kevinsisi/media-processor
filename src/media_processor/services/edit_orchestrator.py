@@ -460,6 +460,7 @@ async def _gather_render_inputs(
     dict[int, dict[str, Any]],
     dict[int, dict[str, Any]],
     dict[int, list[dict[str, Any]]],
+    set[int],
 ]:
     async with async_session_maker() as session:
         project = await session.get(Project, project_id)
@@ -471,6 +472,12 @@ async def _gather_render_inputs(
             .all()
         )
         asset_paths = {a.id: asset_variants.selected_media_path(a) for a in assets}
+        stabilized_asset_ids = {
+            a.id
+            for a in assets
+            if asset_variants.active_variant(a) == asset_variants.STABILIZED_VARIANT
+            and asset_variants.stabilization_status(a) == asset_variants.STABILIZATION_DONE
+        }
         # v0.16 — tracking_json. v0.17 added per-asset ``tracked_object_index``
         # + ``custom_roi_json`` so the user can pick a non-dominant
         # object (or draw a custom ROI) on the analysis page.
@@ -523,6 +530,7 @@ async def _gather_render_inputs(
             custom_roi_by_asset,
             point_track_by_asset,
             secondary_segments_by_asset,
+            stabilized_asset_ids,
         )
 
 
@@ -788,6 +796,7 @@ async def run_render(
         custom_roi_by_asset,
         point_track_by_asset,
         secondary_segments_by_asset,
+        stabilized_asset_ids,
     ) = await _gather_render_inputs(project_id)
 
     # v0.30.0 — opt-in AI Smart Camera stage. Resolves the project
@@ -1050,6 +1059,7 @@ async def run_render(
             crop_region=crop_region_tuple,
             smart_camera_enabled=smart_camera_active,
             smart_camera_beat_grid_s=smart_camera_beat_grid_s,
+            stabilized_asset_ids=stabilized_asset_ids,
             subtitle_style=subtitle_style if subtitles_enabled else None,
             on_progress=_sync_progress,
         )

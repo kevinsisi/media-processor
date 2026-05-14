@@ -819,12 +819,16 @@ def cut_segments(
     smart_camera_enabled: bool = False,
     stabilize_enabled: bool = False,
     smart_camera_beat_grid_s: list[float] | None = None,
+    stabilized_asset_ids: set[int] | None = None,
 ) -> tuple[list[Path], list[bool]]:
     """Cut every segment in the plan; return ``(paths, reframed_flags)``.
 
     ``reframed_flags[i]`` is ``True`` when segment i must skip vidstab:
-    dynamic crop path / AI Smart Camera, or an explicit Smart Camera
-    ``kind=none`` no-correction decision.
+    dynamic crop path / AI Smart Camera, an explicit Smart Camera
+    ``kind=none`` no-correction decision, or the source asset is already
+    a stabilized derivative (``stabilized_asset_ids``). The last case
+    prevents double-stabilization when both asset-level and render-level
+    vidstab are enabled.
 
     ``tracking_by_asset`` (when supplied) maps ``asset_id`` to its
     ``Asset.tracking_json`` dict; segments backed by an asset present in
@@ -885,7 +889,8 @@ def cut_segments(
             timeline_start_s=timeline_start_s,
         )
         out_paths.append(out)
-        reframed_flags.append(bool(reframed))
+        source_stabilized = cut.asset_id in (stabilized_asset_ids or set())
+        reframed_flags.append(bool(reframed) or source_stabilized)
         timeline_start_s += max(0.001, (cut.asset_end_ms - cut.asset_start_ms) / 1000.0)
         if on_progress is not None:
             on_progress(cut.order + 1, total)
@@ -1432,6 +1437,7 @@ def render(
     crop_region: tuple[float, float] | None = None,
     smart_camera_enabled: bool = False,
     smart_camera_beat_grid_s: list[float] | None = None,
+    stabilized_asset_ids: set[int] | None = None,
     subtitle_style: SubtitleStyle | None = None,
     on_progress: Callable[[str, int, int], None] | None = None,
 ) -> RenderResult:
@@ -1482,6 +1488,7 @@ def render(
         smart_camera_enabled=smart_camera_enabled,
         stabilize_enabled=stabilize,
         smart_camera_beat_grid_s=smart_camera_beat_grid_s,
+        stabilized_asset_ids=stabilized_asset_ids,
     )
 
     # Stage 1.5 — optional digital stabilization. Replaces each

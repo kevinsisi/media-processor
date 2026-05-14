@@ -93,6 +93,35 @@ def test_cut_segments_writes_one_file_per_segment(tmp_path: Path) -> None:
     assert reframed_flags == [False, False]
 
 
+def test_cut_segments_stabilized_asset_skips_vidstab(tmp_path: Path) -> None:
+    """Cuts from a stabilized-source asset must return reframed=True so the
+    render-level vidstab stage skips them — prevents double stabilization."""
+    src_raw = tmp_path / "raw.mp4"
+    src_stab = tmp_path / "stab.mp4"
+    src_raw.write_bytes(b"fake")
+    src_stab.write_bytes(b"fake")
+    plan = CutPlan(
+        schema_version="m5.cut-plan.v1",
+        target_duration_ms=2_000,
+        target_aspect_ratio="9:16",
+        profile_name="universal",
+        segments=(
+            CutPlanSegment(0, 1, 0, 1_000, "scripted", "r1"),  # asset 1 = raw
+            CutPlanSegment(1, 2, 0, 1_000, "improv", "r2"),  # asset 2 = stabilized
+        ),
+    )
+    _, reframed_flags = video_renderer.cut_segments(
+        plan,
+        asset_paths={1: src_raw, 2: src_stab},
+        intermediate_dir=tmp_path / "out",
+        target_aspect="9:16",
+        stabilized_asset_ids={2},
+    )
+    assert reframed_flags == [False, True], (
+        "stabilized-source cut must be flagged reframed=True to skip render-level vidstab"
+    )
+
+
 def test_cut_segments_missing_source_raises(tmp_path: Path) -> None:
     plan = CutPlan(
         schema_version="m5.cut-plan.v1",
