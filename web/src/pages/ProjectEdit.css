@@ -835,45 +835,6 @@
   min-width: min(100%, 260px);
 }
 
-.edit-advanced-panel {
-  margin-top: var(--space-5);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.025);
-}
-
-.edit-advanced-panel__summary {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-3);
-  padding: var(--space-4) var(--space-5);
-  cursor: pointer;
-  user-select: none;
-}
-
-.edit-advanced-panel__title {
-  color: var(--text-primary);
-  font-family: var(--font-display);
-  font-size: var(--t-lg);
-  font-weight: 320;
-}
-
-.edit-advanced-panel__hint {
-  color: var(--text-secondary);
-  font-size: var(--t-sm);
-  line-height: 1.5;
-}
-
-.edit-advanced-panel[open] {
-  padding-bottom: var(--space-5);
-}
-
-.edit-advanced-panel[open] > .edit-card,
-.edit-advanced-panel[open] > .subtitle-editor {
-  margin-left: var(--space-5);
-  margin-right: var(--space-5);
-}
-
 .edit-card--secondary {
   border-color: rgba(255, 255, 255, 0.1);
   background: rgba(255, 255, 255, 0.025);
@@ -1266,17 +1227,6 @@
   .publish-workbench__actions .export-sheet__trigger {
     width: 100%;
     justify-content: center;
-  }
-  .edit-advanced-panel__summary {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: var(--space-1);
-    padding: var(--space-4);
-  }
-  .edit-advanced-panel[open] > .edit-card,
-  .edit-advanced-panel[open] > .subtitle-editor {
-    margin-left: var(--space-4);
-    margin-right: var(--space-4);
   }
   .edit-card {
     padding: var(--space-4);

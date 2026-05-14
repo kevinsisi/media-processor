@@ -26,7 +26,7 @@
   border: none;
   cursor: pointer;
   transition: opacity 0.15s, background 0.15s;
-  background: var(--gold, #3b82f6);
+  background: var(--gold, #c9a961);
   color: #fff;
 }
 
