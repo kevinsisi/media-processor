@@ -2053,6 +2053,7 @@ export default function ProjectEdit() {
         label={footerLabel}
         onClick={footerOnClick}
         onOpenQueue={() => setQueueModalOpen(true)}
+        disabled={seedLoading}
       />
 
       {selectedDraftId !== null && <DraftComments draftId={selectedDraftId} />}
