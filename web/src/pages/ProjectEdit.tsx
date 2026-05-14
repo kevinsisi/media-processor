@@ -1284,6 +1284,7 @@ export default function ProjectEdit() {
   const handleAutoReframeChange = useCallback(
     (next: boolean) => {
       setAutoReframe(next);
+      if (next) setSmartCamera(false);
       markSettingsChanged("自動跟住主角設定已更新");
     },
     [markSettingsChanged],
@@ -1324,6 +1325,7 @@ export default function ProjectEdit() {
   const handleSmartCameraChange = useCallback(
     (next: boolean) => {
       setSmartCamera(next);
+      if (next) setAutoReframe(false);
       void apiClient
         .patchProjectSmartCamera(validProjectId, { enabled: next })
         .then((updated) => {
