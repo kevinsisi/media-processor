@@ -710,7 +710,7 @@ def test_emotion_zoompan_suppressed_when_tracking_active(
                 "improv",
                 "",
                 dominant_emotion="happy",
-                dominant_motion="dynamic",
+                dominant_motion="pan",
             ),
         ),
     )
@@ -754,12 +754,15 @@ def test_emotion_zoompan_suppressed_when_tracking_active(
 def test_smart_camera_none_suppresses_stale_point_tracking_and_vidstab(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A no-move Smart Camera decision must not expose persisted point tracking.
+    """Smart Camera kind=none suppresses automatic tracking but not explicit user tracking.
 
-    Draft 49 had point tracks on every asset. When Smart Camera stores
-    ``kind=none`` for a cut, that means no extra correction; the old point-track
-    row is not enough evidence that this render wants a tracking crop, and
-    vidstab must not add its own compensation move afterward.
+    When Smart Camera stores ``kind=none`` for a cut AND the operator has set an
+    explicit point track, the point track must still win (explicit user framing
+    intent takes priority over the Vision no-move decision). Automatic YOLO
+    tracking (no user intent) is still suppressed by kind=none.
+
+    This test exercises the explicit-point-track scenario: kind=none + explicit
+    point track → tracking chain wins, no zoompan, vidstab skipped.
     """
     src = tmp_path / "asset.mp4"
     src.write_bytes(b"fake")
@@ -789,13 +792,16 @@ def test_smart_camera_none_suppresses_stale_point_tracking_and_vidstab(
     )
     captured_filters: list[str] = []
 
-    def fail_point_track(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
-        raise AssertionError("point tracking crop should be suppressed")
-
     monkeypatch.setattr(
         video_renderer.auto_reframe,
         "compute_crop_path_from_point_track",
-        fail_point_track,
+        lambda *args, **kwargs: [(0, 0, 1920, 1080)],
+    )
+    monkeypatch.setattr(video_renderer.auto_reframe, "write_sendcmd_file", lambda *args: None)
+    monkeypatch.setattr(
+        video_renderer.auto_reframe,
+        "build_filter_chain",
+        lambda *args, **kwargs: "POINT_TRACK_CHAIN",
     )
 
     def fake_run(cmd: list[str], *, timeout_s: float, stage: str) -> None:
@@ -818,8 +824,75 @@ def test_smart_camera_none_suppresses_stale_point_tracking_and_vidstab(
 
     assert reframed == [True]
     assert len(captured_filters) == 1
+    assert captured_filters == ["POINT_TRACK_CHAIN"]
     assert "zoompan=" not in captured_filters[0]
-    assert "crop@reframe" not in captured_filters[0]
+
+
+def test_explicit_tracking_wins_over_smart_camera_none_kind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Explicit user point tracking must win even when Smart Camera decides kind=none.
+
+    When ``smart_camera_enabled=True`` and the cut stores ``kind=none`` (Vision
+    decided no AI move), but the operator has an explicit point track set for the
+    asset, the point track must still be applied.  The no-move decision suppresses
+    *automatic* tracking and AI camera moves; it must not override the user's
+    deliberate framing choice.
+    """
+    src = tmp_path / "asset.mp4"
+    src.write_bytes(b"fake")
+    plan = CutPlan(
+        schema_version="m5.cut-plan.v1",
+        target_duration_ms=1_000,
+        target_aspect_ratio="9:16",
+        profile_name="universal",
+        segments=(
+            CutPlanSegment(
+                0,
+                1,
+                0,
+                1_000,
+                "improv",
+                "",
+                smart_camera_json={"kind": "none"},
+            ),
+        ),
+    )
+    captured_filters: list[str] = []
+
+    monkeypatch.setattr(
+        video_renderer.auto_reframe,
+        "compute_crop_path_from_point_track",
+        lambda *args, **kwargs: [(0, 0, 1080, 1920)],
+    )
+    monkeypatch.setattr(video_renderer.auto_reframe, "write_sendcmd_file", lambda *args: None)
+    monkeypatch.setattr(
+        video_renderer.auto_reframe,
+        "build_filter_chain",
+        lambda *args, **kwargs: "POINT_TRACK_CHAIN",
+    )
+
+    def fake_run(cmd: list[str], *, timeout_s: float, stage: str) -> None:
+        captured_filters.append(cmd[cmd.index("-vf") + 1])
+        Path(cmd[-1]).parent.mkdir(parents=True, exist_ok=True)
+        Path(cmd[-1]).write_bytes(b"")
+
+    monkeypatch.setattr(video_renderer, "_run", fake_run)
+
+    # tracking_target_by_asset sentinel -4 activates point tracking;
+    # point_track_by_asset carries the actual track data.
+    _paths, reframed = video_renderer.cut_segments(
+        plan,
+        asset_paths={1: src},
+        intermediate_dir=tmp_path / "out",
+        target_aspect="9:16",
+        tracking_target_by_asset={1: -4},
+        point_track_by_asset={1: {"frames": [{"t_ms": 0, "x": 100, "y": 100}]}},
+        smart_camera_enabled=True,
+    )
+
+    assert reframed == [True]
+    assert captured_filters == ["POINT_TRACK_CHAIN"]
 
 
 def test_stabilize_segment_uses_stable_vidstab_options(

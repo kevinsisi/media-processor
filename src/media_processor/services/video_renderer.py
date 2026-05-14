@@ -676,8 +676,17 @@ def _cut_segment(
         smart_camera_enabled and isinstance(smart_blob, dict) and smart_kind == "none"
     )
 
+    # is_explicit_tracking: True when the operator set a point track,
+    # custom ROI, or picked a specific YOLO object for this asset.
+    # Explicit tracking must win even over a Smart Camera kind=none
+    # decision — the user's framing intent takes priority over what
+    # Vision decided for the AI move.
+    is_explicit_tracking = bool(
+        point_track or custom_roi or (tracking is not None and tracking_object_index is not None)
+    )
+
     crop_path = None
-    if sendcmd_dir is not None and not smart_camera_no_move:
+    if sendcmd_dir is not None and (not smart_camera_no_move or is_explicit_tracking):
         # v0.23 — point_track wins over custom_roi which wins over
         # YOLO tracking. The dispatch reads the same way as the
         # ``tracked_object_index`` sentinel order: -4 (point) → -1
@@ -743,7 +752,7 @@ def _cut_segment(
             )
         if smart_camera_no_move:
             logger.info(
-                "smart-camera: cut %d no-move directive suppresses tracking and zoompan",
+                "smart-camera: cut %d no-move directive suppresses automatic tracking and zoompan",
                 cut.order,
             )
     # explicit_tracking_active: True when crop_path came from a user intent
