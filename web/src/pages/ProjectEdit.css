@@ -395,6 +395,45 @@
   margin: 0 0 var(--space-3) 0;
 }
 
+.render-options__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1, 4px);
+  padding-bottom: var(--space-3, 12px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  margin-bottom: var(--space-2, 8px);
+}
+
+.render-options__group:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+  margin-bottom: 0;
+}
+
+.render-options__group-label {
+  font-size: var(--t-xs);
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-1, 4px);
+}
+
+.render-options__mutex-hint {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  opacity: 0.7;
+  margin-left: 4px;
+}
+
+.render-options__mutex-label {
+  font-size: var(--t-xs);
+  color: var(--text-secondary);
+  opacity: 0.6;
+  margin-top: 2px;
+}
+
 /* ---- Style preset picker (v0.18 — fast / slow / commercial / artistic / custom) ---- */
 
 .style-preset-picker {

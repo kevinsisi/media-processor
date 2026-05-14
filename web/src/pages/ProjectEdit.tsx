@@ -493,43 +493,62 @@ function RenderOptions({
   setSmartCamera,
   disabled,
 }: RenderOptionsProps) {
+  function handleAutoReframe(v: boolean) {
+    setAutoReframe(v);
+    if (v) setSmartCamera(false);
+  }
+  function handleSmartCamera(v: boolean) {
+    setSmartCamera(v);
+    if (v) setAutoReframe(false);
+  }
+
   return (
     <div className="render-options">
-      <EditOptionToggle
-        label="畫面防手震"
-        hint="手機手持拍攝建議開啟；畫面本來很穩時可關閉，加快成品產出。"
-        value={stabilize}
-        onChange={setStabilize}
-        disabled={disabled}
-      />
-      <EditOptionToggle
-        label="加上字幕"
-        hint="開啟後會把繁體中文字幕放進影片，適合社群靜音觀看。"
-        value={subtitlesOn}
-        onChange={setSubtitlesOn}
-        disabled={disabled}
-      />
-      <EditOptionToggle
-        label="使用轉場效果"
-        hint="開啟後片段之間會更柔順；關閉則節奏更直接。"
-        value={transitionsOn}
-        onChange={setTransitionsOn}
-        disabled={disabled}
-      />
-      <EditOptionToggle
-        label="自動跟住主角"
-        hint="建立直式或方形影片時，系統會盡量讓人物、車或商品留在畫面中間。"
-        value={autoReframe}
-        onChange={setAutoReframe}
-        disabled={disabled}
-      />
-      <EditOptionToggle
-        label="AI 智慧運鏡（實驗性）"
-        hint="啟用後重新產生時會多打一次 Gemini 規劃鏡頭運動。可能蓋過情緒縮放；與穩定畫面、跟住主角同時開啟時會自動退讓。"
-        value={smartCamera}
-        onChange={setSmartCamera}
-        disabled={disabled}
-      />
+      <div className="render-options__group">
+        <p className="render-options__group-label">基本</p>
+        <EditOptionToggle
+          label="畫面防手震"
+          hint="手機手持拍攝建議開啟。已使用穩定版的素材不會重複處理。"
+          value={stabilize}
+          onChange={setStabilize}
+          disabled={disabled}
+        />
+        <EditOptionToggle
+          label="加上字幕"
+          hint="開啟後會把繁體中文字幕放進影片，適合社群靜音觀看。"
+          value={subtitlesOn}
+          onChange={setSubtitlesOn}
+          disabled={disabled}
+        />
+        <EditOptionToggle
+          label="使用轉場效果"
+          hint="開啟後片段之間會更柔順；關閉則節奏更直接。"
+          value={transitionsOn}
+          onChange={setTransitionsOn}
+          disabled={disabled}
+        />
+      </div>
+      <div className="render-options__group">
+        <p className="render-options__group-label">
+          AI 進階
+          <span className="render-options__mutex-hint">（選一種）</span>
+        </p>
+        <EditOptionToggle
+          label="自動跟住主角"
+          hint="建立直式或方形影片時，系統會盡量讓人物、車或商品留在畫面中間。"
+          value={autoReframe}
+          onChange={handleAutoReframe}
+          disabled={disabled}
+        />
+        <EditOptionToggle
+          label="AI 智慧運鏡（實驗性）"
+          hint="啟用後重新產生時會多打一次 Gemini 規劃鏡頭運動。與跟住主角同時開啟時會自動退讓。"
+          value={smartCamera}
+          onChange={handleSmartCamera}
+          disabled={disabled}
+        />
+        <p className="render-options__mutex-label">兩者互斥，同時只能啟用一種</p>
+      </div>
     </div>
   );
 }
