@@ -36,6 +36,7 @@ from media_processor.services import (
     object_tracking,
     scene_tagging,
     script_coverage,
+    variant_analysis_snapshots,
     whisper_stt,
 )
 from media_processor.services.settings_store import get_llm_api_keys
@@ -137,6 +138,7 @@ async def _finalise_status(
     else:
         # Partial success counts as analyzed — operator can re-run failed steps.
         asset.status = AssetStatus.ANALYZED.value
+    await variant_analysis_snapshots.save_variant_analysis_snapshot(session, asset)
     await session.commit()
 
 

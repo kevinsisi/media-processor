@@ -855,6 +855,7 @@ class AssetVariantResponse(BaseModel):
     asset_id: int
     active_asset_variant: AssetVariantLiteral
     analysis_job_id: str | None = None
+    restored_from_snapshot: bool = False
     analysis_steps: dict[str, str] | None = None
 
 

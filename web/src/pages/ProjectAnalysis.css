@@ -470,6 +470,16 @@
   gap: var(--space-2);
 }
 
+.asset-variant-panel__preview-label {
+  justify-self: start;
+  padding: 4px 8px;
+  border: 1px solid rgba(209, 174, 91, 0.45);
+  border-radius: 999px;
+  color: var(--gold);
+  background: rgba(209, 174, 91, 0.12);
+  font-size: var(--t-xs);
+}
+
 .asset-variant-panel__video {
   position: relative;
   z-index: 1;
@@ -1189,6 +1199,12 @@
 .project-analysis .cta--quiet {
   border-color: var(--ink-line);
   color: var(--text-secondary);
+}
+
+.project-analysis .cta--selected {
+  border-color: var(--gold);
+  color: var(--gold);
+  background: rgba(209, 174, 91, 0.12);
 }
 
 .board__notice {

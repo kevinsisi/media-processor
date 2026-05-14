@@ -670,8 +670,14 @@ function labelForStabilizationStatus(status: string): string {
 }
 
 
-function VariantPreviewVideo({ src }: { src: string }) {
+function VariantPreviewVideo({ src, label }: { src: string; label: string }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.pause();
+    video.load();
+  }, [src]);
   const togglePlayback = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
@@ -683,7 +689,11 @@ function VariantPreviewVideo({ src }: { src: string }) {
   }, []);
   return (
     <div className="asset-variant-panel__video-wrap">
+      <div className="asset-variant-panel__preview-label mono">
+        正在預覽：{label}
+      </div>
       <video
+        key={src}
         ref={videoRef}
         className="asset-variant-panel__video"
         src={src}
@@ -743,6 +753,7 @@ function AssetVariantControls({
   const stabilizedUrl = asset.variant_urls?.stabilized ?? null;
   const previewUrl =
     previewVariant === "stabilized" && stabilizedUrl ? stabilizedUrl : rawUrl;
+  const previewLabel = previewVariant === "stabilized" ? "防抖版" : "原始影片";
   const canGenerate =
     !stabilizing && !["pending", "running"].includes(asset.stabilization_status);
   return (
@@ -756,14 +767,20 @@ function AssetVariantControls({
           {labelForStabilizationStatus(asset.stabilization_status)}
         </span>
       </div>
-      <VariantPreviewVideo src={previewUrl} />
+      <VariantPreviewVideo src={previewUrl} label={previewLabel} />
       <div className="asset-variant-panel__actions">
-        <button type="button" className="cta cta--quiet" onClick={() => setPreviewVariant("raw")}>
+        <button
+          type="button"
+          className={`cta cta--quiet${previewVariant === "raw" ? " cta--selected" : ""}`}
+          aria-pressed={previewVariant === "raw"}
+          onClick={() => setPreviewVariant("raw")}
+        >
           預覽原始
         </button>
         <button
           type="button"
-          className="cta cta--quiet"
+          className={`cta cta--quiet${previewVariant === "stabilized" ? " cta--selected" : ""}`}
+          aria-pressed={previewVariant === "stabilized"}
           onClick={() => setPreviewVariant("stabilized")}
           disabled={!stabilizedReady || !stabilizedUrl}
           title={stabilizedReady ? "預覽防抖版" : "防抖版尚未完成"}
@@ -943,13 +960,6 @@ function AssetCard({
         </div>
       )}
 
-      {asset.tracking_summary && (
-        <AssetTrackingTarget
-          assetId={asset.id}
-          thumbnailUrl={asset.thumbnail_urls[0] ?? null}
-        />
-      )}
-
       <AssetVariantControls
         asset={asset}
         onStabilize={onStabilize}
@@ -957,6 +967,13 @@ function AssetCard({
         stabilizing={stabilizing}
         switchingVariant={switchingVariant}
       />
+
+      {asset.tracking_summary && (
+        <AssetTrackingTarget
+          assetId={asset.id}
+          thumbnailUrl={asset.thumbnail_urls[0] ?? null}
+        />
+      )}
 
       <div className="asset-card__transcript-toggle">
         <button
@@ -1187,8 +1204,8 @@ export default function ProjectAnalysis() {
       const ok = await confirm({
         title: variant === "stabilized" ? "改用防抖版？" : "改回原始版？",
         message:
-          "切換素材版本會清除畫面座標相關分析與追蹤，並重新檢查這個素材，確保後續剪輯使用同一份影片。",
-        confirmLabel: "切換並重新檢查",
+          "切換時會先把目前版本的分析結果存進資料庫；如果目標版本已分析過，會直接還原，不會重跑檢查或消耗 token。",
+        confirmLabel: "切換版本",
         tone: "default",
       });
       if (!ok) return;
@@ -1196,11 +1213,15 @@ export default function ProjectAnalysis() {
       setTriggerError(null);
       setVariantSwitchingIds((prev) => new Set(prev).add(assetId));
       try {
-        await apiClient.patchAssetVariant(assetId, { variant, reanalyze: true });
+        const result = await apiClient.patchAssetVariant(assetId, { variant, reanalyze: true });
         setStatusMessage(
-          variant === "stabilized"
-            ? "已改用防抖版，並重新送出素材檢查。"
-            : "已改回原始版，並重新送出素材檢查。",
+          result.restored_from_snapshot
+            ? (variant === "stabilized"
+                ? "已改用防抖版，並從資料庫還原這個版本的分析結果。"
+                : "已改回原始版，並從資料庫還原這個版本的分析結果。")
+            : (variant === "stabilized"
+                ? "已改用防抖版，這個版本尚未分析過，已送出素材檢查。"
+                : "已改回原始版，這個版本尚未分析過，已送出素材檢查。"),
         );
         polling.refresh();
       } catch (err) {

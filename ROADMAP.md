@@ -2,7 +2,7 @@
 
 > **單一定位**：沒有剪輯背景的小白也能「拍完就上傳，AI 直接給大量 IG / FB 短影音」的工具。
 > 目標 UX：手機優先、繁體中文、高級感、最少手動編輯。
-> 目前版本：**0.42.3**（M10.1.2 — 一鍵自動選片噪訊過濾 hotfix）
+> 目前版本：**0.42.4**（M10.1.3 — 素材版本預覽與分析結果保存 hotfix）
 > 下一個 milestone：M10.2 — 多專案批次 + 社群直接發布 + AI 自動縮圖。
 
 > **2026-05-13 camera-motion note**：`0.30.23` 到 `0.30.38` 的 camera-motion 修補已被否決；`0.30.39`/`0.30.40` 只保留 Smart Camera `none` 不套殘留 tracking / vidstab 的 no-extra-correction 修正。`0.40.0` 改走素材級 raw / stabilized 版本工作流，未來運鏡 / 焦點追蹤 / 數位防手震變更必須先遵守 `skills/video-camera-movement/SKILL.md`。
@@ -72,6 +72,7 @@
 | **M10.1** | **分析頁手動決策 hub：顯示素材檢查、防抖版本、tracking readiness 與一鍵 / 手動下一步入口** | ✅ done | **0.42.1** |
 | **M10.1.1** | **素材預覽播放與一鍵穩定預設 hotfix：手機原生 controls 不再被 click handler 干擾，一鍵自動預設不再套 auto-reframe/tracking 額外運鏡** | ✅ done | **0.42.2** |
 | **M10.1.2** | **一鍵自動選片噪訊過濾 hotfix：subject filter 排除短暫/低信心 YOLO track，並避開素材開頭 handheld setup** | ✅ done | **0.42.3** |
+| **M10.1.3** | **素材版本預覽與分析保存 hotfix：raw / 防抖預覽切換強制重載影片；raw/stabilized 各自的分析結果存 DB，切回已分析版本不重跑 GPU / Gemini** | ✅ done | **0.42.4** |
 | M10.2 | 多專案批次 + 社群直接發布 + AI 自動縮圖 | 🔮 future | 0.42.x+ |
 
 ---

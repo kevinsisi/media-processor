@@ -262,6 +262,12 @@ class Asset(Base):
         default=AssetStatus.PENDING.value,
     )
     analysis_steps_json: Mapped[Any] = mapped_column(JSON, nullable=True)
+    # v0.42.4 — persisted per-source-version analysis snapshots. Shape:
+    # {"raw": {...}, "stabilized": {...}}. Switching active_asset_variant
+    # saves the current rows here, then restores the target variant if a
+    # snapshot exists so operators can compare raw/stabilized without
+    # repeatedly re-running Whisper / Vision / YOLO / coverage.
+    variant_analysis_json: Mapped[Any] = mapped_column(JSON, nullable=True)
     # v0.16 — YOLOv8 per-frame bounding boxes. v0.17 widened from a single
     # dominant track to a multi-track structure so the user can pick a
     # specific object on the analysis page.

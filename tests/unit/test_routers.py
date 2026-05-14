@@ -565,6 +565,43 @@ def test_patch_asset_variant_clears_variant_dependent_state(
     assert tracking.status_code == 404
 
 
+def test_patch_asset_variant_restores_saved_analysis_without_enqueue(
+    app: FastAPI,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[int, bool]] = []
+
+    def fake_enqueue(asset_id: int, *, force: bool = False) -> str:
+        calls.append((asset_id, force))
+        return f"fake-analysis-{len(calls)}"
+
+    monkeypatch.setattr(assets_router.Path, "is_file", lambda _path: True)
+    monkeypatch.setattr(assets_router, "enqueue_asset_analysis", fake_enqueue)
+    client = TestClient(app)
+
+    first = client.patch("/assets/1/variant", json={"variant": "stabilized"})
+    assert first.status_code == 200, first.text
+    assert first.json()["restored_from_snapshot"] is False
+    assert first.json()["analysis_job_id"] == "fake-analysis-1"
+
+    second = client.patch("/assets/1/variant", json={"variant": "raw"})
+    assert second.status_code == 200, second.text
+    assert second.json()["restored_from_snapshot"] is True
+    assert second.json()["analysis_job_id"] is None
+    assert calls == [(1, True)]
+
+    detail = client.get("/assets/1")
+    assert detail.status_code == 200, detail.text
+    body = detail.json()
+    assert body["active_asset_variant"] == "raw"
+    assert body["status"] == "analyzed"
+    assert body["analysis_steps"] == {"scene": "done", "tracking": "done"}
+    assert [tag["tag_name"] for tag in body["tags"]] == ["car", "logo_close_up", "showroom"]
+
+    tracking = client.get("/assets/1/tracking")
+    assert tracking.status_code == 200, tracking.text
+
+
 def test_post_review_approve(app: FastAPI) -> None:
     client = TestClient(app)
     resp = client.post("/reviews", json={"draft_id": 1, "action": "approve"})

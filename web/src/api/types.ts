@@ -636,6 +636,7 @@ export interface AssetVariantResponse {
   asset_id: number;
   active_asset_variant: AssetVariant;
   analysis_job_id: string | null;
+  restored_from_snapshot: boolean;
   analysis_steps: Record<string, string> | null;
 }
 

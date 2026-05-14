@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -39,10 +39,18 @@ from media_processor.api.schemas import (
     TranslateSubtitleRequest,
     TranslateSubtitleResponse,
 )
-from media_processor.models import Asset, AssetTag, AssetTranscript, ScriptCoverage
-from media_processor.services import asset_management as asset_mgmt
-from media_processor.services import asset_variants, object_tracking
-from media_processor.services import thumbnails as thumbnails_svc
+from media_processor.models import Asset, AssetTranscript, ScriptCoverage
+from media_processor.services import (
+    asset_management as asset_mgmt,
+)
+from media_processor.services import (
+    asset_variants,
+    object_tracking,
+    variant_analysis_snapshots,
+)
+from media_processor.services import (
+    thumbnails as thumbnails_svc,
+)
 from media_processor.services.queue import (
     enqueue_asset_analysis,
     enqueue_asset_stabilization,
@@ -115,25 +123,6 @@ async def get_asset(
     return _serialise_asset(asset)
 
 
-async def _clear_variant_dependent_state(session: AsyncSession, asset: Asset) -> None:
-    """Clear analysis/tracking data whose coordinates depend on the source variant."""
-    await session.execute(
-        delete(AssetTag)
-        .where(AssetTag.asset_id == asset.id)
-        .where(AssetTag.tag_type.in_(["scene", "motion", "emotion"]))
-    )
-    await session.execute(delete(ScriptCoverage).where(ScriptCoverage.asset_id == asset.id))
-    asset.analysis_steps_json = None
-    asset.status = "pending"
-    asset.tracking_json = None
-    asset.tracked_object_index = None
-    asset.custom_roi_json = None
-    asset.point_tracking_json = None
-    asset.point_tracking_origin = None
-    asset.point_tracking_status = None
-    asset.point_tracking_error = None
-
-
 @router.post("/{asset_id}/stabilize", response_model=AssetStabilizeResponse)
 async def stabilize_asset(
     asset_id: int,
@@ -186,13 +175,24 @@ async def patch_asset_variant(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="stabilized file is missing",
             )
-    changed = asset_variants.active_variant(asset) != payload.variant
-    asset.active_asset_variant = payload.variant
+    current_variant = asset_variants.active_variant(asset)
+    changed = current_variant != payload.variant
     analysis_job_id: str | None = None
+    restored_from_snapshot = False
     if changed:
-        await _clear_variant_dependent_state(session, asset)
+        await variant_analysis_snapshots.save_variant_analysis_snapshot(session, asset)
+        asset.active_asset_variant = payload.variant
+        restored_from_snapshot = await variant_analysis_snapshots.restore_variant_analysis_snapshot(
+            session,
+            asset,
+            payload.variant,
+        )
+        if not restored_from_snapshot:
+            await variant_analysis_snapshots.clear_variant_dependent_state(session, asset)
+    else:
+        asset.active_asset_variant = payload.variant
     await session.commit()
-    if changed and payload.reanalyze:
+    if changed and payload.reanalyze and not restored_from_snapshot:
         try:
             analysis_job_id = enqueue_asset_analysis(asset_id, force=True)
         except Exception as exc:  # noqa: BLE001 — surface but keep variant switch.
@@ -205,6 +205,7 @@ async def patch_asset_variant(
         asset_id=asset.id,
         active_asset_variant=asset_variants.active_variant(asset),
         analysis_job_id=analysis_job_id,
+        restored_from_snapshot=restored_from_snapshot,
         analysis_steps=dict(asset.analysis_steps_json or {}) or None,
     )
 
