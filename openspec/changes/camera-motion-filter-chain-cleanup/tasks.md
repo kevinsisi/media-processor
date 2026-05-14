@@ -5,15 +5,15 @@ If both changes land in the same release, this one should land second so
 its tests can assert on the v3 schema directly; if landing first, swap the
 `kind="none"` assertions for the equivalent `directive is None` form.
 
-- [ ] T1 — Emotion zoompan gating in `_cut_segment`
-  - [ ] `services/video_renderer.py` `_cut_segment`:
-    - [ ] Change the emotion-zoompan branch condition to
+- [x] T1 — Emotion zoompan gating in `_cut_segment`
+  - [x] `services/video_renderer.py` `_cut_segment`:
+    - [x] Change the emotion-zoompan branch condition to
       `elif _should_zoompan(cut) and crop_path is None and smart_chain is None`.
     - [ ] Add `INFO` log when `_should_zoompan(cut)` was true but the
       branch was skipped: `"emotion-zoompan suppressed on cut %d:
       %s"` with reason in `{"tracking active", "smart camera active"}`.
-  - [ ] `tests/unit/test_video_renderer.py`:
-    - [ ] Add `test_emotion_zoompan_suppressed_on_tracking_cut`:
+  - [x] `tests/unit/test_video_renderer.py`:
+    - [x] Add `test_emotion_zoompan_suppressed_on_tracking_cut`:
       construct a cut with `dominant_emotion="joy"`, `has_face=True`,
       provide a `point_track`, assert the `-vf` chain contains
       `crop@reframe` and not `zoompan=`.
@@ -21,7 +21,7 @@ its tests can assert on the v3 schema directly; if landing first, swap the
       similar but with `smart_camera_json` carrying a `kind="zoom_in"`
       directive, assert exactly one `zoompan=` (the Smart Camera one)
       in the chain.
-    - [ ] Keep `test_should_zoompan_*` tests as-is — `_should_zoompan`
+    - [x] Keep `test_should_zoompan_*` tests as-is — `_should_zoompan`
       itself is unchanged.
 
 - [ ] T2 — Thread `crop_region` through `auto_reframe`

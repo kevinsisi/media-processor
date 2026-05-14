@@ -75,32 +75,32 @@ own commit with green CI; the bundled PR squashes them.
     - [ ] Adjust existing visible-zoom test fixtures so the directives
       already carry the documented Layer-3 scales (1.85 / 1.65 / 1.65).
 
-- [ ] T4 — Priority flip: explicit tracking wins
-  - [ ] `services/video_renderer.py` `_cut_segment`:
-    - [ ] Compute `has_explicit_tracking` = `point_track is not None or
+- [x] T4 — Priority flip: explicit tracking wins
+  - [x] `services/video_renderer.py` `_cut_segment`:
+    - [x] Compute `has_explicit_tracking` = `point_track is not None or
       custom_roi is not None or (tracking is not None and
       tracking_object_index is not None)`.
-    - [ ] If `has_explicit_tracking and smart_chain is not None`: log
+    - [x] If `has_explicit_tracking and smart_chain is not None`: log
       `INFO` "explicit-tracking overrides Smart Camera on cut N", set
       `smart_chain = None`, keep the existing `crop_path`-based
       `vf_chain`.
-    - [ ] If `not has_explicit_tracking and smart_chain is not None and
+    - [x] If `not has_explicit_tracking and smart_chain is not None and
       crop_path is not None` (this is automatic YOLO + Smart Camera):
       Smart Camera still wins, preserving v0.30.9 behaviour. Log
       `INFO` "smart-camera overrides automatic auto-reframe".
-    - [ ] `reframed_flags` value for the cut: `True` iff the segment must
+    - [x] `reframed_flags` value for the cut: `True` iff the segment must
       skip vidstab: tracking chain, non-`none` Smart Camera directive, or
       a Smart Camera `kind="none"` no-extra-correction decision.
-  - [ ] `tests/unit/test_video_renderer.py`:
-    - [ ] Rename `test_smart_camera_overrides_explicit_tracking` →
+  - [x] `tests/unit/test_video_renderer.py`:
+    - [x] Rename `test_smart_camera_overrides_explicit_tracking` →
       `test_explicit_tracking_overrides_smart_camera` and flip the
       expectation: with a `point_track` set, the resulting `-vf`
       chain MUST contain `crop@reframe` (the sendcmd chain) and MUST
       NOT contain `zoompan`. (This test in 0.30.22 was enforcing the
       wrong direction.)
-    - [ ] Keep `test_smart_camera_overrides_automatic_auto_reframe`
+    - [x] Keep `test_smart_camera_overrides_automatic_auto_reframe`
       unchanged — automatic YOLO is not explicit tracking.
-    - [ ] Add `test_kind_none_sets_stabilization_skip_flag` asserting
+    - [x] Add `test_kind_none_sets_stabilization_skip_flag` asserting
       vidstab does NOT run on a `kind="none"` cut when stabilize is
       enabled and no tracking is set.
 
