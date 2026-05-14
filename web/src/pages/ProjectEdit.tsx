@@ -11,6 +11,8 @@ import CropRegionPicker, {
 import DraggableTimeline from "../components/DraggableTimeline";
 import ExportSheet from "../components/ExportSheet";
 import QueueStatusModal from "../components/QueueStatusModal";
+import StickyGenerateFooter, { type FooterState } from "../components/StickyGenerateFooter";
+import AdvancedEditPanel, { type AdvancedTab } from "../components/AdvancedEditPanel";
 import SubtitleEditor from "../components/SubtitleEditor";
 import SubjectClassPicker from "../components/SubjectClassPicker";
 import SubtitleStyleEditor from "../components/SubtitleStyleEditor";
@@ -1041,6 +1043,8 @@ export default function ProjectEdit() {
   const [sourceOrientation, setSourceOrientation] = useState<
     "portrait" | "landscape" | "mixed" | null
   >(null);
+  // v0.43.0 — active tab for the AdvancedEditPanel (Settings / Timeline / Subtitles).
+  const [advancedTab, setAdvancedTab] = useState<AdvancedTab>("settings");
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
@@ -1547,6 +1551,40 @@ export default function ProjectEdit() {
     ];
   }, [draft, project]);
 
+  // v0.43.0 — StickyGenerateFooter state mapping. Priority order:
+  // queued > triggering/processing > failed > ready > blocked > idle.
+  const footerState: FooterState = (() => {
+    if (showQueued) return "queued";
+    if (triggering || showProcessing) return "triggering";
+    if (showFailed) return "failed";
+    if (showReady) return "ready";
+    if (analysisBlocked) return "blocked";
+    return "idle";
+  })();
+
+  const footerLabel = (() => {
+    switch (footerState) {
+      case "queued":     return "排隊中，點此查看";
+      case "triggering": return "產生中…";
+      case "failed":     return "↺ 重試";
+      case "ready":      return `↺ 重新產生（${durationSec} 秒）`;
+      case "blocked":    return `素材檢查中（剩 ${analysisStatus?.inFlight ?? 0} 項），請稍候`;
+      case "idle":       return `▶ 產生 ${durationSec} 秒短影音`;
+    }
+  })();
+
+  const footerOnClick = (() => {
+    switch (footerState) {
+      case "queued":     return () => setQueueModalOpen(true);
+      case "failed":     return () => { void handleStartEdit(true); };
+      case "ready":      return () => { void handleStartEdit(true); };
+      case "idle":       return showFallback
+        ? () => { void handleStartEdit(true); }
+        : () => { void handleStartEdit(false); };
+      default:           return () => {};
+    }
+  })();
+
   return (
     <main className="page project-edit">
       <header className="edit-hero">
@@ -1601,11 +1639,12 @@ export default function ProjectEdit() {
         </p>
       )}
 
-      {/* v0.21.6 — analysis-status banner. Shown across every state
-         (initial / queued / processing / ready) so the operator sees
-         the warning regardless of whether they're about to trigger
-         a fresh edit or already viewing a finished version. */}
-      {analysisStatus !== null && !analysisStatus.allDone ? (
+      {/* v0.21.6 — analysis-status banner. v0.43.0: scoped to showInitial
+         only — once a draft exists / is processing / is ready, the
+         banner is just noise; the operator already committed to a render
+         and the StickyGenerateFooter surfaces analysis-blocked state
+         when relevant. */}
+      {showInitial && analysisStatus !== null && !analysisStatus.allDone ? (
         <div
           className="analysis-banner analysis-banner--running"
           role="status"
@@ -1645,13 +1684,28 @@ export default function ProjectEdit() {
         </div>
       ) : null}
 
-      {showInitial && (
+      {(showInitial || showFallback) && (
         <section className="edit-card">
-          <h2 className="edit-card__title">準備好就產生短影音</h2>
-          <p className="edit-card__body">
-            系統會依照腳本與影片內容，挑出適合社群觀看的片段，做成可發佈的
-            IG / FB 短影音，並加上繁體中文字幕。
-          </p>
+          {showFallback ? (
+            <>
+              <h2 className="edit-card__title">再產生一版短影音</h2>
+              <p className="edit-card__body">
+                目前選取的版本（v{selectedSummary?.version ?? "?"}，
+                {selectedSummary
+                  ? labelForDraftStatus(selectedSummary.status)
+                  : "未知狀態"}
+                ）沒有額外動作可以執行。如需建立新的版本，可調整下方設定後重新產生。
+              </p>
+            </>
+          ) : (
+            <>
+              <h2 className="edit-card__title">準備好就產生短影音</h2>
+              <p className="edit-card__body">
+                系統會依照腳本與影片內容，挑出適合社群觀看的片段，做成可發佈的
+                IG / FB 短影音，並加上繁體中文字幕。
+              </p>
+            </>
+          )}
           <EditSettingsBlock
             durationSec={durationSec}
             setDurationSec={handleDurationChange}
@@ -1676,31 +1730,9 @@ export default function ProjectEdit() {
             currentBgmSource={currentBgmSource}
             setCurrentBgmSource={setCurrentBgmSource}
             pendingSettingsNotice={pendingSettingsNotice}
-            settingsApplyHint={`按下方「產生 ${durationSec} 秒短影音」才會依照目前設定建立成品。`}
+            settingsApplyHint={`按下方「產生 ${durationSec} 秒短影音」才會依照目前設定建立${showFallback ? "新版" : ""}成品。`}
             cropDirection={cropDirection}
           />
-          <div className="edit-card__actions">
-            <button
-              type="button"
-              className="cta cta--primary"
-              onClick={() => void handleStartEdit(false)}
-              disabled={
-                triggering
-                || analysisBlocked
-              }
-              title={
-                analysisBlocked
-                  ? "等待素材檢查完成後即可產生成品"
-                  : undefined
-              }
-            >
-              {triggering
-                ? "等待開始…"
-                : analysisBlocked
-                  ? `素材檢查中（剩 ${analysisStatus?.inFlight ?? 0} 項），完成後可開始`
-                  : `產生 ${durationSec} 秒短影音`}
-            </button>
-          </div>
         </section>
       )}
 
@@ -1841,98 +1873,105 @@ export default function ProjectEdit() {
             </div>
           </section>
 
-          <details className="edit-advanced-panel">
-            <summary className="edit-advanced-panel__summary">
-              <span className="edit-advanced-panel__title">進階微調</span>
-              <span className="edit-advanced-panel__hint">
-                需要改片段、字幕、配樂或品牌標誌時再打開。
-              </span>
-            </summary>
-
-            <section className="edit-card edit-card--secondary">
-              <div className="edit-card__row">
-                <div>
-                  <h2 className="edit-card__title">片段與設定微調</h2>
-                  <p className="edit-card__body">
-                    這裡保留給需要手動調整的人；一般發佈可直接使用上方工作台。
-                  </p>
-                </div>
-                <div className="edit-card__actions">
-                  {draft.mp4_url && (
-                    <a
-                      className="cta cta--quiet"
-                      href={draft.mp4_url}
-                      download={`project-${validProjectId}-v${draft.version}.mp4`}
+          <AdvancedEditPanel
+            activeTab={advancedTab}
+            onTabChange={setAdvancedTab}
+            settingsContent={
+              <section className="edit-card edit-card--secondary">
+                <div className="edit-card__row">
+                  <div>
+                    <h2 className="edit-card__title">片段與設定微調</h2>
+                    <p className="edit-card__body">
+                      這裡保留給需要手動調整的人；一般發佈可直接使用上方工作台。
+                    </p>
+                  </div>
+                  <div className="edit-card__actions">
+                    {draft.mp4_url && (
+                      <a
+                        className="cta cta--quiet"
+                        href={draft.mp4_url}
+                        download={`project-${validProjectId}-v${draft.version}.mp4`}
+                      >
+                        下載主成品
+                      </a>
+                    )}
+                    <button
+                      type="button"
+                      className="cta cta--secondary"
+                      onClick={() => void handleReRender()}
+                      disabled={triggering}
+                      title="保留目前片段順序，套用目前的焦點追蹤、裁切、配樂、字幕、品牌標誌與轉場設定重新產生成品"
                     >
-                      下載主成品
-                    </a>
-                  )}
-                  <button
-                    type="button"
-                    className="cta cta--secondary"
-                    onClick={() => void handleReRender()}
-                    disabled={triggering}
-                    title="保留目前片段順序，套用目前的焦點追蹤、裁切、配樂、字幕、品牌標誌與轉場設定重新產生成品"
-                  >
-                    {triggering ? "送出中…" : "保留片段套用設定"}
-                  </button>
-                  <button
-                    type="button"
-                    className="cta"
-                    onClick={() => void handleStartEdit(true)}
-                    disabled={triggering || analysisBlocked}
-                    title={
-                      analysisBlocked
-                        ? "等待素材檢查完成後即可重新挑選片段"
-                        : "重新挑選片段；目前的順序會被覆蓋"
-                    }
-                  >
-                    {triggering
-                      ? "送出中…"
-                      : analysisBlocked
-                        ? `素材檢查中（剩 ${analysisStatus?.inFlight ?? 0} 項）`
-                        : `重新選片段（${durationSec} 秒）`}
-                  </button>
+                      {triggering ? "送出中…" : "保留片段套用設定"}
+                    </button>
+                    <button
+                      type="button"
+                      className="cta"
+                      onClick={() => void handleStartEdit(true)}
+                      disabled={triggering || analysisBlocked}
+                      title={
+                        analysisBlocked
+                          ? "等待素材檢查完成後即可重新挑選片段"
+                          : "重新挑選片段；目前的順序會被覆蓋"
+                      }
+                    >
+                      {triggering
+                        ? "送出中…"
+                        : analysisBlocked
+                          ? `素材檢查中（剩 ${analysisStatus?.inFlight ?? 0} 項）`
+                          : `重新選片段（${durationSec} 秒）`}
+                    </button>
+                  </div>
                 </div>
-              </div>
-              <EditSettingsBlock
-                durationSec={durationSec}
-                setDurationSec={handleDurationChange}
-                stylePreset={stylePreset}
-                setStylePreset={handleStylePresetChange}
-                stabilize={stabilize}
-                setStabilize={handleStabilizeChange}
-                subtitlesOn={subtitlesOn}
-                setSubtitlesOn={handleSubtitlesChange}
-                transitionsOn={transitionsOn}
-                setTransitionsOn={handleTransitionsChange}
-                autoReframe={autoReframe}
-                setAutoReframe={handleAutoReframeChange}
-                smartCamera={smartCamera}
-                setSmartCamera={handleSmartCameraChange}
-                sourceAudioVolume={sourceAudioVolume}
-                setSourceAudioVolume={handleSourceAudioVolumeChange}
-                triggering={triggering}
-                validProjectId={validProjectId}
-                project={project}
-                setProject={handleProjectSettingsUpdated}
-                currentBgmSource={currentBgmSource}
-                setCurrentBgmSource={setCurrentBgmSource}
-                pendingSettingsNotice={pendingSettingsNotice}
-                settingsApplyHint="只想套用目前配樂、字幕、品牌、裁切或跟住主角設定，請按上方「保留片段套用設定」；如果想重新挑片段，按「重新選片段」。"
-                cropDirection={cropDirection}
-              />
-              <div className="edit-card__advanced-row">
-                <Link
-                  to={`/projects/${validProjectId}/edit/timeline/${draft.id}`}
-                  className="cta cta--secondary edit-card__advanced-link"
-                >
-                  進階片段編輯
-                </Link>
-                <span className="edit-card__advanced-hint">
-                  打開時間軸，可調整順序、分割或刪除片段
-                </span>
-              </div>
+                <EditSettingsBlock
+                  durationSec={durationSec}
+                  setDurationSec={handleDurationChange}
+                  stylePreset={stylePreset}
+                  setStylePreset={handleStylePresetChange}
+                  stabilize={stabilize}
+                  setStabilize={handleStabilizeChange}
+                  subtitlesOn={subtitlesOn}
+                  setSubtitlesOn={handleSubtitlesChange}
+                  transitionsOn={transitionsOn}
+                  setTransitionsOn={handleTransitionsChange}
+                  autoReframe={autoReframe}
+                  setAutoReframe={handleAutoReframeChange}
+                  smartCamera={smartCamera}
+                  setSmartCamera={handleSmartCameraChange}
+                  sourceAudioVolume={sourceAudioVolume}
+                  setSourceAudioVolume={handleSourceAudioVolumeChange}
+                  triggering={triggering}
+                  validProjectId={validProjectId}
+                  project={project}
+                  setProject={handleProjectSettingsUpdated}
+                  currentBgmSource={currentBgmSource}
+                  setCurrentBgmSource={setCurrentBgmSource}
+                  pendingSettingsNotice={pendingSettingsNotice}
+                  settingsApplyHint="只想套用目前配樂、字幕、品牌、裁切或跟住主角設定，請按上方「保留片段套用設定」；如果想重新挑片段，按「重新選片段」。"
+                  cropDirection={cropDirection}
+                />
+                <div className="edit-card__advanced-row">
+                  <Link
+                    to={`/projects/${validProjectId}/edit/timeline/${draft.id}`}
+                    className="cta cta--secondary edit-card__advanced-link"
+                  >
+                    進階片段編輯
+                  </Link>
+                  <span className="edit-card__advanced-hint">
+                    打開時間軸，可調整順序、分割或刪除片段
+                  </span>
+                </div>
+                {draft.cut_plan?.notes && (
+                  <p className="edit-card__hint mono">「{draft.cut_plan.notes}」</p>
+                )}
+                {draft.cut_plan?.used_fallback && (
+                  <p className="edit-hint">
+                    已用保守方式產生成品（{draft.cut_plan.fallback_reason || "原因未明"}）。
+                  </p>
+                )}
+              </section>
+            }
+            timelineContent={
               <DraggableTimeline
                 draft={draft}
                 videoRef={videoRef as React.RefObject<HTMLVideoElement>}
@@ -1957,30 +1996,23 @@ export default function ProjectEdit() {
                   smartCamera,
                 }}
               />
-            {draft.cut_plan?.notes && (
-              <p className="edit-card__hint mono">「{draft.cut_plan.notes}」</p>
-            )}
-            {draft.cut_plan?.used_fallback && (
-              <p className="edit-hint">
-                已用保守方式產生成品（{draft.cut_plan.fallback_reason || "原因未明"}）。
-              </p>
-            )}
-            </section>
-
-            <SubtitleEditor
-              draftId={draft.id}
-              locked={triggering || awaitingFirstFetch || showProcessing}
-              onRebuildStart={() => void refreshDrafts().catch(() => {})}
-              onRebuildError={(msg) => setTriggerError(msg)}
-              renderFlags={{
-                transitions: transitionsOn,
-                stabilize,
-                subtitles: subtitlesOn,
-                autoReframe,
-                smartCamera,
-              }}
-            />
-          </details>
+            }
+            subtitlesContent={
+              <SubtitleEditor
+                draftId={draft.id}
+                locked={triggering || awaitingFirstFetch || showProcessing}
+                onRebuildStart={() => void refreshDrafts().catch(() => {})}
+                onRebuildError={(msg) => setTriggerError(msg)}
+                renderFlags={{
+                  transitions: transitionsOn,
+                  stabilize,
+                  subtitles: subtitlesOn,
+                  autoReframe,
+                  smartCamera,
+                }}
+              />
+            }
+          />
         </>
       )}
 
@@ -2012,82 +2044,16 @@ export default function ProjectEdit() {
                 </pre>
               </details>
             )}
-            <div className="edit-card__actions">
-              <button
-                type="button"
-                className="cta cta--primary"
-                onClick={() => void handleStartEdit(true)}
-                disabled={triggering}
-              >
-                {triggering
-                  ? "送出中…"
-                  : isOrphan
-                    ? "重新送出"
-                    : "重新產生一版"}
-              </button>
-            </div>
           </section>
         );
       })()}
 
-      {showFallback && (
-        <section className="edit-card">
-          <h2 className="edit-card__title">再產生一版短影音</h2>
-          <p className="edit-card__body">
-            目前選取的版本（v{selectedSummary?.version ?? "?"}，{
-              selectedSummary
-                ? labelForDraftStatus(selectedSummary.status)
-                : "未知狀態"
-            }）沒有額外動作可以執行。如需建立新的版本，可調整下方設定後重新產生。
-          </p>
-          <EditSettingsBlock
-            durationSec={durationSec}
-            setDurationSec={handleDurationChange}
-            stylePreset={stylePreset}
-            setStylePreset={handleStylePresetChange}
-            stabilize={stabilize}
-            setStabilize={handleStabilizeChange}
-            subtitlesOn={subtitlesOn}
-            setSubtitlesOn={handleSubtitlesChange}
-            transitionsOn={transitionsOn}
-            setTransitionsOn={handleTransitionsChange}
-            autoReframe={autoReframe}
-            setAutoReframe={handleAutoReframeChange}
-            smartCamera={smartCamera}
-            setSmartCamera={handleSmartCameraChange}
-            sourceAudioVolume={sourceAudioVolume}
-            setSourceAudioVolume={handleSourceAudioVolumeChange}
-            triggering={triggering}
-            validProjectId={validProjectId}
-            project={project}
-            setProject={handleProjectSettingsUpdated}
-            currentBgmSource={currentBgmSource}
-            setCurrentBgmSource={setCurrentBgmSource}
-            pendingSettingsNotice={pendingSettingsNotice}
-            settingsApplyHint={`按下方「產生 ${durationSec} 秒短影音」才會依照目前設定建立新版成品。`}
-            cropDirection={cropDirection}
-          />
-          <div className="edit-card__actions">
-            <button
-              type="button"
-              className="cta cta--primary"
-              onClick={() => void handleStartEdit(true)}
-              disabled={triggering || analysisBlocked}
-              title={
-                analysisBlocked
-                  ? "等待素材檢查完成後即可重新產生"
-                  : undefined
-              }
-            >
-              {triggering
-                ? "送出中…"
-                : analysisBlocked
-                  ? `素材檢查中（剩 ${analysisStatus?.inFlight ?? 0} 項）`
-                  : `產生 ${durationSec} 秒短影音`}
-            </button>
-          </div>
-        </section>
-      )}
+      <StickyGenerateFooter
+        state={footerState}
+        label={footerLabel}
+        onClick={footerOnClick}
+        onOpenQueue={() => setQueueModalOpen(true)}
+      />
 
       {selectedDraftId !== null && <DraftComments draftId={selectedDraftId} />}
 

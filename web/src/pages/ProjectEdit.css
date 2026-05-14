@@ -4,6 +4,9 @@
   max-width: 1180px;
   margin: 0 auto;
   padding: var(--space-7) var(--space-7) var(--space-9);
+  /* v0.43.0 — reserve space so the sticky generate footer never covers
+     the last DraftComments thread / queue inspector. */
+  padding-bottom: 100px;
 }
 
 .edit-hero {
