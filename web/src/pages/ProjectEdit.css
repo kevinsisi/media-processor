@@ -376,6 +376,19 @@
   color: var(--status-down, #b34b3a);
 }
 
+.version-chip--approved .version-chip__state {
+  color: rgb(98, 184, 122);
+}
+
+.version-chip--rejected .version-chip__state {
+  color: var(--status-down, #b34b3a);
+}
+
+.version-chip--latest .version-chip__state {
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
 /* ---- Duration picker (M5.1 — user-configurable target render length) ---- */
 
 .duration-picker {

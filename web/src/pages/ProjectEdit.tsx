@@ -255,26 +255,35 @@ function VersionSwitcher({
   disabled,
 }: VersionSwitcherProps) {
   if (drafts.length === 0) return null;
+  const latestId = drafts.reduce((max, d) => (d.id > max ? d.id : max), drafts[0].id);
   return (
     <nav className="version-switcher" aria-label="短影音版本">
       <span className="version-switcher__label">版本</span>
       <div className="version-switcher__chips" role="tablist">
         {drafts.map((d) => {
           const isActive = d.id === selectedId;
+          const isLatest = d.id === latestId;
           return (
             <button
               key={d.id}
               type="button"
               role="tab"
               aria-selected={isActive}
-              className={`version-chip version-chip--${d.status}${isActive ? " version-chip--active" : ""}`}
+              className={[
+                "version-chip",
+                `version-chip--${d.status}`,
+                isActive ? "version-chip--active" : "",
+                isLatest ? "version-chip--latest" : "",
+              ]
+                .filter(Boolean)
+                .join(" ")}
               onClick={() => onSelect(d.id)}
               disabled={disabled}
               title={`v${d.version} · ${labelForDraftStatus(d.status)}`}
             >
               <span className="version-chip__num mono">v{d.version}</span>
               <span className="version-chip__state mono">
-                {labelForDraftStatus(d.status)}
+                {isLatest ? "NOW" : labelForDraftStatus(d.status)}
               </span>
             </button>
           );
