@@ -761,9 +761,7 @@ def _cut_segment(
     # Automatic YOLO (tracking_object_index is None) is not explicit intent;
     # Smart Camera can still override it per v0.30.9 behaviour.
     explicit_tracking_active = crop_path is not None and (
-        point_track is not None
-        or custom_roi is not None
-        or tracking_object_index is not None
+        point_track is not None or custom_roi is not None or tracking_object_index is not None
     )
 
     if smart_chain is not None and crop_path is not None:
