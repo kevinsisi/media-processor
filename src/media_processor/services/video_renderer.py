@@ -746,12 +746,29 @@ def _cut_segment(
                 "smart-camera: cut %d no-move directive suppresses tracking and zoompan",
                 cut.order,
             )
+    # explicit_tracking_active: True when crop_path came from a user intent
+    # (point track, custom ROI, or user-picked YOLO object). Smart Camera
+    # must not override these — the operator's framing intent takes priority.
+    # Automatic YOLO (tracking_object_index is None) is not explicit intent;
+    # Smart Camera can still override it per v0.30.9 behaviour.
+    explicit_tracking_active = crop_path is not None and (
+        point_track is not None
+        or custom_roi is not None
+        or tracking_object_index is not None
+    )
+
     if smart_chain is not None and crop_path is not None:
-        logger.info(
-            "smart-camera: cut %d overrides automatic auto-reframe",
-            cut.order,
-        )
-    if smart_chain is not None:
+        if explicit_tracking_active:
+            logger.info(
+                "smart-camera: cut %d deferred — explicit user tracking takes priority",
+                cut.order,
+            )
+        else:
+            logger.info(
+                "smart-camera: cut %d overrides automatic auto-reframe",
+                cut.order,
+            )
+    if smart_chain is not None and not explicit_tracking_active:
         # The smart-camera filter renders directly to the target
         # canvas, so the static aspect step is redundant. Replace
         # the chain entirely with the zoompan-driven crop.
@@ -761,10 +778,11 @@ def _cut_segment(
         # and no persisted tracking crop. Leave only the static aspect chain;
         # the return flag below also blocks vidstab from adding its own move.
         pass
-    elif _should_zoompan(cut):
+    elif _should_zoompan(cut) and crop_path is None:
         # zoompan operates on its own canvas, so we run it AFTER the
         # aspect crop so the zoom centre is the cropped frame's centre
         # rather than the original asset's.
+        # crop_path is None guard: do not stack zoompan on top of tracking chains.
         vf_chain = f"{vf_chain},{_zoompan_filter(target_aspect, duration_s)}"
     cmd = [
         "ffmpeg",

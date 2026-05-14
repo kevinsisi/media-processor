@@ -541,7 +541,12 @@ def test_smart_camera_overrides_automatic_auto_reframe(
 def test_smart_camera_overrides_explicit_tracking(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """When Smart Camera is checked, even picked tracking targets must not mask it."""
+    """Explicit user tracking must not be overridden by Smart Camera.
+
+    When a user has picked a tracking target (YOLO object index), their framing
+    intent takes priority over any Smart Camera directive on the same cut.
+    The explicit tracking chain must be used, not the Smart Camera chain.
+    """
     src = tmp_path / "asset.mp4"
     src.write_bytes(b"fake")
     plan = CutPlan(
@@ -603,7 +608,147 @@ def test_smart_camera_overrides_explicit_tracking(
     )
 
     assert reframed == [True]
-    assert captured_filters == ["SMART_CAMERA_CHAIN"]
+    assert captured_filters == ["EXPLICIT_TRACKING_CHAIN"]
+
+
+def test_explicit_point_track_wins_over_smart_camera(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Point tracking (user clicked a pixel) must not be overridden by Smart Camera.
+
+    Even when ``smart_camera_enabled=True`` and the cut carries a pan directive,
+    a point-track crop set by the user is explicit framing intent and must win.
+    """
+    src = tmp_path / "asset.mp4"
+    src.write_bytes(b"fake")
+    plan = CutPlan(
+        schema_version="m5.cut-plan.v1",
+        target_duration_ms=1_000,
+        target_aspect_ratio="9:16",
+        profile_name="universal",
+        segments=(
+            CutPlanSegment(
+                0,
+                1,
+                0,
+                1_000,
+                "improv",
+                "",
+                smart_camera_json={
+                    "kind": "pan",
+                    "from_rect": [0.0, 0.0, 1.0, 1.0],
+                    "to_rect": [0.20, 0.20, 0.60, 0.60],
+                    "ease": "linear",
+                },
+            ),
+        ),
+    )
+    captured_filters: list[str] = []
+
+    monkeypatch.setattr(
+        video_renderer.auto_reframe,
+        "compute_crop_path_from_point_track",
+        lambda *args, **kwargs: [(0, 0, 1080, 1920)],
+    )
+    monkeypatch.setattr(video_renderer.auto_reframe, "write_sendcmd_file", lambda *args: None)
+    monkeypatch.setattr(
+        video_renderer.auto_reframe,
+        "build_filter_chain",
+        lambda *args, **kwargs: "POINT_TRACK_CHAIN",
+    )
+    monkeypatch.setattr(
+        video_renderer,
+        "_smart_camera_filter",
+        lambda *args, **kwargs: "SMART_CAMERA_CHAIN",
+    )
+
+    def fake_run(cmd: list[str], *, timeout_s: float, stage: str) -> None:
+        captured_filters.append(cmd[cmd.index("-vf") + 1])
+        Path(cmd[-1]).parent.mkdir(parents=True, exist_ok=True)
+        Path(cmd[-1]).write_bytes(b"")
+
+    monkeypatch.setattr(video_renderer, "_run", fake_run)
+
+    # tracking_target_by_asset sentinel -4 activates point tracking;
+    # point_track_by_asset carries the actual track data.
+    _paths, reframed = video_renderer.cut_segments(
+        plan,
+        asset_paths={1: src},
+        intermediate_dir=tmp_path / "out",
+        target_aspect="9:16",
+        tracking_target_by_asset={1: -4},
+        point_track_by_asset={1: {"frames": [{"t_ms": 0, "x": 100, "y": 100}]}},
+        smart_camera_enabled=True,
+    )
+
+    assert reframed == [True]
+    assert captured_filters == ["POINT_TRACK_CHAIN"]
+
+
+def test_emotion_zoompan_suppressed_when_tracking_active(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Emotion zoompan must not stack on top of an active tracking crop chain.
+
+    When the cut has ``dominant_emotion`` / ``dominant_motion`` that would
+    normally trigger zoompan, but the asset already has a YOLO tracking crop
+    path, zoompan must be suppressed so the two filter chains don't compose.
+    """
+    src = tmp_path / "asset.mp4"
+    src.write_bytes(b"fake")
+    plan = CutPlan(
+        schema_version="m5.cut-plan.v1",
+        target_duration_ms=1_000,
+        target_aspect_ratio="9:16",
+        profile_name="universal",
+        segments=(
+            CutPlanSegment(
+                0,
+                1,
+                0,
+                1_000,
+                "improv",
+                "",
+                dominant_emotion="happy",
+                dominant_motion="dynamic",
+            ),
+        ),
+    )
+    captured_filters: list[str] = []
+
+    monkeypatch.setattr(
+        video_renderer.auto_reframe,
+        "compute_crop_path",
+        lambda *args, **kwargs: [(0, 0, 1080, 1920)],
+    )
+    monkeypatch.setattr(video_renderer.auto_reframe, "write_sendcmd_file", lambda *args: None)
+    monkeypatch.setattr(
+        video_renderer.auto_reframe,
+        "build_filter_chain",
+        lambda *args, **kwargs: "AUTO_REFRAME_CHAIN",
+    )
+
+    def fake_run(cmd: list[str], *, timeout_s: float, stage: str) -> None:
+        captured_filters.append(cmd[cmd.index("-vf") + 1])
+        Path(cmd[-1]).parent.mkdir(parents=True, exist_ok=True)
+        Path(cmd[-1]).write_bytes(b"")
+
+    monkeypatch.setattr(video_renderer, "_run", fake_run)
+
+    # YOLO tracking with no specific object index (automatic YOLO, no smart camera)
+    _paths, reframed = video_renderer.cut_segments(
+        plan,
+        asset_paths={1: src},
+        intermediate_dir=tmp_path / "out",
+        target_aspect="9:16",
+        tracking_by_asset={1: {"frames": []}},
+        smart_camera_enabled=False,
+    )
+
+    assert reframed == [True]
+    assert len(captured_filters) == 1
+    assert "AUTO_REFRAME_CHAIN" in captured_filters[0]
+    assert "zoompan=" not in captured_filters[0]
 
 
 def test_smart_camera_none_suppresses_stale_point_tracking_and_vidstab(
