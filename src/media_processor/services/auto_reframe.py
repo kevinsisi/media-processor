@@ -101,7 +101,13 @@ class CropPath:
     points: list[tuple[float, int, int]]
 
 
-def _crop_dimensions(src_w: int, src_h: int, target_aspect: str) -> tuple[int, int]:
+def _crop_dimensions(
+    src_w: int,
+    src_h: int,
+    target_aspect: str,
+    *,
+    crop_zoom_factor: float = CROP_ZOOM_FACTOR,
+) -> tuple[int, int]:
     """Compute the dynamic crop window for ``target_aspect`` inside
     ``(src_w, src_h)``.
 
@@ -128,8 +134,8 @@ def _crop_dimensions(src_w: int, src_h: int, target_aspect: str) -> tuple[int, i
         cw, ch = by_height
     # Apply the zoom factor and round to even values; libx264 prefers
     # even widths/heights.
-    cw = int(round(cw * CROP_ZOOM_FACTOR))
-    ch = int(round(ch * CROP_ZOOM_FACTOR))
+    cw = int(round(cw * crop_zoom_factor))
+    ch = int(round(ch * crop_zoom_factor))
     cw = cw - (cw % 2)
     ch = ch - (ch % 2)
     return max(2, cw), max(2, ch)
@@ -267,6 +273,7 @@ def compute_crop_path(
     src_h: int | None = None,
     object_index: int | None = None,
     smooth_camera_path: bool = True,
+    crop_zoom_factor: float = CROP_ZOOM_FACTOR,
 ) -> CropPath | None:
     """Build a Kalman-smoothed dynamic crop for the cut span.
 
@@ -293,7 +300,7 @@ def compute_crop_path(
     if target_aspect not in ASPECT_RATIOS:
         return None
 
-    crop_w, crop_h = _crop_dimensions(sw, sh, target_aspect)
+    crop_w, crop_h = _crop_dimensions(sw, sh, target_aspect, crop_zoom_factor=crop_zoom_factor)
     # ``CROP_ZOOM_FACTOR`` shrinks the crop window below the maximum
     # target-aspect rectangle, so even when source matches target
     # aspect the window is smaller than the source and has room to
@@ -395,6 +402,8 @@ def compute_crop_path_from_custom_roi(
     asset_end_ms: int,
     src_w: int | None = None,
     src_h: int | None = None,
+    smooth_camera_path: bool = False,
+    crop_zoom_factor: float = CROP_ZOOM_FACTOR,
 ) -> CropPath | None:
     """Same as :func:`compute_crop_path` but using a CSRT-tracked ROI.
 
@@ -418,7 +427,8 @@ def compute_crop_path_from_custom_roi(
         asset_end_ms=asset_end_ms,
         src_w=src_w,
         src_h=src_h,
-        smooth_camera_path=False,
+        smooth_camera_path=smooth_camera_path,
+        crop_zoom_factor=crop_zoom_factor,
     )
 
 
@@ -430,6 +440,8 @@ def compute_crop_path_from_point_track(
     asset_end_ms: int,
     src_w: int | None = None,
     src_h: int | None = None,
+    smooth_camera_path: bool = False,
+    crop_zoom_factor: float = CROP_ZOOM_FACTOR,
 ) -> CropPath | None:
     """v0.23 — auto-reframe centred on a single LK-tracked pixel.
 
@@ -490,7 +502,8 @@ def compute_crop_path_from_point_track(
         asset_end_ms=asset_end_ms,
         src_w=src_w,
         src_h=src_h,
-        smooth_camera_path=False,
+        smooth_camera_path=smooth_camera_path,
+        crop_zoom_factor=crop_zoom_factor,
     )
 
 

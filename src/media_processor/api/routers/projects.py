@@ -1247,6 +1247,7 @@ async def batch_stabilize_project_assets(
     }
     if not payload.force:
         skip_statuses.add(asset_variants.STABILIZATION_DONE)
+        skip_statuses.add(asset_variants.STABILIZATION_SKIPPED)
 
     for asset in assets:
         current_status = asset_variants.stabilization_status(asset)
