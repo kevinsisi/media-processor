@@ -223,7 +223,9 @@ def estimate_stabilization_need(src: Path) -> StabilizationNeedEstimate:
                     blockSize=7,
                 )
                 if points0 is not None and len(points0) >= 20:
-                    points1, status, _ = cv2_any.calcOpticalFlowPyrLK(prev_gray, gray, points0, None)
+                    points1, status, _ = cv2_any.calcOpticalFlowPyrLK(
+                        prev_gray, gray, points0, None
+                    )
                     if points1 is not None and status is not None:
                         mask = status.reshape(-1) == 1
                         good0 = points0[mask]
@@ -263,12 +265,10 @@ def estimate_stabilization_need(src: Path) -> StabilizationNeedEstimate:
     jitter_rms = float(np.sqrt(np.mean(residual_arr**2)))
     jitter_p95 = float(np.percentile(residual_arr, 95))
     low_jitter = (
-        jitter_rms < PREFLIGHT_LOW_JITTER_RMS_PX
-        and jitter_p95 < PREFLIGHT_LOW_JITTER_P95_PX
+        jitter_rms < PREFLIGHT_LOW_JITTER_RMS_PX and jitter_p95 < PREFLIGHT_LOW_JITTER_P95_PX
     )
     reason = (
-        f"jitter_rms={jitter_rms:.3f}px jitter_p95={jitter_p95:.3f}px "
-        f"usable_steps={usable_steps}"
+        f"jitter_rms={jitter_rms:.3f}px jitter_p95={jitter_p95:.3f}px usable_steps={usable_steps}"
     )
     return StabilizationNeedEstimate(
         not low_jitter,
@@ -501,7 +501,9 @@ def stabilize_source_from_tracking(
     scratch_dir = Path(scratch_dir)
     dst.parent.mkdir(parents=True, exist_ok=True)
     scratch_dir.mkdir(parents=True, exist_ok=True)
-    sendcmd_path = auto_reframe.write_sendcmd_file(crop_path, scratch_dir / f"{dst.stem}.tracking.txt")
+    sendcmd_path = auto_reframe.write_sendcmd_file(
+        crop_path, scratch_dir / f"{dst.stem}.tracking.txt"
+    )
     filter_chain = auto_reframe.build_filter_chain(
         crop_path,
         sendcmd_path,
