@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
@@ -86,6 +87,45 @@ def thumbnail_urls_for_asset(asset_id: int) -> list[str]:
 router = APIRouter(prefix="/assets", tags=["assets"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
+
+
+def _discard_derivative_path(path: str | None, raw_path: str) -> None:
+    if not path or Path(path) == Path(raw_path):
+        return
+    with suppress(OSError):
+        Path(path).unlink(missing_ok=True)
+
+
+def _invalidate_stabilized_variant_for_tracking_change(asset: Asset) -> str | None:
+    """A tracking target changes the meaning of a stabilized derivative.
+
+    Existing stabilized files may have been created by whole-frame vidstab or a
+    previous tracking target. Keep raw immutable and make the operator-visible
+    source fall back to raw until a fresh tracking-based derivative is ready.
+    """
+
+    previous_path = getattr(asset, "stabilized_path", None)
+    asset.active_asset_variant = asset_variants.RAW_VARIANT
+    asset.stabilized_path = None
+    asset.stabilization_status = asset_variants.STABILIZATION_NOT_STARTED
+    asset.stabilization_error = "tracking target changed; stabilized variant needs regeneration"
+    return previous_path
+
+
+def _discard_derivative_paths(paths: list[str | None], raw_path: str) -> None:
+    for path in paths:
+        _discard_derivative_path(path, raw_path)
+
+
+def _stage_tracking_stabilization(asset: Asset) -> None:
+    asset.stabilization_status = asset_variants.STABILIZATION_PENDING
+    asset.stabilization_error = None
+    asset.stabilized_path = str(asset_variants.stabilized_path_for_asset(asset))
+
+
+def _mark_tracking_stabilization_enqueue_failed(asset: Asset, exc: Exception) -> None:
+    asset.stabilization_status = asset_variants.STABILIZATION_FAILED
+    asset.stabilization_error = f"tracking stabilization enqueue failed: {exc}"
 
 
 def _serialise_asset(asset: Asset) -> AssetDetail:
@@ -625,8 +665,14 @@ async def patch_asset_tracking_target(
     if asset is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="asset not found")
 
+    enqueue_tracking_stabilization = False
+    derivative_paths_to_discard: list[str | None] = []
     if payload.mode == "auto":
+        derivative_paths_to_discard.append(
+            _invalidate_stabilized_variant_for_tracking_change(asset)
+        )
         asset.tracked_object_index = None
+        enqueue_tracking_stabilization = True
     elif payload.mode == "object":
         if payload.object_index is None:
             raise HTTPException(
@@ -652,7 +698,11 @@ async def patch_asset_tracking_target(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f'object_index={payload.object_index} not in tracking_json["tracks"]',
             )
+        derivative_paths_to_discard.append(
+            _invalidate_stabilized_variant_for_tracking_change(asset)
+        )
         asset.tracked_object_index = int(payload.object_index)
+        enqueue_tracking_stabilization = True
     elif payload.mode == "custom":
         if not payload.custom_roi:
             raise HTTPException(
@@ -670,6 +720,9 @@ async def patch_asset_tracking_target(
                 detail=f"custom_roi must contain integer x,y,w,h: {exc}",
             ) from exc
         init_t_ms = int(payload.custom_roi.get("source_t_ms") or 0)
+        derivative_paths_to_discard.append(
+            _invalidate_stabilized_variant_for_tracking_change(asset)
+        )
         media_path = asset_variants.selected_media_path(asset)
         # CSRT can be slow on long clips (real-time-ish), but the user
         # is waiting on this single asset — run inline. asyncio.to_thread
@@ -692,6 +745,7 @@ async def patch_asset_tracking_target(
             ) from exc
         asset.custom_roi_json = roi_json
         asset.tracked_object_index = -1
+        enqueue_tracking_stabilization = True
     elif payload.mode == "point":
         # v0.23 — pyramidal Lucas-Kanade pixel-precise tracking from a
         # single user click. The FE sends 0..1 normalised display-space
@@ -740,6 +794,9 @@ async def patch_asset_tracking_target(
         # the FE's first poll after the PATCH reply already sees
         # ``status = "pending"``. ``point_tracking_json`` is cleared
         # because any previous trace is now stale.
+        derivative_paths_to_discard.append(
+            _invalidate_stabilized_variant_for_tracking_change(asset)
+        )
         asset.tracked_object_index = -4
         asset.point_tracking_json = None
         asset.point_tracking_status = "pending"
@@ -750,6 +807,8 @@ async def patch_asset_tracking_target(
             "norm_y": norm_y,
         }
         await session.commit()
+        _discard_derivative_paths(derivative_paths_to_discard, str(asset.file_path))
+        derivative_paths_to_discard.clear()
         # Enqueue AFTER the commit so the worker is guaranteed to see
         # the row in ``status="pending"`` (otherwise the worker could
         # race and overwrite a row that hasn't yet been marked
@@ -781,8 +840,14 @@ async def patch_asset_tracking_target(
         # ``point_tracking_status="pending"`` (added in v0.28.0).
         # The FE flips to polling mode on seeing that status.
     elif payload.mode == "fixed":
+        derivative_paths_to_discard.append(
+            _invalidate_stabilized_variant_for_tracking_change(asset)
+        )
         asset.tracked_object_index = -2
     else:  # "none"
+        derivative_paths_to_discard.append(
+            _invalidate_stabilized_variant_for_tracking_change(asset)
+        )
         asset.tracked_object_index = -3
 
     if payload.mode != "point" and asset.point_tracking_status == "pending":
@@ -790,6 +855,15 @@ async def patch_asset_tracking_target(
         asset.point_tracking_error = None
 
     await session.commit()
+    _discard_derivative_paths(derivative_paths_to_discard, str(asset.file_path))
+    if enqueue_tracking_stabilization:
+        _stage_tracking_stabilization(asset)
+        await session.commit()
+        try:
+            enqueue_asset_stabilization(asset_id, force=True)
+        except Exception as exc:  # noqa: BLE001 — tracking target still remains valid.
+            _mark_tracking_stabilization_enqueue_failed(asset, exc)
+            await session.commit()
     await session.refresh(asset)
     return TrackingTargetResponse(
         asset_id=asset_id,

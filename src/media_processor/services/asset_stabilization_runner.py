@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
+from contextlib import suppress
 from pathlib import Path
+from uuid import uuid4
 
 from sqlalchemy import select
 
@@ -16,6 +20,49 @@ from media_processor.services import asset_variants
 logger = logging.getLogger(__name__)
 
 
+def _tracking_intent_key(asset: Asset) -> str:
+    custom_roi = asset.custom_roi_json if isinstance(asset.custom_roi_json, dict) else {}
+    point_origin = (
+        asset.point_tracking_origin if isinstance(asset.point_tracking_origin, dict) else {}
+    )
+    point_track = asset.point_tracking_json if isinstance(asset.point_tracking_json, dict) else {}
+    tracking_blob = asset.tracking_json if isinstance(asset.tracking_json, dict) else {}
+    payload = json.dumps(
+        {
+            "active_asset_variant": asset_variants.active_variant(asset),
+            "tracked_object_index": asset.tracked_object_index,
+            "point_tracking_status": asset.point_tracking_status,
+            "point_tracking_origin": point_origin,
+            "point_tracking_json": point_track,
+            "custom_roi_init": custom_roi.get("init"),
+            "custom_roi_json": custom_roi,
+            "tracking_json": tracking_blob,
+        },
+        sort_keys=True,
+        default=str,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _candidate_path(dst: Path) -> Path:
+    return dst.with_name(f"{dst.stem}.{uuid4().hex}.candidate{dst.suffix}")
+
+
+def _discard_candidate(path: Path) -> None:
+    with suppress(OSError):
+        path.unlink(missing_ok=True)
+
+
+def _discard_previous_derivative(path: str | None, raw_path: str, keep_path: Path) -> None:
+    if not path:
+        return
+    previous = Path(path)
+    if previous == Path(raw_path) or previous == keep_path:
+        return
+    with suppress(OSError):
+        previous.unlink(missing_ok=True)
+
+
 async def run_asset_stabilization(asset_id: int, *, force: bool = False) -> dict[str, str | int]:
     async with async_session_maker() as session:
         asset = (
@@ -24,6 +71,11 @@ async def run_asset_stabilization(asset_id: int, *, force: bool = False) -> dict
         if asset is None:
             logger.warning("run_asset_stabilization: asset %d not found", asset_id)
             return {"asset_id": asset_id, "status": "missing"}
+        if asset.tracked_object_index == -4 and asset.point_tracking_status == "pending":
+            asset.stabilization_status = asset_variants.STABILIZATION_NOT_STARTED
+            asset.stabilization_error = "waiting for point tracking before stabilization"
+            await session.commit()
+            return {"asset_id": asset_id, "status": "waiting_point_tracking"}
         if (
             not force
             and asset_variants.stabilization_status(asset) == asset_variants.STABILIZATION_DONE
@@ -34,23 +86,28 @@ async def run_asset_stabilization(asset_id: int, *, force: bool = False) -> dict
         asset.stabilization_status = asset_variants.STABILIZATION_RUNNING
         asset.stabilization_error = None
         dst = asset_variants.stabilized_path_for_asset(asset)
+        previous_stabilized_path = getattr(asset, "stabilized_path", None)
         asset.stabilized_path = str(dst)
+        intent_key = _tracking_intent_key(asset)
         await session.commit()
         src = asset_variants.selected_media_path(asset)
-        if src == dst:
+        if src == dst or asset_variants.active_variant(asset) == asset_variants.STABILIZED_VARIANT:
             # A forced rerun can be requested while the stabilized variant is
             # active. Avoid reading and replacing the same file in one ffmpeg
             # operation; regenerate from immutable raw in that case.
             src = Path(asset.file_path)
+        raw_path = str(asset.file_path)
         scratch = Path(settings.analysis_dir) / "asset_stabilization" / str(asset_id)
+        asset_snapshot = asset
 
+    candidate_dst = _candidate_path(dst)
     tracking_error: str | None
     try:
         tracking_result = await asyncio.to_thread(
             asset_variants.stabilize_source_from_tracking,
-            asset,
+            asset_snapshot,
             src,
-            dst,
+            candidate_dst,
             scratch,
         )
     except Exception as exc:  # noqa: BLE001 — fall back to vidstab/preflight below.
@@ -60,14 +117,20 @@ async def run_asset_stabilization(asset_id: int, *, force: bool = False) -> dict
         )
         tracking_result = None
         tracking_error = f"tracking stabilization failed: {type(exc).__name__}: {exc}"
+        _discard_candidate(candidate_dst)
     else:
         tracking_error = None
     if tracking_result is not None:
         async with async_session_maker() as session:
             row = await session.get(Asset, asset_id)
             if row is None:
+                _discard_candidate(candidate_dst)
                 return {"asset_id": asset_id, "status": "missing_after"}
-            row.stabilized_path = str(dst)
+            if _tracking_intent_key(row) != intent_key:
+                _discard_candidate(candidate_dst)
+                return {"asset_id": asset_id, "status": "stale_intent"}
+            replaced_stabilized_path = getattr(row, "stabilized_path", None)
+            row.stabilized_path = str(candidate_dst)
             row.stabilization_status = asset_variants.STABILIZATION_DONE
             row.stabilization_error = (
                 f"tracking-based stabilization ({tracking_result.mode}); "
@@ -75,6 +138,8 @@ async def run_asset_stabilization(asset_id: int, *, force: bool = False) -> dict
                 f"crop={tracking_result.crop_w}x{tracking_result.crop_h}"
             )
             await session.commit()
+        _discard_previous_derivative(previous_stabilized_path, raw_path, candidate_dst)
+        _discard_previous_derivative(replaced_stabilized_path, raw_path, candidate_dst)
         return {"asset_id": asset_id, "status": "done"}
 
     if not force:
@@ -87,36 +152,50 @@ async def run_asset_stabilization(asset_id: int, *, force: bool = False) -> dict
             )
             async with async_session_maker() as session:
                 row = await session.get(Asset, asset_id)
-                if row is not None:
-                    row.stabilized_path = None
-                    row.stabilization_status = asset_variants.STABILIZATION_SKIPPED
-                    detail = f"low-jitter source skipped: {estimate.reason}"
-                    row.stabilization_error = (
-                        f"{tracking_error}; {detail}" if tracking_error else detail
-                    )
-                    await session.commit()
+                if row is None:
+                    return {"asset_id": asset_id, "status": "missing_after"}
+                if _tracking_intent_key(row) != intent_key:
+                    return {"asset_id": asset_id, "status": "stale_intent"}
+                row.stabilized_path = None
+                row.stabilization_status = asset_variants.STABILIZATION_SKIPPED
+                detail = f"low-jitter source skipped: {estimate.reason}"
+                row.stabilization_error = (
+                    f"{tracking_error}; {detail}" if tracking_error else detail
+                )
+                await session.commit()
             return {"asset_id": asset_id, "status": asset_variants.STABILIZATION_SKIPPED}
 
     try:
-        await asyncio.to_thread(asset_variants.stabilize_source, src, dst, scratch)
+        await asyncio.to_thread(asset_variants.stabilize_source, src, candidate_dst, scratch)
     except Exception as exc:  # noqa: BLE001 — persist terminal state for the UI.
         logger.exception("run_asset_stabilization: asset %d failed", asset_id)
+        _discard_candidate(candidate_dst)
         async with async_session_maker() as session:
             row = await session.get(Asset, asset_id)
-            if row is not None:
-                row.stabilization_status = asset_variants.STABILIZATION_FAILED
-                row.stabilization_error = f"{type(exc).__name__}: {exc}"
-                await session.commit()
+            if row is None:
+                return {"asset_id": asset_id, "status": "missing_after"}
+            if _tracking_intent_key(row) != intent_key:
+                return {"asset_id": asset_id, "status": "stale_intent"}
+            row.stabilization_status = asset_variants.STABILIZATION_FAILED
+            row.stabilization_error = f"{type(exc).__name__}: {exc}"
+            await session.commit()
         return {"asset_id": asset_id, "status": "failed"}
 
     async with async_session_maker() as session:
         row = await session.get(Asset, asset_id)
         if row is None:
+            _discard_candidate(candidate_dst)
             return {"asset_id": asset_id, "status": "missing_after"}
-        row.stabilized_path = str(dst)
+        if _tracking_intent_key(row) != intent_key:
+            _discard_candidate(candidate_dst)
+            return {"asset_id": asset_id, "status": "stale_intent"}
+        replaced_stabilized_path = getattr(row, "stabilized_path", None)
+        row.stabilized_path = str(candidate_dst)
         row.stabilization_status = asset_variants.STABILIZATION_DONE
         row.stabilization_error = None
         await session.commit()
+    _discard_previous_derivative(previous_stabilized_path, raw_path, candidate_dst)
+    _discard_previous_derivative(replaced_stabilized_path, raw_path, candidate_dst)
     return {"asset_id": asset_id, "status": "done"}
 
 

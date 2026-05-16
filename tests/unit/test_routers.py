@@ -7,6 +7,7 @@ engine via dependency override; the routers themselves are unchanged.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Iterator
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -65,6 +66,7 @@ def app(monkeypatch: pytest.MonkeyPatch) -> Iterator[FastAPI]:
             yield session
 
     production_app.dependency_overrides[get_session] = override_get_session
+    production_app.state.test_session_maker = session_maker
     try:
         yield production_app
     finally:
@@ -269,6 +271,31 @@ def test_point_tracking_enqueue_failure_reaches_terminal_state(
     assert "enqueue failed" in body["point_tracking_error"]
 
 
+def test_point_tracking_request_invalidates_stabilized_variant(
+    app: FastAPI,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_enqueue(*_args: Any, **_kwargs: Any) -> str:
+        return "point-track-1"
+
+    monkeypatch.setattr(assets_router, "enqueue_point_tracking", fake_enqueue)
+    client = TestClient(app)
+
+    resp = client.patch(
+        "/assets/1/tracking-target",
+        json={"mode": "point", "point": {"norm_x": 0.5, "norm_y": 0.5, "frame_ms": 0}},
+    )
+
+    assert resp.status_code == 202, resp.text
+    detail = client.get("/assets/1")
+    assert detail.status_code == 200, detail.text
+    body = detail.json()
+    assert body["active_asset_variant"] == "raw"
+    assert body["stabilized_path"] is None
+    assert body["stabilization_status"] == "not_started"
+    assert "tracking target changed" in body["stabilization_error"]
+
+
 def test_tracking_detail_returns_custom_roi_origin(
     app: FastAPI,
     monkeypatch: pytest.MonkeyPatch,
@@ -299,6 +326,11 @@ def test_tracking_detail_returns_custom_roi_origin(
         }
 
     monkeypatch.setattr(assets_router.object_tracking, "track_custom_roi", fake_track_custom_roi)
+    monkeypatch.setattr(
+        assets_router,
+        "enqueue_asset_stabilization",
+        lambda *_args, **_kwargs: "tracking-stabilize-1",
+    )
     client = TestClient(app)
 
     resp = client.patch(
@@ -320,6 +352,150 @@ def test_tracking_detail_returns_custom_roi_origin(
     assert body["tracked_object_index"] == -1
     assert body["has_custom_roi"] is True
     assert body["custom_roi_origin"] == resp.json()["custom_roi_origin"]
+
+    asset_detail = client.get("/assets/1")
+    assert asset_detail.status_code == 200, asset_detail.text
+    asset_body = asset_detail.json()
+    assert asset_body["active_asset_variant"] == "raw"
+    assert asset_body["stabilization_status"] == "pending"
+    assert asset_body["stabilized_path"].endswith("1_foo.stab.mp4")
+
+
+def test_tracking_target_stabilization_enqueue_failure_marks_failed(
+    app: FastAPI,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_enqueue(*_args: Any, **_kwargs: Any) -> str:
+        raise RuntimeError("redis down")
+
+    monkeypatch.setattr(assets_router, "enqueue_asset_stabilization", fail_enqueue)
+    client = TestClient(app)
+
+    resp = client.patch(
+        "/assets/1/tracking-target",
+        json={"mode": "object", "object_index": 0},
+    )
+
+    assert resp.status_code == 200, resp.text
+    detail = client.get("/assets/1")
+    assert detail.status_code == 200, detail.text
+    body = detail.json()
+    assert body["active_asset_variant"] == "raw"
+    assert body["stabilization_status"] == "failed"
+    assert "redis down" in body["stabilization_error"]
+
+
+def test_custom_tracking_target_uses_raw_after_invalidating_stabilized_variant(
+    app: FastAPI,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import asyncio
+
+    old_derivative = tmp_path / "old.stab.mp4"
+    old_derivative.write_bytes(b"old stabilized")
+
+    async def set_stabilized_active() -> None:
+        async with app.state.test_session_maker() as session:
+            asset = await session.get(Asset, 1)
+            assert asset is not None
+            asset.active_asset_variant = "stabilized"
+            asset.stabilized_path = str(old_derivative)
+            asset.stabilization_status = "done"
+            await session.commit()
+
+    asyncio.run(set_stabilized_active())
+    tracked_sources: list[Path] = []
+
+    def fake_track_custom_roi(media_path: Path, *_args: Any, **kwargs: Any) -> dict[str, Any]:
+        tracked_sources.append(media_path)
+        return {
+            "src_w": 3840,
+            "src_h": 2160,
+            "fps": 5.0,
+            "init_t_ms": int(kwargs["init_t_ms"]),
+            "init": {
+                "x": int(kwargs["init_x"]),
+                "y": int(kwargs["init_y"]),
+                "w": int(kwargs["init_w"]),
+                "h": int(kwargs["init_h"]),
+            },
+            "frames": [
+                {
+                    "t_ms": int(kwargs["init_t_ms"]),
+                    "x": int(kwargs["init_x"]),
+                    "y": int(kwargs["init_y"]),
+                    "w": int(kwargs["init_w"]),
+                    "h": int(kwargs["init_h"]),
+                    "conf": 1.0,
+                }
+            ],
+            "sampled_frames": 1,
+        }
+
+    monkeypatch.setattr(assets_router.object_tracking, "track_custom_roi", fake_track_custom_roi)
+    monkeypatch.setattr(
+        assets_router,
+        "enqueue_asset_stabilization",
+        lambda *_args, **_kwargs: "tracking-stabilize-1",
+    )
+    client = TestClient(app)
+
+    resp = client.patch(
+        "/assets/1/tracking-target",
+        json={"mode": "custom", "custom_roi": {"x": 120, "y": 240, "w": 640, "h": 360}},
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert tracked_sources == [Path("/mnt/assets/foo.mp4")]
+    assert not old_derivative.exists()
+
+
+def test_custom_tracking_failure_keeps_previous_stabilized_file(
+    app: FastAPI,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import asyncio
+
+    old_derivative = tmp_path / "old.stab.mp4"
+    old_derivative.write_bytes(b"old stabilized")
+
+    async def set_stabilized_active() -> None:
+        async with app.state.test_session_maker() as session:
+            asset = await session.get(Asset, 1)
+            assert asset is not None
+            asset.active_asset_variant = "stabilized"
+            asset.stabilized_path = str(old_derivative)
+            asset.stabilization_status = "done"
+            await session.commit()
+
+    asyncio.run(set_stabilized_active())
+
+    def fail_track_custom_roi(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        raise assets_router.object_tracking.TrackingError("boom")
+
+    monkeypatch.setattr(assets_router.object_tracking, "track_custom_roi", fail_track_custom_roi)
+    client = TestClient(app)
+
+    resp = client.patch(
+        "/assets/1/tracking-target",
+        json={"mode": "custom", "custom_roi": {"x": 120, "y": 240, "w": 640, "h": 360}},
+    )
+
+    assert resp.status_code == 500, resp.text
+    assert old_derivative.exists()
+
+    async def read_asset_state() -> tuple[str | None, str | None, str | None]:
+        async with app.state.test_session_maker() as session:
+            asset = await session.get(Asset, 1)
+            assert asset is not None
+            return asset.active_asset_variant, asset.stabilized_path, asset.stabilization_status
+
+    active_variant, stabilized_path, stabilization_status = asyncio.run(read_asset_state())
+    assert active_variant == "stabilized"
+    assert stabilized_path == str(old_derivative)
+    assert stabilization_status == "done"
 
 
 def test_bgm_enqueue_failure_marks_job_failed(

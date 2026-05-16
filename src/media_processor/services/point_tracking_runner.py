@@ -38,6 +38,7 @@ from media_processor.core.db import async_session_maker
 from media_processor.models import Asset
 from media_processor.services import asset_variants
 from media_processor.services import point_tracking as point_tracking_svc
+from media_processor.services.queue import enqueue_asset_stabilization
 
 logger = logging.getLogger(__name__)
 
@@ -204,12 +205,23 @@ async def run_point_tracking(
         row.point_tracking_error = None
         # ``tracked_object_index`` is set to -4 by the API endpoint
         # at enqueue time, so we don't touch it here.
+        row.stabilization_status = asset_variants.STABILIZATION_PENDING
+        row.stabilization_error = None
+        row.stabilized_path = str(asset_variants.stabilized_path_for_asset(row))
         await session.commit()
+        try:
+            stabilization_job_id = enqueue_asset_stabilization(asset_id, force=True)
+        except Exception as exc:  # noqa: BLE001 — point tracking succeeded; surface stabilization separately.
+            row.stabilization_status = asset_variants.STABILIZATION_FAILED
+            row.stabilization_error = f"tracking stabilization enqueue failed: {exc}"
+            await session.commit()
+            stabilization_job_id = None
 
     return {
         "asset_id": asset_id,
         "status": "done",
         "sampled_frames": int(point_json.get("sampled_frames", 0)),
+        "stabilization_job_id": stabilization_job_id,
     }
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -7,7 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import StaticPool
 
 from media_processor.models import Asset, Base, Project
-from media_processor.services import asset_stabilization_runner, asset_variants
+from media_processor.services import (
+    asset_stabilization_runner,
+    asset_variants,
+    point_tracking_runner,
+)
 
 
 async def _seed_asset(session_maker: async_sessionmaker[AsyncSession], source: Path) -> int:
@@ -107,18 +112,30 @@ async def test_run_asset_stabilization_prefers_tracking_derivative(
     source.write_bytes(b"raw")
     asset_id = await _seed_asset(session_maker, source)
     dst = tmp_path / "tracking.stab.mp4"
+    candidate = tmp_path / "tracking.unique.mp4"
 
     monkeypatch.setattr(asset_stabilization_runner, "async_session_maker", session_maker)
     monkeypatch.setattr(asset_variants, "stabilized_path_for_asset", lambda _asset: dst)
-    monkeypatch.setattr(
-        asset_variants,
-        "stabilize_source_from_tracking",
-        lambda *_args: asset_variants.TrackingStabilizationResult(
+    monkeypatch.setattr(asset_stabilization_runner, "_candidate_path", lambda _dst: candidate)
+
+    def fake_tracking_derivative(
+        _asset: Asset,
+        _src: Path,
+        output: Path,
+        _scratch_dir: Path,
+    ) -> asset_variants.TrackingStabilizationResult:
+        output.write_bytes(b"tracking-stabilized")
+        return asset_variants.TrackingStabilizationResult(
             mode="tracking_point",
             point_count=120,
             crop_w=3556,
             crop_h=2000,
-        ),
+        )
+
+    monkeypatch.setattr(
+        asset_variants,
+        "stabilize_source_from_tracking",
+        fake_tracking_derivative,
     )
     monkeypatch.setattr(
         asset_variants,
@@ -137,10 +154,119 @@ async def test_run_asset_stabilization_prefers_tracking_derivative(
     async with session_maker() as session:
         asset = await session.get(Asset, asset_id)
         assert asset is not None
-        assert asset.stabilized_path == str(dst)
+        assert asset.stabilized_path == str(candidate)
         assert asset.stabilization_status == asset_variants.STABILIZATION_DONE
         assert asset.stabilization_error is not None
         assert "tracking-based stabilization (tracking_point)" in asset.stabilization_error
+    assert candidate.read_bytes() == b"tracking-stabilized"
+
+
+@pytest.mark.asyncio
+async def test_run_asset_stabilization_discards_stale_tracking_derivative(
+    session_maker: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "raw.mp4"
+    source.write_bytes(b"raw")
+    asset_id = await _seed_asset(session_maker, source)
+    dst = tmp_path / "tracking.stab.mp4"
+    candidate = tmp_path / "tracking.stale.mp4"
+
+    async def change_tracking_intent() -> None:
+        async with session_maker() as session:
+            asset = await session.get(Asset, asset_id)
+            assert asset is not None
+            asset.tracked_object_index = -3
+            asset.stabilization_status = asset_variants.STABILIZATION_PENDING
+            asset.stabilization_error = "new tracking target queued"
+            await session.commit()
+
+    def fake_tracking_derivative(
+        _asset: Asset,
+        _src: Path,
+        output: Path,
+        _scratch_dir: Path,
+    ) -> asset_variants.TrackingStabilizationResult:
+        output.write_bytes(b"stale-output")
+        asyncio.run(change_tracking_intent())
+        return asset_variants.TrackingStabilizationResult(
+            mode="tracking_point",
+            point_count=120,
+            crop_w=3556,
+            crop_h=2000,
+        )
+
+    monkeypatch.setattr(asset_stabilization_runner, "async_session_maker", session_maker)
+    monkeypatch.setattr(asset_variants, "stabilized_path_for_asset", lambda _asset: dst)
+    monkeypatch.setattr(asset_stabilization_runner, "_candidate_path", lambda _dst: candidate)
+    monkeypatch.setattr(asset_variants, "stabilize_source_from_tracking", fake_tracking_derivative)
+
+    result = await asset_stabilization_runner.run_asset_stabilization(asset_id, force=True)
+
+    assert result == {"asset_id": asset_id, "status": "stale_intent"}
+    assert not candidate.exists()
+    async with session_maker() as session:
+        asset = await session.get(Asset, asset_id)
+        assert asset is not None
+        assert asset.tracked_object_index == -3
+        assert asset.stabilized_path == str(dst)
+        assert asset.stabilization_status == asset_variants.STABILIZATION_PENDING
+        assert asset.stabilization_error == "new tracking target queued"
+
+
+@pytest.mark.asyncio
+async def test_run_asset_stabilization_cleans_replaced_same_intent_derivative(
+    session_maker: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "raw.mp4"
+    source.write_bytes(b"raw")
+    asset_id = await _seed_asset(session_maker, source)
+    dst = tmp_path / "tracking.stab.mp4"
+    candidate = tmp_path / "tracking.latest.mp4"
+    earlier_derivative = tmp_path / "tracking.earlier.mp4"
+    earlier_derivative.write_bytes(b"earlier")
+
+    async def publish_same_intent_first() -> None:
+        async with session_maker() as session:
+            asset = await session.get(Asset, asset_id)
+            assert asset is not None
+            asset.stabilized_path = str(earlier_derivative)
+            asset.stabilization_status = asset_variants.STABILIZATION_DONE
+            await session.commit()
+
+    def fake_tracking_derivative(
+        _asset: Asset,
+        _src: Path,
+        output: Path,
+        _scratch_dir: Path,
+    ) -> asset_variants.TrackingStabilizationResult:
+        output.write_bytes(b"latest")
+        asyncio.run(publish_same_intent_first())
+        return asset_variants.TrackingStabilizationResult(
+            mode="tracking_point",
+            point_count=120,
+            crop_w=3556,
+            crop_h=2000,
+        )
+
+    monkeypatch.setattr(asset_stabilization_runner, "async_session_maker", session_maker)
+    monkeypatch.setattr(asset_variants, "stabilized_path_for_asset", lambda _asset: dst)
+    monkeypatch.setattr(asset_stabilization_runner, "_candidate_path", lambda _dst: candidate)
+    monkeypatch.setattr(asset_variants, "stabilize_source_from_tracking", fake_tracking_derivative)
+
+    result = await asset_stabilization_runner.run_asset_stabilization(asset_id, force=True)
+
+    assert result == {"asset_id": asset_id, "status": "done"}
+    assert candidate.exists()
+    assert not earlier_derivative.exists()
+    async with session_maker() as session:
+        asset = await session.get(Asset, asset_id)
+        assert asset is not None
+        assert asset.stabilized_path == str(candidate)
+        assert asset.stabilization_status == asset_variants.STABILIZATION_DONE
 
 
 @pytest.mark.asyncio
@@ -153,9 +279,20 @@ async def test_run_asset_stabilization_force_bypasses_low_jitter_preflight(
     source.write_bytes(b"raw")
     asset_id = await _seed_asset(session_maker, source)
     dst = tmp_path / "forced.stab.mp4"
+    candidate = tmp_path / "forced.unique.mp4"
+    old_derivative = tmp_path / "old.stab.mp4"
+    old_derivative.write_bytes(b"old")
+    async with session_maker() as session:
+        asset = await session.get(Asset, asset_id)
+        assert asset is not None
+        asset.active_asset_variant = asset_variants.STABILIZED_VARIANT
+        asset.stabilized_path = str(old_derivative)
+        asset.stabilization_status = asset_variants.STABILIZATION_DONE
+        await session.commit()
 
     monkeypatch.setattr(asset_stabilization_runner, "async_session_maker", session_maker)
     monkeypatch.setattr(asset_variants, "stabilized_path_for_asset", lambda _asset: dst)
+    monkeypatch.setattr(asset_stabilization_runner, "_candidate_path", lambda _dst: candidate)
     monkeypatch.setattr(
         asset_variants,
         "estimate_stabilization_need",
@@ -163,6 +300,7 @@ async def test_run_asset_stabilization_force_bypasses_low_jitter_preflight(
     )
 
     def fake_stabilize_source(_src: Path, output: Path, _scratch_dir: Path) -> None:
+        assert _src == source
         output.write_bytes(b"stabilized")
 
     monkeypatch.setattr(asset_variants, "stabilize_source", fake_stabilize_source)
@@ -173,5 +311,98 @@ async def test_run_asset_stabilization_force_bypasses_low_jitter_preflight(
     async with session_maker() as session:
         asset = await session.get(Asset, asset_id)
         assert asset is not None
-        assert asset.stabilized_path == str(dst)
+        assert asset.stabilized_path == str(candidate)
         assert asset.stabilization_status == asset_variants.STABILIZATION_DONE
+    assert candidate.read_bytes() == b"stabilized"
+    assert not old_derivative.exists()
+
+
+@pytest.mark.asyncio
+async def test_run_asset_stabilization_waits_for_pending_point_tracking(
+    session_maker: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "raw.mp4"
+    source.write_bytes(b"raw")
+    asset_id = await _seed_asset(session_maker, source)
+    async with session_maker() as session:
+        asset = await session.get(Asset, asset_id)
+        assert asset is not None
+        asset.tracked_object_index = -4
+        asset.point_tracking_status = "pending"
+        await session.commit()
+
+    monkeypatch.setattr(asset_stabilization_runner, "async_session_maker", session_maker)
+    monkeypatch.setattr(
+        asset_variants,
+        "stabilize_source",
+        lambda *_args, **_kwargs: pytest.fail("must wait for point tracking"),
+    )
+
+    result = await asset_stabilization_runner.run_asset_stabilization(asset_id)
+
+    assert result == {"asset_id": asset_id, "status": "waiting_point_tracking"}
+    async with session_maker() as session:
+        asset = await session.get(Asset, asset_id)
+        assert asset is not None
+        assert asset.stabilization_status == asset_variants.STABILIZATION_NOT_STARTED
+        assert asset.stabilization_error == "waiting for point tracking before stabilization"
+
+
+@pytest.mark.asyncio
+async def test_point_tracking_done_enqueues_tracking_stabilization(
+    session_maker: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "raw.mp4"
+    source.write_bytes(b"raw")
+    asset_id = await _seed_asset(session_maker, source)
+    async with session_maker() as session:
+        asset = await session.get(Asset, asset_id)
+        assert asset is not None
+        asset.tracked_object_index = -4
+        asset.point_tracking_status = "pending"
+        asset.point_tracking_origin = {"norm_x": 0.5, "norm_y": 0.5, "frame_ms": 0}
+        await session.commit()
+
+    job_calls: list[tuple[int, bool]] = []
+    monkeypatch.setattr(point_tracking_runner, "async_session_maker", session_maker)
+    monkeypatch.setattr(
+        asset_variants, "stabilized_path_for_asset", lambda _asset: tmp_path / "point.stab.mp4"
+    )
+    monkeypatch.setattr(
+        point_tracking_runner.point_tracking_svc,
+        "track_point",
+        lambda *_args, **_kwargs: {
+            "src_w": 3840,
+            "src_h": 2160,
+            "fps": 60.0,
+            "init": {"x": 1920, "y": 1080},
+            "frames": [{"t_ms": 0, "x": 1920.0, "y": 1080.0, "lost": False}],
+            "sampled_frames": 1,
+        },
+    )
+    monkeypatch.setattr(
+        point_tracking_runner,
+        "enqueue_asset_stabilization",
+        lambda asset_id_arg, *, force=False: job_calls.append((asset_id_arg, force)) or "stab-1",
+    )
+
+    result = await point_tracking_runner.run_point_tracking(
+        asset_id,
+        init_norm_x=0.5,
+        init_norm_y=0.5,
+        init_t_ms=0,
+    )
+
+    assert result["status"] == "done"
+    assert result["stabilization_job_id"] == "stab-1"
+    assert job_calls == [(asset_id, True)]
+    async with session_maker() as session:
+        asset = await session.get(Asset, asset_id)
+        assert asset is not None
+        assert asset.point_tracking_status == "done"
+        assert asset.stabilization_status == asset_variants.STABILIZATION_PENDING
+        assert asset.stabilized_path == str(tmp_path / "point.stab.mp4")

@@ -5,6 +5,8 @@
 - [x] 1.1 Add a backend resolver that returns the best stabilization target from existing asset tracking data: point, custom ROI, picked object, optional automatic object fallback.
 - [ ] 1.2 Add tests for target priority and unusable/missing tracking data fallback.
 - [x] 1.3 Ensure all source reads use `asset_variants.selected_media_path(asset)`.
+- [x] 1.4 Invalidate stale stabilized derivatives when the operator changes the tracking target.
+- [x] 1.5 Auto-enqueue forced tracking-based stabilization after async point tracking completes.
 
 ## 2. Smooth Camera Path Generation
 
@@ -31,6 +33,7 @@
 - [ ] 5.1 Reuse existing tracking setup UI; do not require a new tracking picker for this change.
 - [ ] 5.2 Label generated derivatives as `tracking` vs `vidstab` if backend exposes mode.
 - [ ] 5.3 Show skipped/failed reasons in user-facing Chinese without raw implementation jargon.
+- [x] 5.4 Ensure selecting a new tracking target does not leave the old vidstab/stabilized derivative as the active source.
 
 ## 6. Verification
 

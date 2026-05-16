@@ -4,11 +4,29 @@
 
 The system SHALL use existing explicit asset tracking data as the preferred source for generating a silky stabilized asset derivative.
 
+#### Scenario: Operator changes tracking target after a stabilized derivative exists
+
+- **WHEN** an operator changes an asset tracking target
+- **THEN** any existing stabilized derivative is treated as stale for that asset
+- **AND** the active source falls back to raw until a fresh stabilized derivative is generated
+- **AND** the stale stabilized derivative is not used as the final selected source implicitly
+
 #### Scenario: Asset has point tracking selected
 
 - **WHEN** an asset has usable point tracking data and the operator requests stabilization
 - **THEN** the stabilization worker uses the point track as the primary stabilization target
 - **AND** whole-frame vidstab does not decide the framing path
+
+#### Scenario: Point tracking completes asynchronously
+
+- **WHEN** a queued point tracking job finishes successfully
+- **THEN** the system queues a forced asset stabilization job
+- **AND** that stabilization job uses the completed point track before vidstab fallback
+
+#### Scenario: Stabilization job starts while point tracking is pending
+
+- **WHEN** an asset stabilization job runs while the selected point track is still pending
+- **THEN** the stabilization job waits/skips instead of publishing a whole-frame vidstab derivative for the stale pre-tracking intent
 
 #### Scenario: Asset has custom ROI tracking selected
 
