@@ -2,7 +2,7 @@
 
 > **單一定位**：沒有剪輯背景的小白也能「拍完就上傳，AI 直接給大量 IG / FB 短影音」的工具。
 > 目標 UX：手機優先、繁體中文、高級感、最少手動編輯。
-> 目前版本：**0.42.4**（M10.1.3 — 素材版本預覽與分析結果保存 hotfix）
+> 目前版本：**0.42.5**（M9.15.23 — Smart Camera priority + `kind="none"` schema cleanup）
 > 下一個 milestone：M10.2 — 多專案批次 + 社群直接發布 + AI 自動縮圖。
 
 > **2026-05-13 camera-motion note**：`0.30.23` 到 `0.30.38` 的 camera-motion 修補已被否決；`0.30.39`/`0.30.40` 只保留 Smart Camera `none` 不套殘留 tracking / vidstab 的 no-extra-correction 修正。`0.40.0` 改走素材級 raw / stabilized 版本工作流，未來運鏡 / 焦點追蹤 / 數位防手震變更必須先遵守 `skills/video-camera-movement/SKILL.md`。
@@ -61,6 +61,7 @@
 | **M9.15.20** | **真正 BGM beat sync：Smart Camera 運鏡完成點吸附到配樂節拍，不改 cut 長度** | ✅ done | **0.30.20** |
 | **M9.15.21** | **AI 配樂 UX：進剪輯頁背景預抓建議，生成仍以欄位文字為準，AI / 音樂庫配樂可下載** | ✅ done | **0.30.21** |
 | **M9.15.22** | **AI Smart Camera 明顯化：新 directive 與舊 draft render-time 都放大 zoom / pan，讓運鏡肉眼可辨識** | ✅ done | **0.30.22** |
+| **M9.15.23** | **Smart Camera priority correction + `kind="none"` schema：explicit tracking 優先、Vision 失敗/模糊時不再用 modulo fallback，renderer 不再二次放大 planner directive** | ✅ done | **0.42.5** |
 | **M9.15.39** | **Smart Camera `none` 明確代表靜態構圖：不再讓殘留 point/custom tracking 覆蓋 AI no-move 決策** | ✅ done | **0.30.39** |
 | **M9.15.40** | **Smart Camera `none` 明確代表不做額外修正：跳過 vidstab，避免低紋理/高反光 no-move cut 被補償成左右飄** | ✅ done | **0.30.40** |
 | **M9.16** | **素材級防抖版本工作流：每個素材保留 raw、可產生 stabilized derivative，素材卡可預覽/切換版本，分析 / 追蹤 / render 走同一 active variant** | ✅ done | **0.40.0** |

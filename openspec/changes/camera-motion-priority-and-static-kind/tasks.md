@@ -3,36 +3,36 @@
 Implement in the order below. Each task is small enough to land as its
 own commit with green CI; the bundled PR squashes them.
 
-- [ ] T1 — Schema v3 + `kind="none"` in planner
-  - [ ] `services/smart_camera_planner.py`:
-    - [ ] Bump `SMART_CAMERA_SCHEMA_VERSION` to `"smart-camera.v3"`.
-    - [ ] Allow `kind="none"` in `Directive` (relax the
+- [x] T1 — Schema v3 + `kind="none"` in planner
+  - [x] `services/smart_camera_planner.py`:
+    - [x] Bump `SMART_CAMERA_SCHEMA_VERSION` to `"smart-camera.v3"`.
+    - [x] Allow `kind="none"` in `Directive` (relax the
       `_derive_directive` return-type contract and the
       `apply_smart_camera_to_plan` writer to pass through).
-    - [ ] `_derive_directive` returns `Directive(kind="none",
+    - [x] `_derive_directive` returns `Directive(kind="none",
       from_rect=(0,0,1,1), to_rect=(0,0,1,1), ease="linear",
       notes="<row 2 or row 4 or row 6 reason>")` in every code path
       that today returns `None`. Add the `notes` reason matching the
       decisions skill row (mid-band / simultaneous / empty).
-    - [ ] `serialise_directive` accepts `kind="none"` and emits the
+    - [x] `serialise_directive` accepts `kind="none"` and emits the
       blob normally (no `focus_regions` required).
-  - [ ] `tests/unit/test_smart_camera_planner.py`:
-    - [ ] Replace `test_derive_returns_none_when_mid_band_area` ↦
+  - [x] `tests/unit/test_smart_camera_planner.py`:
+    - [x] Replace `test_derive_returns_none_when_mid_band_area` ↦
       `test_derive_returns_none_kind_when_mid_band_area`
       (asserts `directive.kind == "none"`).
-    - [ ] Replace `test_derive_does_not_pan_for_simultaneous_clusters` ↦
+    - [x] Replace `test_derive_does_not_pan_for_simultaneous_clusters` ↦
       `test_derive_returns_none_kind_for_simultaneous_clusters`.
-    - [ ] Replace `test_derive_returns_none_for_empty_regions` ↦
+    - [x] Replace `test_derive_returns_none_for_empty_regions` ↦
       `test_derive_returns_none_kind_for_empty_regions`.
-    - [ ] Add `test_serialise_round_trip_none_kind` covering the
+    - [x] Add `test_serialise_round_trip_none_kind` covering the
       `kind="none"` blob shape.
 
-- [ ] T2 — Remove `_fallback_directive_for_cut`
-  - [ ] `services/smart_camera_planner.py`:
-    - [ ] Delete `_fallback_directive_for_cut`.
-    - [ ] Delete `FALLBACK_ZOOM_IN_END_SCALE`,
+- [x] T2 — Remove `_fallback_directive_for_cut`
+  - [x] `services/smart_camera_planner.py`:
+    - [x] Delete `_fallback_directive_for_cut`.
+    - [x] Delete `FALLBACK_ZOOM_IN_END_SCALE`,
       `FALLBACK_ZOOM_OUT_START_SCALE`, `FALLBACK_PAN_SCALE`.
-    - [ ] In `plan_smart_camera`, replace every call site
+    - [x] In `plan_smart_camera`, replace every call site
       (`directive = _fallback_directive_for_cut(cut, reason=...)`) with
       `directive = Directive(kind="none", from_rect=(0,0,1,1),
       to_rect=(0,0,1,1), ease="linear", notes=f"no-move: {reason}")`.
@@ -40,39 +40,39 @@ own commit with green CI; the bundled PR squashes them.
       `SmartCameraQuotaError`-via-_call_vision, and the bare
       `Exception`) plus the inner `if directive is None` post-derive
       check.
-    - [ ] Rename `build_fallback_directives` ↦
+    - [x] Rename `build_fallback_directives` ↦
       `build_no_move_directives`. Update the call site in
       `services/edit_orchestrator.py` AND the public export name in
       the `__all__` list at the bottom of
       `services/smart_camera_planner.py`.
-  - [ ] `tests/unit/test_smart_camera_planner.py`:
-    - [ ] Replace `test_fallback_directives_cover_every_cut` with
+  - [x] `tests/unit/test_smart_camera_planner.py`:
+    - [x] Replace `test_fallback_directives_cover_every_cut` with
       `test_no_move_directives_cover_every_cut` asserting every cut
       gets `kind="none"`.
 
-- [ ] T3 — Renderer accepts and short-circuits `kind="none"`
-  - [ ] `services/video_renderer.py`:
-    - [ ] `SMART_CAMERA_KINDS = frozenset({"zoom_in", "zoom_out", "pan", "none"})`.
-    - [ ] `_smart_camera_filter` returns `None` immediately when
+- [x] T3 — Renderer accepts and short-circuits `kind="none"`
+  - [x] `services/video_renderer.py`:
+    - [x] `SMART_CAMERA_KINDS = frozenset({"zoom_in", "zoom_out", "pan", "none"})`.
+    - [x] `_smart_camera_filter` returns `None` immediately when
       `kind == "none"`, without going through the rect / zoom math.
-    - [ ] `deserialise_directive` accepts `kind="none"` and returns a
+    - [x] `deserialise_directive` accepts `kind="none"` and returns a
       `Directive` with that kind plus full-frame rects.
-    - [ ] Pre-v3 forward-compatibility: when a stored directive blob
+    - [x] Pre-v3 forward-compatibility: when a stored directive blob
       has `kind` missing OR `kind not in SMART_CAMERA_KINDS`, the
       renderer treats it as `kind="none"`. No SQL migration.
-    - [ ] Delete `SMART_CAMERA_VISIBLE_ZOOM_IN_MIN`,
+    - [x] Delete `SMART_CAMERA_VISIBLE_ZOOM_IN_MIN`,
       `SMART_CAMERA_VISIBLE_ZOOM_OUT_MIN`,
       `SMART_CAMERA_VISIBLE_PAN_ZOOM_MIN`,
       `SMART_CAMERA_VISIBLE_PAN_GAIN` constants.
-    - [ ] Remove the `t_zoom = max(t_zoom, SMART_CAMERA_VISIBLE_*)`
+    - [x] Remove the `t_zoom = max(t_zoom, SMART_CAMERA_VISIBLE_*)`
       and pan-gain post-processing inside `_smart_camera_filter`. Use
       the directive's rects directly.
-  - [ ] `tests/unit/test_video_renderer.py`:
-    - [ ] Add `test_smart_camera_filter_returns_none_for_none_kind`.
-    - [ ] Add `test_smart_camera_filter_treats_pre_v3_blob_as_none`.
-    - [ ] Remove `test_smart_camera_filter_boosts_subtle_zoom_out`
+  - [x] `tests/unit/test_video_renderer.py`:
+    - [x] Add `test_smart_camera_filter_returns_none_for_none_kind`.
+    - [x] Add `test_smart_camera_filter_treats_pre_v3_blob_as_none`.
+    - [x] Remove `test_smart_camera_filter_boosts_subtle_zoom_out`
       (the boost no longer exists).
-    - [ ] Adjust existing visible-zoom test fixtures so the directives
+    - [x] Adjust existing visible-zoom test fixtures so the directives
       already carry the documented Layer-3 scales (1.85 / 1.65 / 1.65).
 
 - [x] T4 — Priority flip: explicit tracking wins
@@ -104,20 +104,20 @@ own commit with green CI; the bundled PR squashes them.
       vidstab does NOT run on a `kind="none"` cut when stabilize is
       enabled and no tracking is set.
 
-- [ ] T5 — Skill / contract docs
-  - [ ] Verify `skills/camera-motion-decisions/SKILL.md` Layer 2 row 6
+- [x] T5 — Skill / contract docs
+  - [x] Verify `skills/camera-motion-decisions/SKILL.md` Layer 2 row 6
     matches T2 behaviour.
-  - [ ] Verify `skills/video-camera-movement/SKILL.md` "Smart Camera
+  - [x] Verify `skills/video-camera-movement/SKILL.md` "Smart Camera
     `none` (schema v3 `kind="none"`)" rule matches T1+T3 behaviour.
-  - [ ] If T1/T2/T3/T4 needed any deviation from the skills (e.g., the
+  - [x] If T1/T2/T3/T4 needed any deviation from the skills (e.g., the
     `kind="none"` placeholder rects had to be set differently), update
     the corresponding skill section in the same commit.
 
-- [ ] T6 — Migration + ROADMAP entry
-  - [ ] `ROADMAP.md`: add a row "M9.15.23 — Smart Camera priority
+- [x] T6 — Migration + ROADMAP entry
+  - [x] `ROADMAP.md`: add a row "M9.15.23 — Smart Camera priority
     correction + `kind="none"` schema, removes 0.30.22's modulo
-    fallback. ✅ done @ <version>".
-  - [ ] No DB migration required (directives are JSON in
+    fallback. ✅ done @ 0.42.5".
+  - [x] No DB migration required (directives are JSON in
     `cut_plan_segments.smart_camera_json`; forward-compatibility lives
     in the renderer's read-time fallback per T3).
 

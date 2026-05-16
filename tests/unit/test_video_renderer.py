@@ -283,10 +283,10 @@ def test_smart_camera_filter_pan_uses_constant_zoom() -> None:
     assert chain is not None
     assert "zoompan=" in chain
     assert "s=1920x1080" in chain
-    assert f"z='{video_renderer.SMART_CAMERA_VISIBLE_PAN_ZOOM_MIN:.6f}'" in chain
+    assert "z='1.282051'" in chain
 
 
-def test_smart_camera_filter_boosts_subtle_zoom_out() -> None:
+def test_smart_camera_filter_uses_directive_zoom_out_scale() -> None:
     chain = video_renderer._smart_camera_filter(
         {
             "kind": "zoom_out",
@@ -299,24 +299,27 @@ def test_smart_camera_filter_boosts_subtle_zoom_out() -> None:
     )
 
     assert chain is not None
-    assert f"{video_renderer.SMART_CAMERA_VISIBLE_ZOOM_OUT_MIN:.6f}" in chain
+    assert "1.162791" in chain
 
 
 def test_smart_camera_filter_rejects_malformed_directive() -> None:
     """Bad inputs return None so the renderer falls back to the static path."""
-    assert video_renderer._smart_camera_filter({}, "9:16", 1.0) is None
+    # Out-of-range rect coords are rejected, not silently clamped past 1.
     assert (
         video_renderer._smart_camera_filter(
-            {"kind": "wibble", "from_rect": [0, 0, 1, 1], "to_rect": [0, 0, 1, 1]},
+            {"kind": "zoom_in", "from_rect": [0, 0, 1, 1], "to_rect": [0, 0, 5, 5]},
             "9:16",
             1.0,
         )
         is None
     )
-    # Out-of-range rect coords are rejected, not silently clamped past 1.
+
+
+def test_smart_camera_filter_treats_pre_v3_blob_as_none() -> None:
+    assert video_renderer._smart_camera_filter({}, "9:16", 1.0) is None
     assert (
         video_renderer._smart_camera_filter(
-            {"kind": "zoom_in", "from_rect": [0, 0, 1, 1], "to_rect": [0, 0, 5, 5]},
+            {"kind": "wibble", "from_rect": [0, 0, 1, 1], "to_rect": [0, 0, 1, 1]},
             "9:16",
             1.0,
         )

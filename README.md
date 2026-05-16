@@ -2,7 +2,7 @@
 
 Content factory pipeline for novice-friendly Instagram and Facebook short-video production.
 
-**Status:** v0.42.2 / M10.1.1 — Mobile asset preview playback and one-click stability defaults hotfix.
+**Status:** v0.42.5 / M9.15.23 — Smart Camera priority + `kind="none"` schema cleanup.
 
 ## Spec
 
