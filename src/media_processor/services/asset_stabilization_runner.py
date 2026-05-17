@@ -142,7 +142,7 @@ async def run_asset_stabilization(asset_id: int, *, force: bool = False) -> dict
         _discard_previous_derivative(replaced_stabilized_path, raw_path, candidate_dst)
         return {"asset_id": asset_id, "status": "done"}
 
-    if not force:
+    if tracking_error or not force:
         estimate = await asyncio.to_thread(asset_variants.estimate_stabilization_need, src)
         if not estimate.should_stabilize:
             logger.info(
@@ -192,7 +192,9 @@ async def run_asset_stabilization(asset_id: int, *, force: bool = False) -> dict
         replaced_stabilized_path = getattr(row, "stabilized_path", None)
         row.stabilized_path = str(candidate_dst)
         row.stabilization_status = asset_variants.STABILIZATION_DONE
-        row.stabilization_error = None
+        row.stabilization_error = (
+            f"{tracking_error}; vidstab fallback completed" if tracking_error else None
+        )
         await session.commit()
     _discard_previous_derivative(previous_stabilized_path, raw_path, candidate_dst)
     _discard_previous_derivative(replaced_stabilized_path, raw_path, candidate_dst)

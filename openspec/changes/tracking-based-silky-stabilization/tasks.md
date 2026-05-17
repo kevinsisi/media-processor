@@ -20,7 +20,8 @@
 - [x] 3.1 Render tracking-stabilized derivatives via ffmpeg crop/sendcmd with bounded crop margin.
 - [x] 3.2 Preserve duration/fps/resolution compatibility and raw immutability.
 - [ ] 3.3 Ensure render-level vidstab skips assets already stabilized by tracking mode.
-- [ ] 3.4 Add failure handling that never publishes a derivative that fails quality gates.
+- [x] 3.4 Add failure handling that never publishes a tracking candidate that fails quality gates.
+- [x] 3.5 Tune vidstab fallback smoothing with project 11 validation after tracking candidates are rejected.
 
 ## 4. API / Data Model
 
@@ -37,7 +38,7 @@
 
 ## 6. Verification
 
-- [ ] 6.1 Validate with project 11 DJI assets and at least one asset with explicit point/custom ROI tracking.
-- [ ] 6.2 Compare raw, current vidstab derivative, and tracking-stabilized derivative with objective metrics.
+- [x] 6.1 Validate with project 11 DJI assets and at least one asset with explicit point/custom ROI tracking.
+- [x] 6.2 Compare raw, current vidstab derivative, and tracking-stabilized derivative with objective metrics.
 - [ ] 6.3 Produce side-by-side review MP4s for representative pass/fail clips.
 - [ ] 6.4 Confirm `openspec validate --all --strict`, focused tests, web build, and production health after deploy.

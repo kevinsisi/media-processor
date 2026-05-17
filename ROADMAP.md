@@ -2,7 +2,7 @@
 
 > **單一定位**：沒有剪輯背景的小白也能「拍完就上傳，AI 直接給大量 IG / FB 短影音」的工具。
 > 目標 UX：手機優先、繁體中文、高級感、最少手動編輯。
-> 目前版本：**0.42.8**（M9.15.26 — tracking target changes regenerate stabilized variants）
+> 目前版本：**0.42.9**（M9.15.27 — stronger asset-level vidstab fallback smoothing）
 > 下一個 milestone：M10.2 — 多專案批次 + 社群直接發布 + AI 自動縮圖。
 
 > **2026-05-13 camera-motion note**：`0.30.23` 到 `0.30.38` 的 camera-motion 修補已被否決；`0.30.39`/`0.30.40` 只保留 Smart Camera `none` 不套殘留 tracking / vidstab 的 no-extra-correction 修正。`0.40.0` 改走素材級 raw / stabilized 版本工作流，未來運鏡 / 焦點追蹤 / 數位防手震變更必須先遵守 `skills/video-camera-movement/SKILL.md`。
@@ -65,6 +65,7 @@
 | **M9.15.24** | **Asset stabilization preflight：先量 raw high-frequency jitter，低抖動素材跳過 vidstab，避免防手震反而製造補償抖動** | ✅ done | **0.42.6** |
 | **M9.15.25** | **Tracking-based silky stabilization MVP：優先使用既有 point/custom ROI/picked object tracking 產生平滑 crop derivative，vidstab 降為 fallback** | ✅ done | **0.42.7** |
 | **M9.15.26** | **Tracking target regeneration flow：追蹤設定變更會讓舊 stabilized 失效，point tracking 完成後自動排 tracking-based stabilized 重產，避免舊 vidstab 版本殘留** | ✅ done | **0.42.8** |
+| **M9.15.27** | **Asset-level vidstab fallback tuning：project 11 實測將 smoothing 提高到 30，tracking gate 擋下不良 subject-lock 時 fallback 更明顯降低高頻抖動** | ✅ done | **0.42.9** |
 | **M9.15.39** | **Smart Camera `none` 明確代表靜態構圖：不再讓殘留 point/custom tracking 覆蓋 AI no-move 決策** | ✅ done | **0.30.39** |
 | **M9.15.40** | **Smart Camera `none` 明確代表不做額外修正：跳過 vidstab，避免低紋理/高反光 no-move cut 被補償成左右飄** | ✅ done | **0.30.40** |
 | **M9.16** | **素材級防抖版本工作流：每個素材保留 raw、可產生 stabilized derivative，素材卡可預覽/切換版本，分析 / 追蹤 / render 走同一 active variant** | ✅ done | **0.40.0** |

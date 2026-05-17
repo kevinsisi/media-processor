@@ -2,7 +2,7 @@
 
 Content factory pipeline for novice-friendly Instagram and Facebook short-video production.
 
-**Status:** v0.42.8 / M9.15.26 — tracking target changes regenerate stabilized variants.
+**Status:** v0.42.9 / M9.15.27 — stronger asset-level vidstab fallback smoothing.
 
 ## Spec
 

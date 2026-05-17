@@ -60,8 +60,9 @@ The system SHALL compare the generated derivative against the raw source before 
 #### Scenario: Tracking-stabilized output is worse than raw
 
 - **WHEN** objective metrics show new adjacent-frame spikes, worse high-frequency jitter, bad subject containment, or sustained black borders
-- **THEN** the system does not publish the derivative as a ready stabilized variant
-- **AND** the asset records a terminal failure or skipped reason visible to the operator
+- **THEN** the system does not publish the tracking-derived candidate as the ready stabilized variant
+- **AND** the system may fall back to whole-frame vidstab from raw source
+- **AND** the asset records the tracking rejection reason when fallback completes successfully
 
 #### Scenario: Tracking-stabilized output passes quality gates
 
@@ -83,3 +84,9 @@ The system SHALL keep whole-frame vidstab below tracking-based stabilization in 
 
 - **WHEN** an asset has no usable explicit or acceptable automatic tracking target
 - **THEN** the system falls back to existing low-jitter preflight and vidstab behavior
+
+#### Scenario: Tracking quality gate rejects candidate
+
+- **WHEN** tracking-based stabilization is rejected by the quality gate
+- **THEN** fallback vidstab uses the project-validated stronger smoothing setting for high-jitter sources
+- **AND** low-jitter preflight still skips sources that should not be stabilized

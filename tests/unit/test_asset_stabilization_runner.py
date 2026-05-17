@@ -317,6 +317,112 @@ async def test_run_asset_stabilization_force_bypasses_low_jitter_preflight(
     assert not old_derivative.exists()
 
 
+def test_asset_stabilization_uses_project11_validated_vidstab_smoothing() -> None:
+    assert asset_variants.STABILIZE_SMOOTHING == 30
+
+
+@pytest.mark.asyncio
+async def test_run_asset_stabilization_records_tracking_fallback_reason(
+    session_maker: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "raw.mp4"
+    source.write_bytes(b"raw")
+    asset_id = await _seed_asset(session_maker, source)
+    dst = tmp_path / "fallback.stab.mp4"
+    candidate = tmp_path / "fallback.unique.mp4"
+
+    monkeypatch.setattr(asset_stabilization_runner, "async_session_maker", session_maker)
+    monkeypatch.setattr(asset_variants, "stabilized_path_for_asset", lambda _asset: dst)
+    monkeypatch.setattr(asset_stabilization_runner, "_candidate_path", lambda _dst: candidate)
+
+    def fail_tracking_derivative(*_args: object, **_kwargs: object) -> None:
+        raise asset_variants.AssetStabilizationError("tracking output regressed jitter")
+
+    def fake_stabilize_source(_src: Path, output: Path, _scratch_dir: Path) -> None:
+        output.write_bytes(b"vidstab-fallback")
+
+    monkeypatch.setattr(asset_variants, "stabilize_source_from_tracking", fail_tracking_derivative)
+    monkeypatch.setattr(
+        asset_variants,
+        "estimate_stabilization_need",
+        lambda _src: asset_variants.StabilizationNeedEstimate(
+            True,
+            sampled_frames=300,
+            usable_steps=299,
+            jitter_rms_px=0.5,
+            jitter_p95_px=1.0,
+            reason="jitter_rms=0.500px jitter_p95=1.000px usable_steps=299",
+        ),
+    )
+    monkeypatch.setattr(asset_variants, "stabilize_source", fake_stabilize_source)
+
+    result = await asset_stabilization_runner.run_asset_stabilization(asset_id, force=True)
+
+    assert result == {"asset_id": asset_id, "status": "done"}
+    async with session_maker() as session:
+        asset = await session.get(Asset, asset_id)
+        assert asset is not None
+        assert asset.stabilization_status == asset_variants.STABILIZATION_DONE
+        assert asset.stabilization_error is not None
+        assert "tracking output regressed jitter" in asset.stabilization_error
+        assert "vidstab fallback completed" in asset.stabilization_error
+
+
+@pytest.mark.asyncio
+async def test_tracking_rejection_fallback_still_skips_low_jitter_source(
+    session_maker: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "raw.mp4"
+    source.write_bytes(b"raw")
+    asset_id = await _seed_asset(session_maker, source)
+
+    monkeypatch.setattr(asset_stabilization_runner, "async_session_maker", session_maker)
+    monkeypatch.setattr(
+        asset_variants,
+        "stabilized_path_for_asset",
+        lambda asset: tmp_path / f"{asset.id}.stab.mp4",
+    )
+    monkeypatch.setattr(
+        asset_variants,
+        "stabilize_source_from_tracking",
+        lambda *_args: (_ for _ in ()).throw(
+            asset_variants.AssetStabilizationError("tracking output regressed jitter")
+        ),
+    )
+    monkeypatch.setattr(
+        asset_variants,
+        "estimate_stabilization_need",
+        lambda _src: asset_variants.StabilizationNeedEstimate(
+            False,
+            sampled_frames=313,
+            usable_steps=312,
+            jitter_rms_px=0.114,
+            jitter_p95_px=0.241,
+            reason="jitter_rms=0.114px jitter_p95=0.241px usable_steps=312",
+        ),
+    )
+    monkeypatch.setattr(
+        asset_variants,
+        "stabilize_source",
+        lambda *_args, **_kwargs: pytest.fail("low-jitter fallback must not run vidstab"),
+    )
+
+    result = await asset_stabilization_runner.run_asset_stabilization(asset_id, force=True)
+
+    assert result == {"asset_id": asset_id, "status": "skipped"}
+    async with session_maker() as session:
+        asset = await session.get(Asset, asset_id)
+        assert asset is not None
+        assert asset.stabilization_status == asset_variants.STABILIZATION_SKIPPED
+        assert asset.stabilization_error is not None
+        assert "tracking output regressed jitter" in asset.stabilization_error
+        assert "low-jitter source skipped" in asset.stabilization_error
+
+
 @pytest.mark.asyncio
 async def test_run_asset_stabilization_waits_for_pending_point_tracking(
     session_maker: async_sessionmaker[AsyncSession],
