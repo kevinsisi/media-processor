@@ -76,14 +76,17 @@ async def run_asset_stabilization(asset_id: int, *, force: bool = False) -> dict
             asset.stabilization_error = "waiting for point tracking before stabilization"
             await session.commit()
             return {"asset_id": asset_id, "status": "waiting_point_tracking"}
-        if (
+        existing_done_path = Path(asset.stabilized_path) if asset.stabilized_path else None
+        existing_done_valid = (
             not force
             and asset_variants.stabilization_status(asset) == asset_variants.STABILIZATION_DONE
-            and asset.stabilized_path
-            and Path(asset.stabilized_path).is_file()
-        ):
+            and existing_done_path is not None
+            and existing_done_path.is_file()
+        )
+        if existing_done_valid and asset.tracked_object_index is not None:
             return {"asset_id": asset_id, "status": "done"}
         asset.stabilization_status = asset_variants.STABILIZATION_RUNNING
+        previous_stabilization_error = getattr(asset, "stabilization_error", None)
         asset.stabilization_error = None
         dst = asset_variants.stabilized_path_for_asset(asset)
         previous_stabilized_path = getattr(asset, "stabilized_path", None)
@@ -99,8 +102,46 @@ async def run_asset_stabilization(asset_id: int, *, force: bool = False) -> dict
         raw_path = str(asset.file_path)
         scratch = Path(settings.analysis_dir) / "asset_stabilization" / str(asset_id)
         asset_snapshot = asset
+        tracked_object_index = asset.tracked_object_index
 
     candidate_dst = _candidate_path(dst)
+    preflight_estimate: asset_variants.StabilizationNeedEstimate | None = None
+    if not force and tracked_object_index is None:
+        preflight_estimate = await asyncio.to_thread(
+            asset_variants.estimate_stabilization_need, src
+        )
+        if not preflight_estimate.should_stabilize:
+            logger.info(
+                "run_asset_stabilization: asset %d skipped low-jitter source before auto tracking (%s)",
+                asset_id,
+                preflight_estimate.reason,
+            )
+            async with async_session_maker() as session:
+                row = await session.get(Asset, asset_id)
+                if row is None:
+                    return {"asset_id": asset_id, "status": "missing_after"}
+                if _tracking_intent_key(row) != intent_key:
+                    return {"asset_id": asset_id, "status": "stale_intent"}
+                row.active_asset_variant = asset_variants.RAW_VARIANT
+                row.stabilized_path = None
+                row.stabilization_status = asset_variants.STABILIZATION_SKIPPED
+                row.stabilization_error = f"low-jitter source skipped: {preflight_estimate.reason}"
+                await session.commit()
+            _discard_previous_derivative(previous_stabilized_path, raw_path, candidate_dst)
+            return {"asset_id": asset_id, "status": asset_variants.STABILIZATION_SKIPPED}
+        if existing_done_valid:
+            async with async_session_maker() as session:
+                row = await session.get(Asset, asset_id)
+                if row is None:
+                    return {"asset_id": asset_id, "status": "missing_after"}
+                if _tracking_intent_key(row) != intent_key:
+                    return {"asset_id": asset_id, "status": "stale_intent"}
+                row.stabilized_path = str(existing_done_path)
+                row.stabilization_status = asset_variants.STABILIZATION_DONE
+                row.stabilization_error = previous_stabilization_error
+                await session.commit()
+            return {"asset_id": asset_id, "status": "done"}
+
     tracking_error: str | None
     try:
         tracking_result = await asyncio.to_thread(
@@ -143,7 +184,11 @@ async def run_asset_stabilization(asset_id: int, *, force: bool = False) -> dict
         return {"asset_id": asset_id, "status": "done"}
 
     if tracking_error or not force:
-        estimate = await asyncio.to_thread(asset_variants.estimate_stabilization_need, src)
+        if preflight_estimate is None:
+            preflight_estimate = await asyncio.to_thread(
+                asset_variants.estimate_stabilization_need, src
+            )
+        estimate = preflight_estimate
         if not estimate.should_stabilize:
             logger.info(
                 "run_asset_stabilization: asset %d skipped low-jitter source (%s)",
@@ -156,6 +201,7 @@ async def run_asset_stabilization(asset_id: int, *, force: bool = False) -> dict
                     return {"asset_id": asset_id, "status": "missing_after"}
                 if _tracking_intent_key(row) != intent_key:
                     return {"asset_id": asset_id, "status": "stale_intent"}
+                row.active_asset_variant = asset_variants.RAW_VARIANT
                 row.stabilized_path = None
                 row.stabilization_status = asset_variants.STABILIZATION_SKIPPED
                 detail = f"low-jitter source skipped: {estimate.reason}"
@@ -163,6 +209,7 @@ async def run_asset_stabilization(asset_id: int, *, force: bool = False) -> dict
                     f"{tracking_error}; {detail}" if tracking_error else detail
                 )
                 await session.commit()
+            _discard_previous_derivative(previous_stabilized_path, raw_path, candidate_dst)
             return {"asset_id": asset_id, "status": asset_variants.STABILIZATION_SKIPPED}
 
     try:

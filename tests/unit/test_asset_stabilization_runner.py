@@ -99,7 +99,133 @@ async def test_run_asset_stabilization_skips_low_jitter_source(
         assert asset.stabilization_status == asset_variants.STABILIZATION_SKIPPED
         assert asset.stabilization_error is not None
         assert "low-jitter source skipped" in asset.stabilization_error
-        assert "jitter_rms=0.114px" in asset.stabilization_error
+    assert "jitter_rms=0.114px" in asset.stabilization_error
+
+
+@pytest.mark.asyncio
+async def test_run_asset_stabilization_skips_auto_tracking_on_low_jitter_source(
+    session_maker: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "raw.mp4"
+    source.write_bytes(b"raw")
+    asset_id = await _seed_asset(session_maker, source)
+    old_derivative = tmp_path / "old.stab.mp4"
+    old_derivative.write_bytes(b"old")
+    async with session_maker() as session:
+        asset = await session.get(Asset, asset_id)
+        assert asset is not None
+        asset.tracked_object_index = None
+        asset.active_asset_variant = asset_variants.STABILIZED_VARIANT
+        asset.stabilized_path = str(old_derivative)
+        asset.stabilization_status = asset_variants.STABILIZATION_DONE
+        await session.commit()
+
+    monkeypatch.setattr(asset_stabilization_runner, "async_session_maker", session_maker)
+    monkeypatch.setattr(
+        asset_variants,
+        "stabilized_path_for_asset",
+        lambda asset: tmp_path / f"{asset.id}.stab.mp4",
+    )
+    monkeypatch.setattr(
+        asset_variants,
+        "estimate_stabilization_need",
+        lambda _src: asset_variants.StabilizationNeedEstimate(
+            False,
+            sampled_frames=313,
+            usable_steps=312,
+            jitter_rms_px=0.114,
+            jitter_p95_px=0.241,
+            reason="jitter_rms=0.114px jitter_p95=0.241px usable_steps=312",
+        ),
+    )
+    monkeypatch.setattr(
+        asset_variants,
+        "stabilize_source_from_tracking",
+        lambda *_args, **_kwargs: pytest.fail("low-jitter auto tracking must be skipped"),
+    )
+    monkeypatch.setattr(
+        asset_variants,
+        "stabilize_source",
+        lambda *_args, **_kwargs: pytest.fail("low-jitter source must not run vidstab"),
+    )
+
+    result = await asset_stabilization_runner.run_asset_stabilization(asset_id)
+
+    assert result == {"asset_id": asset_id, "status": "skipped"}
+    assert not old_derivative.exists()
+    async with session_maker() as session:
+        asset = await session.get(Asset, asset_id)
+        assert asset is not None
+        assert asset.active_asset_variant == asset_variants.RAW_VARIANT
+        assert asset.stabilized_path is None
+        assert asset.stabilization_status == asset_variants.STABILIZATION_SKIPPED
+        assert asset.stabilization_error is not None
+        assert "low-jitter source skipped" in asset.stabilization_error
+
+
+@pytest.mark.asyncio
+async def test_run_asset_stabilization_keeps_auto_done_derivative_when_still_needed(
+    session_maker: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "raw.mp4"
+    source.write_bytes(b"raw")
+    asset_id = await _seed_asset(session_maker, source)
+    old_derivative = tmp_path / "old.stab.mp4"
+    old_derivative.write_bytes(b"old")
+    async with session_maker() as session:
+        asset = await session.get(Asset, asset_id)
+        assert asset is not None
+        asset.tracked_object_index = None
+        asset.active_asset_variant = asset_variants.STABILIZED_VARIANT
+        asset.stabilized_path = str(old_derivative)
+        asset.stabilization_status = asset_variants.STABILIZATION_DONE
+        asset.stabilization_error = "tracking-based stabilization (auto_tracking)"
+        await session.commit()
+
+    monkeypatch.setattr(asset_stabilization_runner, "async_session_maker", session_maker)
+    monkeypatch.setattr(
+        asset_variants,
+        "stabilized_path_for_asset",
+        lambda asset: tmp_path / f"{asset.id}.stab.mp4",
+    )
+    monkeypatch.setattr(
+        asset_variants,
+        "estimate_stabilization_need",
+        lambda _src: asset_variants.StabilizationNeedEstimate(
+            True,
+            sampled_frames=300,
+            usable_steps=299,
+            jitter_rms_px=0.5,
+            jitter_p95_px=1.0,
+            reason="jitter_rms=0.500px jitter_p95=1.000px usable_steps=299",
+        ),
+    )
+    monkeypatch.setattr(
+        asset_variants,
+        "stabilize_source_from_tracking",
+        lambda *_args, **_kwargs: pytest.fail("valid done derivative must stay idempotent"),
+    )
+    monkeypatch.setattr(
+        asset_variants,
+        "stabilize_source",
+        lambda *_args, **_kwargs: pytest.fail("valid done derivative must not run vidstab"),
+    )
+
+    result = await asset_stabilization_runner.run_asset_stabilization(asset_id)
+
+    assert result == {"asset_id": asset_id, "status": "done"}
+    assert old_derivative.exists()
+    async with session_maker() as session:
+        asset = await session.get(Asset, asset_id)
+        assert asset is not None
+        assert asset.active_asset_variant == asset_variants.STABILIZED_VARIANT
+        assert asset.stabilized_path == str(old_derivative)
+        assert asset.stabilization_status == asset_variants.STABILIZATION_DONE
+        assert asset.stabilization_error == "tracking-based stabilization (auto_tracking)"
 
 
 @pytest.mark.asyncio
@@ -113,6 +239,12 @@ async def test_run_asset_stabilization_prefers_tracking_derivative(
     asset_id = await _seed_asset(session_maker, source)
     dst = tmp_path / "tracking.stab.mp4"
     candidate = tmp_path / "tracking.unique.mp4"
+    async with session_maker() as session:
+        asset = await session.get(Asset, asset_id)
+        assert asset is not None
+        asset.tracked_object_index = -4
+        asset.point_tracking_status = "done"
+        await session.commit()
 
     monkeypatch.setattr(asset_stabilization_runner, "async_session_maker", session_maker)
     monkeypatch.setattr(asset_variants, "stabilized_path_for_asset", lambda _asset: dst)
@@ -379,6 +511,15 @@ async def test_tracking_rejection_fallback_still_skips_low_jitter_source(
     source = tmp_path / "raw.mp4"
     source.write_bytes(b"raw")
     asset_id = await _seed_asset(session_maker, source)
+    old_derivative = tmp_path / "old.stab.mp4"
+    old_derivative.write_bytes(b"old")
+    async with session_maker() as session:
+        asset = await session.get(Asset, asset_id)
+        assert asset is not None
+        asset.active_asset_variant = asset_variants.STABILIZED_VARIANT
+        asset.stabilized_path = str(old_derivative)
+        asset.stabilization_status = asset_variants.STABILIZATION_DONE
+        await session.commit()
 
     monkeypatch.setattr(asset_stabilization_runner, "async_session_maker", session_maker)
     monkeypatch.setattr(
@@ -417,10 +558,13 @@ async def test_tracking_rejection_fallback_still_skips_low_jitter_source(
     async with session_maker() as session:
         asset = await session.get(Asset, asset_id)
         assert asset is not None
+        assert asset.active_asset_variant == asset_variants.RAW_VARIANT
+        assert asset.stabilized_path is None
         assert asset.stabilization_status == asset_variants.STABILIZATION_SKIPPED
         assert asset.stabilization_error is not None
         assert "tracking output regressed jitter" in asset.stabilization_error
         assert "low-jitter source skipped" in asset.stabilization_error
+    assert not old_derivative.exists()
 
 
 @pytest.mark.asyncio

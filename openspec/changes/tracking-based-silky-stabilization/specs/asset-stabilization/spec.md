@@ -90,3 +90,9 @@ The system SHALL keep whole-frame vidstab below tracking-based stabilization in 
 - **WHEN** tracking-based stabilization is rejected by the quality gate
 - **THEN** fallback vidstab uses the project-validated stronger smoothing setting for high-jitter sources
 - **AND** low-jitter preflight still skips sources that should not be stabilized
+
+#### Scenario: Automatic tracking is available on a low-jitter source
+
+- **WHEN** an asset has only automatic tracking available and the operator did not force stabilization
+- **THEN** low-jitter preflight runs before generating an automatic tracking derivative
+- **AND** low-jitter sources are marked skipped instead of being auto-tracking stabilized

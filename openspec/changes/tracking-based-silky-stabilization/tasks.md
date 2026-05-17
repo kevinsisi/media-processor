@@ -22,6 +22,7 @@
 - [ ] 3.3 Ensure render-level vidstab skips assets already stabilized by tracking mode.
 - [x] 3.4 Add failure handling that never publishes a tracking candidate that fails quality gates.
 - [x] 3.5 Tune vidstab fallback smoothing with project 11 validation after tracking candidates are rejected.
+- [x] 3.6 Ensure non-force automatic tracking stabilization respects low-jitter preflight before rendering.
 
 ## 4. API / Data Model
 
