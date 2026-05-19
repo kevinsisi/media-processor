@@ -3,7 +3,7 @@
   "status": "no_findings",
   "evidence": "No findings",
   "notes": [
-    "Reviewed v0.42.10 low-jitter automatic tracking stabilization guard.",
-    "Local gates: ruff format --check, ruff check, focused pytest, mypy, OpenSpec strict validate, and web build passed."
+    "Reviewed v0.43.1 version metadata alignment after production Alembic recovery.",
+    "Local gates: ruff check src/media_processor/api/main.py, mypy src/media_processor/api/main.py, OpenSpec strict validate, and web build passed."
   ]
 }

@@ -2,7 +2,7 @@
 
 Content factory pipeline for novice-friendly Instagram and Facebook short-video production.
 
-**Status:** v0.42.10 / M9.15.28 — low-jitter auto-tracking stabilization guard.
+**Status:** v0.43.1 / M9.15.30 — stabilization watchdog and migration recovery fixes.
 
 ## Spec
 
