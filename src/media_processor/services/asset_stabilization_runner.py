@@ -144,6 +144,9 @@ async def run_asset_stabilization(asset_id: int, *, force: bool = False) -> dict
                 if row is None:
                     return {"asset_id": asset_id, "status": "missing_after"}
                 if _tracking_intent_key(row) != intent_key:
+                    if row.stabilization_status == asset_variants.STABILIZATION_RUNNING:
+                        row.stabilization_status = asset_variants.STABILIZATION_NOT_STARTED
+                    await session.commit()
                     return {"asset_id": asset_id, "status": "stale_intent"}
                 row.active_asset_variant = asset_variants.RAW_VARIANT
                 row.stabilized_path = None
@@ -159,6 +162,9 @@ async def run_asset_stabilization(asset_id: int, *, force: bool = False) -> dict
                 if row is None:
                     return {"asset_id": asset_id, "status": "missing_after"}
                 if _tracking_intent_key(row) != intent_key:
+                    if row.stabilization_status == asset_variants.STABILIZATION_RUNNING:
+                        row.stabilization_status = asset_variants.STABILIZATION_NOT_STARTED
+                    await session.commit()
                     return {"asset_id": asset_id, "status": "stale_intent"}
                 row.stabilized_path = str(existing_done_path)
                 row.stabilization_status = asset_variants.STABILIZATION_DONE
@@ -193,6 +199,9 @@ async def run_asset_stabilization(asset_id: int, *, force: bool = False) -> dict
                 return {"asset_id": asset_id, "status": "missing_after"}
             if _tracking_intent_key(row) != intent_key:
                 _discard_candidate(candidate_dst)
+                if row.stabilization_status == asset_variants.STABILIZATION_RUNNING:
+                    row.stabilization_status = asset_variants.STABILIZATION_NOT_STARTED
+                await session.commit()
                 return {"asset_id": asset_id, "status": "stale_intent"}
             replaced_stabilized_path = getattr(row, "stabilized_path", None)
             row.active_asset_variant = asset_variants.STABILIZED_VARIANT
@@ -229,6 +238,9 @@ async def run_asset_stabilization(asset_id: int, *, force: bool = False) -> dict
                 if row is None:
                     return {"asset_id": asset_id, "status": "missing_after"}
                 if _tracking_intent_key(row) != intent_key:
+                    if row.stabilization_status == asset_variants.STABILIZATION_RUNNING:
+                        row.stabilization_status = asset_variants.STABILIZATION_NOT_STARTED
+                    await session.commit()
                     return {"asset_id": asset_id, "status": "stale_intent"}
                 row.active_asset_variant = asset_variants.RAW_VARIANT
                 row.stabilized_path = None
@@ -252,6 +264,8 @@ async def run_asset_stabilization(asset_id: int, *, force: bool = False) -> dict
             if row is None:
                 return {"asset_id": asset_id, "status": "missing_after"}
             if _tracking_intent_key(row) != intent_key:
+                row.stabilization_status = asset_variants.STABILIZATION_NOT_STARTED
+                await session.commit()
                 return {"asset_id": asset_id, "status": "stale_intent"}
             row.active_asset_variant = asset_variants.RAW_VARIANT
             row.stabilization_status = asset_variants.STABILIZATION_FAILED
@@ -267,6 +281,8 @@ async def run_asset_stabilization(asset_id: int, *, force: bool = False) -> dict
             return {"asset_id": asset_id, "status": "missing_after"}
         if _tracking_intent_key(row) != intent_key:
             _discard_candidate(candidate_dst)
+            row.stabilization_status = asset_variants.STABILIZATION_NOT_STARTED
+            await session.commit()
             return {"asset_id": asset_id, "status": "stale_intent"}
         replaced_stabilized_path = getattr(row, "stabilized_path", None)
         row.active_asset_variant = asset_variants.STABILIZED_VARIANT

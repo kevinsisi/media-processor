@@ -51,6 +51,7 @@ from media_processor.services.queue import (
     enqueue_project_edit,
     has_asset_analysis_job,
     has_asset_analysis_step_job,
+    has_asset_stabilization_job,
     has_bgm_generation_job,
     has_draft_export_job,
     has_draft_render_job,
@@ -143,6 +144,7 @@ async def _sweep_once() -> None:
         await _sweep_exports(session)
         await _sweep_bgm_jobs(session)
         await _sweep_point_tracking(session)
+        await _sweep_asset_stabilization(session)
         await _sweep_asset_analysis(session)
         await session.commit()
 
@@ -315,6 +317,25 @@ async def _sweep_point_tracking(session: Any) -> None:
             "watchdog: point tracking job vanished from queue; please retry tracking"
         )
         logger.warning("watchdog: point tracking asset %d marked failed", asset.id)
+
+
+async def _sweep_asset_stabilization(session: Any) -> None:
+    from media_processor.services import asset_variants
+
+    rows = (
+        await session.execute(
+            select(Asset).where(Asset.stabilization_status == asset_variants.STABILIZATION_RUNNING)
+        )
+    ).scalars()
+    for asset in rows:
+        exists = await asyncio.to_thread(has_asset_stabilization_job, asset.id)
+        if exists:
+            continue
+        asset.stabilization_status = asset_variants.STABILIZATION_NOT_STARTED
+        asset.stabilization_error = "watchdog: stabilization job vanished from queue; please retry"
+        logger.warning(
+            "watchdog: stabilization asset %d reset to not_started (missing RQ job)", asset.id
+        )
 
 
 async def _sweep_asset_analysis(session: Any) -> None:

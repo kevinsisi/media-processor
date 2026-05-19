@@ -458,6 +458,15 @@ def has_point_tracking_job(
     )
 
 
+def has_asset_stabilization_job(asset_id: int, *, exclude_job_id: str | None = None) -> bool:
+    return has_matching_job(
+        ANALYSIS_QUEUE,
+        func_name=STABILIZE_ASSET_FN,
+        args_prefix=(asset_id,),
+        exclude_job_id=exclude_job_id,
+    )
+
+
 def has_asset_analysis_job(asset_id: int, *, exclude_job_id: str | None = None) -> bool:
     return has_matching_job(
         ANALYSIS_QUEUE,
