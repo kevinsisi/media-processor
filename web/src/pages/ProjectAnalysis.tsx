@@ -662,11 +662,21 @@ function labelForStabilizationStatus(status: string): string {
       return "防抖處理中";
     case "done":
       return "防抖版已就緒";
+    case "skipped":
+      return "原片已足夠穩";
     case "failed":
       return "防抖失敗";
     default:
       return "尚未產生防抖版";
   }
+}
+
+
+function stabilizationNoticeFor(asset: AssetAnalysisItem): string | null {
+  if (asset.stabilization_status === "skipped") {
+    return "這支影片本身已經很穩，系統先不做防抖，避免補償過度讓畫面反而飄動。若你仍想比較，可以按「仍要產生防抖版」強制生成。";
+  }
+  return asset.stabilization_error;
 }
 
 
@@ -756,6 +766,13 @@ function AssetVariantControls({
   const previewLabel = previewVariant === "stabilized" ? "防抖版" : "原始影片";
   const canGenerate =
     !stabilizing && !["pending", "running"].includes(asset.stabilization_status);
+  const forceStabilize = ["failed", "skipped"].includes(asset.stabilization_status);
+  const generateLabel = asset.stabilization_status === "skipped"
+    ? "仍要產生防抖版"
+    : stabilizedReady
+      ? "重新產生防抖"
+      : "產生防抖版";
+  const stabilizationNotice = stabilizationNoticeFor(asset);
   return (
     <div className="asset-variant-panel">
       <div className="asset-variant-panel__head">
@@ -790,10 +807,10 @@ function AssetVariantControls({
         <button
           type="button"
           className="cta"
-          onClick={() => onStabilize(asset.id, asset.stabilization_status === "failed")}
+          onClick={() => onStabilize(asset.id, forceStabilize)}
           disabled={!canGenerate}
         >
-          {stabilizing ? "送出中…" : stabilizedReady ? "重新產生防抖" : "產生防抖版"}
+          {stabilizing ? "送出中…" : generateLabel}
         </button>
       </div>
       <div className="asset-variant-panel__actions">
@@ -815,8 +832,14 @@ function AssetVariantControls({
           使用防抖版
         </button>
       </div>
-      {asset.stabilization_error && (
-        <p className="asset-variant-panel__error">{asset.stabilization_error}</p>
+      {stabilizationNotice && (
+        <p
+          className={asset.stabilization_status === "skipped"
+            ? "asset-variant-panel__notice"
+            : "asset-variant-panel__error"}
+        >
+          {stabilizationNotice}
+        </p>
       )}
     </div>
   );

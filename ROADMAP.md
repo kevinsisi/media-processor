@@ -2,7 +2,7 @@
 
 > **單一定位**：沒有剪輯背景的小白也能「拍完就上傳，AI 直接給大量 IG / FB 短影音」的工具。
 > 目標 UX：手機優先、繁體中文、高級感、最少手動編輯。
-> 目前版本：**0.43.1**（M9.15.30 — stabilization watchdog and migration recovery fixes）
+> 目前版本：**0.43.2**（M9.15.31 — human-readable stabilization skip state）
 > 下一個 milestone：M10.2 — 多專案批次 + 社群直接發布 + AI 自動縮圖。
 
 > **2026-05-13 camera-motion note**：`0.30.23` 到 `0.30.38` 的 camera-motion 修補已被否決；`0.30.39`/`0.30.40` 只保留 Smart Camera `none` 不套殘留 tracking / vidstab 的 no-extra-correction 修正。`0.40.0` 改走素材級 raw / stabilized 版本工作流，未來運鏡 / 焦點追蹤 / 數位防手震變更必須先遵守 `skills/video-camera-movement/SKILL.md`。
@@ -69,6 +69,7 @@
 | **M9.15.28** | **Low-jitter auto-tracking guard：非 force 的 automatic tracking stabilization 先跑低抖動 preflight，避免本來穩的素材被自動重產 derivative** | ✅ done | **0.42.10** |
 | **M9.15.29** | **Stabilization pipeline reorder（upload→stabilize→analyze）：stabilization runner 在每個 terminal state 自動切 active_asset_variant 並 enqueue analysis；新增 stabilization_mode / stabilization_metrics_json；crop_region anchor 貫穿所有 tracking 路徑；emotion zoompan 不再疊加在 dynamic crop 上** | ✅ done | **0.43.0** |
 | **M9.15.30** | **Stabilization watchdog / migration recovery fixes：修正 stabilization stuck-in-running、watchdog gap、以及 stabilization_metrics_json TEXT→JSON migration** | ✅ done | **0.43.1** |
+| **M9.15.31** | **Human-readable stabilization skip state：低抖動跳過防抖時改用操作者看得懂的 UI 文案，並提供仍要強制產生防抖版的入口** | ✅ done | **0.43.2** |
 | **M9.15.39** | **Smart Camera `none` 明確代表靜態構圖：不再讓殘留 point/custom tracking 覆蓋 AI no-move 決策** | ✅ done | **0.30.39** |
 | **M9.15.40** | **Smart Camera `none` 明確代表不做額外修正：跳過 vidstab，避免低紋理/高反光 no-move cut 被補償成左右飄** | ✅ done | **0.30.40** |
 | **M9.16** | **素材級防抖版本工作流：每個素材保留 raw、可產生 stabilized derivative，素材卡可預覽/切換版本，分析 / 追蹤 / render 走同一 active variant** | ✅ done | **0.40.0** |

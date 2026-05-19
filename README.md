@@ -2,7 +2,7 @@
 
 Content factory pipeline for novice-friendly Instagram and Facebook short-video production.
 
-**Status:** v0.43.1 / M9.15.30 — stabilization watchdog and migration recovery fixes.
+**Status:** v0.43.2 / M9.15.31 — human-readable stabilization skip state.
 
 ## Spec
 

@@ -540,6 +540,11 @@
   background: rgba(77, 179, 111, 0.16);
 }
 
+.asset-variant-status--skipped {
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.10);
+}
+
 .asset-variant-status--failed {
   color: var(--status-down, #b34b3a);
   background: rgba(179, 75, 58, 0.16);
@@ -555,6 +560,13 @@
   margin: 0;
   color: var(--status-down, #b34b3a);
   font-size: var(--t-sm);
+}
+
+.asset-variant-panel__notice {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--t-sm);
+  line-height: 1.6;
 }
 
 /* ---- v0.20.2 — top-of-page analysis progress summary ---- */

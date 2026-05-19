@@ -3,7 +3,7 @@
   "status": "no_findings",
   "evidence": "No findings",
   "notes": [
-    "Reviewed v0.43.1 version metadata alignment after production Alembic recovery.",
-    "Local gates: ruff check src/media_processor/api/main.py, mypy src/media_processor/api/main.py, OpenSpec strict validate, and web build passed."
+    "Reviewed v0.43.2 low-jitter skipped stabilization UI and force-generate behavior.",
+    "Local gates: npm run build, ruff check src/media_processor/api/main.py, mypy src/media_processor/api/main.py, and OpenSpec strict validate passed."
   ]
 }
