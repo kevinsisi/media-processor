@@ -24,9 +24,13 @@
 - [x] 3.5 Tune vidstab fallback smoothing with project 11 validation after tracking candidates are rejected.
 - [x] 3.6 Ensure non-force automatic tracking stabilization respects low-jitter preflight before rendering.
 
+## 3.7 Pipeline Reorder
+
+- [x] 3.7 Reorder upload pipeline to `upload → stabilize → analyze`: remove analysis enqueue from `uploads.py`; stabilization runner auto-switches `active_asset_variant` to stabilized (success) or raw (skip/fail) and enqueues analysis at every terminal state.
+
 ## 4. API / Data Model
 
-- [ ] 4.1 Decide whether to add `stabilization_mode` and `stabilization_metrics_json` columns before implementation.
+- [x] 4.1 Decided: add `stabilization_mode` (string, "tracking"|"vidstab"|null) and `stabilization_metrics_json` (JSON) columns to assets (alembic 0030).
 - [ ] 4.2 Expose mode/metrics in asset detail if columns are added.
 - [ ] 4.3 Keep `force=true` semantics clear: force attempts generation, but final quality gates can still reject unsafe output.
 
