@@ -90,7 +90,7 @@ class AssetStabilizationError(RuntimeError):
 
 def active_variant(asset: Any) -> AssetVariant:
     value = str(getattr(asset, "active_asset_variant", RAW_VARIANT) or RAW_VARIANT)
-    return value if value in VARIANT_VALUES else RAW_VARIANT
+    return cast("AssetVariant", value) if value in VARIANT_VALUES else RAW_VARIANT
 
 
 def stabilization_status(asset: Any) -> str:

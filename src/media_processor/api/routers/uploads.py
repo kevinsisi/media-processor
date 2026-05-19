@@ -34,7 +34,7 @@ from media_processor.models import (
 from media_processor.services import asset_variants
 from media_processor.services import thumbnails as thumbnails_svc
 from media_processor.services import uploads as upload_svc
-from media_processor.services.queue import enqueue_asset_analysis, enqueue_asset_stabilization
+from media_processor.services.queue import enqueue_asset_stabilization
 
 SCRIPT_MAX_BYTES = 1_048_576
 
@@ -291,22 +291,9 @@ async def _finalize_video(row: UploadSession, session: AsyncSession, expected: i
             exc,
         )
 
-    # M4 — kick off the analysis pipeline as a background RQ job. Failure to
-    # enqueue (e.g. Redis down) must NOT fail the upload — the operator can
-    # re-trigger via POST /assets/{id}/analyze.
-    try:
-        enqueue_asset_analysis(asset_id)
-    except Exception as exc:  # noqa: BLE001 — log and continue.
-        import logging
-
-        logging.getLogger(__name__).warning(
-            "failed to enqueue analysis for asset %d: %s — operator can retry via POST /analyze",
-            asset_id,
-            exc,
-        )
-
-    # v0.40.0 — prepare a source-level stabilized derivative for side-by-side
-    # preview. Raw remains the active variant until the operator switches.
+    # v0.40.0 — stabilize first; the runner auto-switches variant and enqueues
+    # analysis at each terminal state (success → stabilized, skip/fail → raw).
+    # Analysis is no longer enqueued here; it runs after stabilization completes.
     try:
         asset_loaded.stabilization_status = asset_variants.STABILIZATION_PENDING
         asset_loaded.stabilized_path = str(asset_variants.stabilized_path_for_asset(asset_loaded))
