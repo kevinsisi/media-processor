@@ -12,7 +12,7 @@ same PR — never silently diverge.
 - Production is intentionally back on `0.30.22`.
 - Draft `49` on project `10` is the known regression canary for camera-motion changes.
 - The `0.30.23` through `0.30.37` camera-motion experiments were rejected for visible shake or fallback regressions. Do not revive them by copying code paths back in.
-- Two OpenSpec changes are queued to close known gaps between this guardrail and `0.30.22` code: `camera-motion-priority-and-static-kind` and `camera-motion-filter-chain-cleanup`. Read both before touching Smart Camera, auto-reframe, or vidstab paths.
+- Both camera-motion OpenSpec changes (`camera-motion-priority-and-static-kind`, `camera-motion-filter-chain-cleanup`) are archived as of 2026-05-19. The current codebase (branch `feat/openspec-completion-batch`) reflects all their rules.
 
 ## Priority Order
 

@@ -110,3 +110,71 @@ def test_compute_crop_path_keeps_slow_pan_after_smoothing() -> None:
     first_x = path.points[0][1]
     last_x = path.points[-1][1]
     assert last_x - first_x > 250
+
+
+def test_compute_crop_path_centre_anchor_matches_no_anchor() -> None:
+    """crop_region=(0.5, 0.5) must produce identical output to crop_region=None."""
+    frames = [{"t_ms": i * 200, "x": 910, "y": 490, "w": 100, "h": 100} for i in range(20)]
+    tracking = {"src_w": 1920, "src_h": 1080, "frames": frames}
+
+    path_none = auto_reframe.compute_crop_path(
+        tracking, target_aspect="9:16", asset_start_ms=0, asset_end_ms=4_000
+    )
+    path_centre = auto_reframe.compute_crop_path(
+        tracking,
+        target_aspect="9:16",
+        asset_start_ms=0,
+        asset_end_ms=4_000,
+        crop_region=(0.5, 0.5),
+    )
+
+    assert path_none is not None
+    assert path_centre is not None
+    xs_none = [x for _, x, _ in path_none.points]
+    xs_centre = [x for _, x, _ in path_centre.points]
+    assert xs_none == xs_centre
+
+
+def test_compute_crop_path_left_anchor_shifts_idle_x() -> None:
+    """Left anchor (x_norm=0.2) shifts the idle crop window toward the left edge."""
+    frames = [{"t_ms": i * 200, "x": 960, "y": 490, "w": 100, "h": 100} for i in range(20)]
+    tracking = {"src_w": 1920, "src_h": 1080, "frames": frames}
+
+    path_centre = auto_reframe.compute_crop_path(
+        tracking, target_aspect="9:16", asset_start_ms=0, asset_end_ms=4_000
+    )
+    path_left = auto_reframe.compute_crop_path(
+        tracking,
+        target_aspect="9:16",
+        asset_start_ms=0,
+        asset_end_ms=4_000,
+        crop_region=(0.2, 0.5),
+    )
+
+    assert path_centre is not None
+    assert path_left is not None
+    mean_x_centre = sum(x for _, x, _ in path_centre.points) / len(path_centre.points)
+    mean_x_left = sum(x for _, x, _ in path_left.points) / len(path_left.points)
+    assert mean_x_left < mean_x_centre
+
+
+def test_compute_crop_path_anchor_bias_does_not_break_subject_lock() -> None:
+    """With a moving subject, Kalman tracking still dominates over the anchor bias."""
+    frames = []
+    for i in range(20):
+        cx = 320 + i * 64
+        frames.append({"t_ms": i * 200, "x": cx - 50, "y": 490, "w": 100, "h": 100})
+    tracking = {"src_w": 1920, "src_h": 1080, "frames": frames}
+
+    path = auto_reframe.compute_crop_path(
+        tracking,
+        target_aspect="9:16",
+        asset_start_ms=0,
+        asset_end_ms=4_000,
+        crop_region=(0.2, 0.5),
+        smooth_camera_path=False,
+    )
+
+    assert path is not None
+    xs = [x for _, x, _ in path.points]
+    assert max(xs) - min(xs) > 200

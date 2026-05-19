@@ -16,8 +16,31 @@ from media_processor.api.config import settings
 from media_processor.core.db import async_session_maker
 from media_processor.models import Asset
 from media_processor.services import asset_variants
+from media_processor.services.queue import enqueue_asset_analysis
 
 logger = logging.getLogger(__name__)
+
+
+def _enqueue_analysis_after_stabilization(asset_id: int, *, force: bool) -> None:
+    """Best-effort analysis enqueue after stabilization terminal state.
+
+    Failure must not surface to the caller — the operator can retry via
+    POST /assets/{id}/analyze.
+    """
+    try:
+        enqueue_asset_analysis(asset_id, force=force)
+        logger.info(
+            "run_asset_stabilization: enqueued analysis for asset %d (force=%s)",
+            asset_id,
+            force,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "run_asset_stabilization: failed to enqueue analysis for asset %d: %s"
+            " — operator can retry via POST /analyze",
+            asset_id,
+            exc,
+        )
 
 
 def _tracking_intent_key(asset: Asset) -> str:
@@ -128,6 +151,7 @@ async def run_asset_stabilization(asset_id: int, *, force: bool = False) -> dict
                 row.stabilization_error = f"low-jitter source skipped: {preflight_estimate.reason}"
                 await session.commit()
             _discard_previous_derivative(previous_stabilized_path, raw_path, candidate_dst)
+            _enqueue_analysis_after_stabilization(asset_id, force=force)
             return {"asset_id": asset_id, "status": asset_variants.STABILIZATION_SKIPPED}
         if existing_done_valid:
             async with async_session_maker() as session:
@@ -171,16 +195,21 @@ async def run_asset_stabilization(asset_id: int, *, force: bool = False) -> dict
                 _discard_candidate(candidate_dst)
                 return {"asset_id": asset_id, "status": "stale_intent"}
             replaced_stabilized_path = getattr(row, "stabilized_path", None)
+            row.active_asset_variant = asset_variants.STABILIZED_VARIANT
             row.stabilized_path = str(candidate_dst)
             row.stabilization_status = asset_variants.STABILIZATION_DONE
-            row.stabilization_error = (
-                f"tracking-based stabilization ({tracking_result.mode}); "
-                f"points={tracking_result.point_count}; "
-                f"crop={tracking_result.crop_w}x{tracking_result.crop_h}"
-            )
+            row.stabilization_error = None
+            row.stabilization_mode = "tracking"
+            row.stabilization_metrics_json = {
+                "mode": tracking_result.mode,
+                "point_count": tracking_result.point_count,
+                "crop_w": tracking_result.crop_w,
+                "crop_h": tracking_result.crop_h,
+            }
             await session.commit()
         _discard_previous_derivative(previous_stabilized_path, raw_path, candidate_dst)
         _discard_previous_derivative(replaced_stabilized_path, raw_path, candidate_dst)
+        _enqueue_analysis_after_stabilization(asset_id, force=force)
         return {"asset_id": asset_id, "status": "done"}
 
     if tracking_error or not force:
@@ -210,6 +239,7 @@ async def run_asset_stabilization(asset_id: int, *, force: bool = False) -> dict
                 )
                 await session.commit()
             _discard_previous_derivative(previous_stabilized_path, raw_path, candidate_dst)
+            _enqueue_analysis_after_stabilization(asset_id, force=force)
             return {"asset_id": asset_id, "status": asset_variants.STABILIZATION_SKIPPED}
 
     try:
@@ -223,9 +253,11 @@ async def run_asset_stabilization(asset_id: int, *, force: bool = False) -> dict
                 return {"asset_id": asset_id, "status": "missing_after"}
             if _tracking_intent_key(row) != intent_key:
                 return {"asset_id": asset_id, "status": "stale_intent"}
+            row.active_asset_variant = asset_variants.RAW_VARIANT
             row.stabilization_status = asset_variants.STABILIZATION_FAILED
             row.stabilization_error = f"{type(exc).__name__}: {exc}"
             await session.commit()
+        _enqueue_analysis_after_stabilization(asset_id, force=force)
         return {"asset_id": asset_id, "status": "failed"}
 
     async with async_session_maker() as session:
@@ -237,14 +269,16 @@ async def run_asset_stabilization(asset_id: int, *, force: bool = False) -> dict
             _discard_candidate(candidate_dst)
             return {"asset_id": asset_id, "status": "stale_intent"}
         replaced_stabilized_path = getattr(row, "stabilized_path", None)
+        row.active_asset_variant = asset_variants.STABILIZED_VARIANT
         row.stabilized_path = str(candidate_dst)
         row.stabilization_status = asset_variants.STABILIZATION_DONE
-        row.stabilization_error = (
-            f"{tracking_error}; vidstab fallback completed" if tracking_error else None
-        )
+        row.stabilization_error = tracking_error
+        row.stabilization_mode = "vidstab"
+        row.stabilization_metrics_json = None
         await session.commit()
     _discard_previous_derivative(previous_stabilized_path, raw_path, candidate_dst)
     _discard_previous_derivative(replaced_stabilized_path, raw_path, candidate_dst)
+    _enqueue_analysis_after_stabilization(asset_id, force=force)
     return {"asset_id": asset_id, "status": "done"}
 
 

@@ -274,6 +274,7 @@ def compute_crop_path(
     object_index: int | None = None,
     smooth_camera_path: bool = True,
     crop_zoom_factor: float = CROP_ZOOM_FACTOR,
+    crop_region: tuple[float, float] | None = None,
 ) -> CropPath | None:
     """Build a Kalman-smoothed dynamic crop for the cut span.
 
@@ -351,11 +352,20 @@ def compute_crop_path(
     half_h = crop_h / 2.0
     max_x = max(0, sw - crop_w)
     max_y = max(0, sh - crop_h)
+    # crop_region anchor: bias the rest position toward (x_norm, y_norm) so
+    # a left/top anchor shifts the crop window even when the subject is at
+    # source centre. The clamp absorbs over-bias so the window never spills off.
+    if crop_region is not None:
+        bias_x = (max(0.0, min(1.0, crop_region[0])) - 0.5) * float(max_x)
+        bias_y = (max(0.0, min(1.0, crop_region[1])) - 0.5) * float(max_y)
+    else:
+        bias_x = 0.0
+        bias_y = 0.0
     target_x_list: list[float] = []
     target_y_list: list[float] = []
     for cx, cy in zip(cx_list, cy_list, strict=True):
-        target_x_list.append(max(0.0, min(float(max_x), cx - half_w)))
-        target_y_list.append(max(0.0, min(float(max_y), cy - half_h)))
+        target_x_list.append(max(0.0, min(float(max_x), cx - half_w + bias_x)))
+        target_y_list.append(max(0.0, min(float(max_y), cy - half_h + bias_y)))
     if smooth_camera_path:
         target_x_list = _smooth_path_values(target_x_list, target_times)
         target_y_list = _smooth_path_values(target_y_list, target_times)
@@ -404,6 +414,7 @@ def compute_crop_path_from_custom_roi(
     src_h: int | None = None,
     smooth_camera_path: bool = False,
     crop_zoom_factor: float = CROP_ZOOM_FACTOR,
+    crop_region: tuple[float, float] | None = None,
 ) -> CropPath | None:
     """Same as :func:`compute_crop_path` but using a CSRT-tracked ROI.
 
@@ -429,6 +440,7 @@ def compute_crop_path_from_custom_roi(
         src_h=src_h,
         smooth_camera_path=smooth_camera_path,
         crop_zoom_factor=crop_zoom_factor,
+        crop_region=crop_region,
     )
 
 
@@ -442,6 +454,7 @@ def compute_crop_path_from_point_track(
     src_h: int | None = None,
     smooth_camera_path: bool = False,
     crop_zoom_factor: float = CROP_ZOOM_FACTOR,
+    crop_region: tuple[float, float] | None = None,
 ) -> CropPath | None:
     """v0.23 — auto-reframe centred on a single LK-tracked pixel.
 
@@ -504,6 +517,7 @@ def compute_crop_path_from_point_track(
         src_h=src_h,
         smooth_camera_path=smooth_camera_path,
         crop_zoom_factor=crop_zoom_factor,
+        crop_region=crop_region,
     )
 
 

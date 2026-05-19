@@ -420,6 +420,7 @@ def _smart_camera_filter(
     *,
     timeline_start_s: float = 0.0,
     beat_grid_s: list[float] | tuple[float, ...] | None = None,
+    crop_region: tuple[float, float] | None = None,
 ) -> str | None:
     """Build a ``zoompan`` filter chain for a smart-camera cut.
 
@@ -482,6 +483,21 @@ def _smart_camera_filter(
     f_cy = fy + fh / 2.0
     t_cx = tx + tw / 2.0
     t_cy = ty + th / 2.0
+    # Apply crop_region anchor with collapse-at-edges so:
+    #   centre anchor (0.5) → zero shift
+    #   left anchor (0.2) → shifts centred directives toward 0.2
+    #   directive already near an edge → barely shifted (collapse → 0)
+    if crop_region is not None:
+        ax = max(0.0, min(1.0, crop_region[0]))
+        ay = max(0.0, min(1.0, crop_region[1]))
+
+        def _bias(c: float, anchor: float) -> float:
+            return max(0.0, min(1.0, c + (anchor - 0.5) * (1.0 - abs(2.0 * c - 1.0))))
+
+        f_cx = _bias(f_cx, ax)
+        t_cx = _bias(t_cx, ax)
+        f_cy = _bias(f_cy, ay)
+        t_cy = _bias(t_cy, ay)
     f_zoom = 1.0 / max(fw, fh)
     t_zoom = 1.0 / max(tw, th)
 
@@ -674,6 +690,7 @@ def _cut_segment(
                 target_aspect=target_aspect,
                 asset_start_ms=cut.asset_start_ms,
                 asset_end_ms=cut.asset_end_ms,
+                crop_region=crop_region,
             )
         elif custom_roi:
             crop_path = auto_reframe.compute_crop_path_from_custom_roi(
@@ -681,6 +698,7 @@ def _cut_segment(
                 target_aspect=target_aspect,
                 asset_start_ms=cut.asset_start_ms,
                 asset_end_ms=cut.asset_end_ms,
+                crop_region=crop_region,
             )
         elif tracking:
             crop_path = auto_reframe.compute_crop_path(
@@ -690,6 +708,7 @@ def _cut_segment(
                 asset_end_ms=cut.asset_end_ms,
                 object_index=tracking_object_index,
                 smooth_camera_path=tracking_object_index is None,
+                crop_region=crop_region,
             )
         if crop_path is not None:
             sendcmd_path = sendcmd_dir / f"reframe_seg_{cut.order:04d}.txt"
@@ -715,6 +734,7 @@ def _cut_segment(
                 duration_s,
                 timeline_start_s=timeline_start_s,
                 beat_grid_s=smart_camera_beat_grid_s,
+                crop_region=crop_region,
             )
         except Exception:  # noqa: BLE001 — never let a single bad directive fail render.
             logger.exception(
@@ -762,12 +782,24 @@ def _cut_segment(
         # and no persisted tracking crop. Leave only the static aspect chain;
         # the return flag below also blocks vidstab from adding its own move.
         pass
-    elif _should_zoompan(cut) and crop_path is None:
+    elif _should_zoompan(cut) and crop_path is None and smart_chain is None:
         # zoompan operates on its own canvas, so we run it AFTER the
         # aspect crop so the zoom centre is the cropped frame's centre
         # rather than the original asset's.
-        # crop_path is None guard: do not stack zoompan on top of tracking chains.
+        # crop_path is None: do not stack zoompan on top of tracking chains.
+        # smart_chain is None: do not stack emotion zoompan on top of Smart Camera.
         vf_chain = f"{vf_chain},{_zoompan_filter(target_aspect, duration_s)}"
+    elif _should_zoompan(cut):
+        if crop_path is not None:
+            logger.info(
+                "emotion-zoompan suppressed on cut %d: tracking active",
+                cut.order,
+            )
+        elif smart_chain is not None:
+            logger.info(
+                "emotion-zoompan suppressed on cut %d: smart camera active",
+                cut.order,
+            )
     cmd = [
         "ffmpeg",
         "-hide_banner",

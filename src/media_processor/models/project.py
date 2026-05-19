@@ -245,6 +245,8 @@ class Asset(Base):
         default="not_started",
     )
     stabilization_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    stabilization_mode: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    stabilization_metrics_json: Mapped[Any] = mapped_column(JSON, nullable=True)
     active_asset_variant: Mapped[str] = mapped_column(
         String(16),
         nullable=False,
