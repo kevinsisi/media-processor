@@ -370,6 +370,50 @@ def test_smart_camera_sync_frame_picks_beat_near_visual_hit() -> None:
     assert frame == 72
 
 
+def test_smart_camera_centre_anchor_unchanged() -> None:
+    """crop_region=(0.5, 0.5) must produce -vf identical to crop_region=None."""
+    blob = {
+        "kind": "pan",
+        "from_rect": [0.1, 0.3, 0.4, 0.4],
+        "to_rect": [0.5, 0.3, 0.4, 0.4],
+        "ease": "linear",
+    }
+    chain_none = video_renderer._smart_camera_filter(blob, "9:16", 2.0)
+    chain_centre = video_renderer._smart_camera_filter(blob, "9:16", 2.0, crop_region=(0.5, 0.5))
+    assert chain_none == chain_centre
+
+
+def test_smart_camera_left_anchor_biases_centred_pan() -> None:
+    """Left anchor shifts a centred pan's x expressions."""
+    blob = {
+        "kind": "pan",
+        "from_rect": [0.25, 0.25, 0.5, 0.5],
+        "to_rect": [0.25, 0.25, 0.5, 0.5],
+        "ease": "linear",
+    }
+    chain_centre = video_renderer._smart_camera_filter(blob, "16:9", 2.0, crop_region=(0.5, 0.5))
+    chain_left = video_renderer._smart_camera_filter(blob, "16:9", 2.0, crop_region=(0.2, 0.5))
+    assert chain_centre is not None
+    assert chain_left is not None
+    assert chain_left != chain_centre
+
+
+def test_smart_camera_edge_directive_anchor_collapses() -> None:
+    """A directive already near an edge is barely shifted by the anchor."""
+    blob = {
+        "kind": "zoom_in",
+        "from_rect": [0.0, 0.25, 0.2, 0.5],
+        "to_rect": [0.0, 0.25, 0.2, 0.5],
+        "ease": "linear",
+    }
+    chain_no_anchor = video_renderer._smart_camera_filter(blob, "9:16", 2.0)
+    chain_anchored = video_renderer._smart_camera_filter(blob, "9:16", 2.0, crop_region=(0.2, 0.5))
+    assert chain_no_anchor is not None
+    assert chain_anchored is not None
+    assert "zoompan=" in chain_no_anchor
+    assert "zoompan=" in chain_anchored
+
+
 def test_smart_camera_filter_can_finish_move_on_bgm_beat() -> None:
     chain = video_renderer._smart_camera_filter(
         {
@@ -829,6 +873,64 @@ def test_smart_camera_none_suppresses_stale_point_tracking_and_vidstab(
     assert len(captured_filters) == 1
     assert captured_filters == ["POINT_TRACK_CHAIN"]
     assert "zoompan=" not in captured_filters[0]
+
+
+def test_emotion_zoompan_suppressed_on_smart_camera_cut(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Smart Camera directive must suppress emotion zoompan on the same cut.
+
+    When the cut has dominant_emotion eligible for zoompan AND a Smart Camera
+    directive with kind="zoom_in", only the Smart Camera zoompan= expression
+    must appear in the -vf chain — emotion zoompan must not stack on top.
+    """
+    src = tmp_path / "asset.mp4"
+    src.write_bytes(b"fake")
+    plan = CutPlan(
+        schema_version="m5.cut-plan.v1",
+        target_duration_ms=2_000,
+        target_aspect_ratio="9:16",
+        profile_name="universal",
+        segments=(
+            CutPlanSegment(
+                0,
+                1,
+                0,
+                2_000,
+                "improv",
+                "",
+                dominant_emotion="happy",
+                dominant_motion="static",
+                smart_camera_json={
+                    "kind": "zoom_in",
+                    "from_rect": [0.0, 0.0, 1.0, 1.0],
+                    "to_rect": [0.40, 0.40, 0.20, 0.20],
+                    "ease": "linear",
+                },
+            ),
+        ),
+    )
+    captured_filters: list[str] = []
+
+    def fake_run(cmd: list[str], *, timeout_s: float, stage: str) -> None:
+        captured_filters.append(cmd[cmd.index("-vf") + 1])
+        Path(cmd[-1]).parent.mkdir(parents=True, exist_ok=True)
+        Path(cmd[-1]).write_bytes(b"")
+
+    monkeypatch.setattr(video_renderer, "_run", fake_run)
+
+    video_renderer.cut_segments(
+        plan,
+        asset_paths={1: src},
+        intermediate_dir=tmp_path / "out",
+        target_aspect="9:16",
+        smart_camera_enabled=True,
+    )
+
+    assert len(captured_filters) == 1
+    vf = captured_filters[0]
+    assert "zoompan=" in vf, "Smart Camera zoompan must be present"
+    assert vf.count("zoompan=") == 1, f"emotion zoompan must not stack: {vf}"
 
 
 def test_explicit_tracking_wins_over_smart_camera_none_kind(
