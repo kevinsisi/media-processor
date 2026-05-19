@@ -961,11 +961,11 @@ class _FakeAsset:
     def __init__(self, **kwargs: object) -> None:
         self.duration_ms = kwargs.get("duration_ms", 5000)
         self.resolution = kwargs.get("resolution", "1920x1080")
-        self.tracked_object_index = kwargs.get("tracked_object_index", None)
-        self.point_tracking_json = kwargs.get("point_tracking_json", None)
-        self.point_tracking_status = kwargs.get("point_tracking_status", None)
-        self.custom_roi_json = kwargs.get("custom_roi_json", None)
-        self.tracking_json = kwargs.get("tracking_json", None)
+        self.tracked_object_index = kwargs.get("tracked_object_index")
+        self.point_tracking_json = kwargs.get("point_tracking_json")
+        self.point_tracking_status = kwargs.get("point_tracking_status")
+        self.custom_roi_json = kwargs.get("custom_roi_json")
+        self.tracking_json = kwargs.get("tracking_json")
 
 
 def _make_fake_crop_path(n: int = 60) -> auto_reframe.CropPath:
