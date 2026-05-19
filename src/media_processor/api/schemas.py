@@ -724,7 +724,7 @@ class AssetDetail(BaseModel):
     stabilization_status: str = "not_started"
     stabilization_error: str | None = None
     stabilization_mode: str | None = None
-    stabilization_metrics_json: dict | None = None
+    stabilization_metrics_json: dict[str, object] | None = None
     variant_urls: dict[str, str | None] = Field(default_factory=dict)
     duration_ms: int
     resolution: str | None
@@ -1081,7 +1081,7 @@ class AssetAnalysisItem(BaseModel):
     stabilization_status: str = "not_started"
     stabilization_error: str | None = None
     stabilization_mode: str | None = None
-    stabilization_metrics_json: dict | None = None
+    stabilization_metrics_json: dict[str, object] | None = None
     variant_urls: dict[str, str | None] = Field(default_factory=dict)
     duration_ms: int
     # v0.26.0 — surface the source resolution (already stored on
