@@ -11,6 +11,7 @@ from media_processor.models import Asset, Base, Project
 from media_processor.services import (
     asset_stabilization_runner,
     asset_variants,
+    auto_reframe,
     point_tracking_runner,
 )
 
@@ -949,3 +950,123 @@ async def test_run_asset_stabilization_sets_mode_vidstab(
         assert asset is not None
         assert asset.stabilization_mode == "vidstab"
         assert asset.stabilization_metrics_json is None
+
+
+# ---------------------------------------------------------------------------
+# D4 — _tracking_crop_path_for_asset priority routing
+# ---------------------------------------------------------------------------
+
+
+class _FakeAsset:
+    def __init__(self, **kwargs: object) -> None:
+        self.duration_ms = kwargs.get("duration_ms", 5000)
+        self.resolution = kwargs.get("resolution", "1920x1080")
+        self.tracked_object_index = kwargs.get("tracked_object_index", None)
+        self.point_tracking_json = kwargs.get("point_tracking_json", None)
+        self.point_tracking_status = kwargs.get("point_tracking_status", None)
+        self.custom_roi_json = kwargs.get("custom_roi_json", None)
+        self.tracking_json = kwargs.get("tracking_json", None)
+
+
+def _make_fake_crop_path(n: int = 60) -> auto_reframe.CropPath:
+    return auto_reframe.CropPath(
+        crop_w=608,
+        crop_h=1080,
+        src_w=1920,
+        src_h=1080,
+        points=[(i * 0.033, 480, 0) for i in range(n)],
+    )
+
+
+def test_tracking_crop_path_prefers_point_track(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_path = _make_fake_crop_path(60)
+    monkeypatch.setattr(
+        auto_reframe, "compute_crop_path_from_point_track", lambda *_a, **_kw: fake_path
+    )
+    monkeypatch.setattr(
+        auto_reframe,
+        "compute_crop_path_from_custom_roi",
+        lambda *_a, **_kw: pytest.fail("must not call custom_roi for tracked_object_index=-4"),
+    )
+
+    asset = _FakeAsset(
+        tracked_object_index=-4,
+        point_tracking_json={"src_w": 1920, "src_h": 1080, "frames": []},
+    )
+    result = asset_variants._tracking_crop_path_for_asset(asset)
+
+    assert result is not None
+    mode, path = result
+    assert mode == "tracking_point"
+    assert len(path.points) == 60
+
+
+def test_tracking_crop_path_falls_back_to_custom_roi(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_path = _make_fake_crop_path(60)
+    monkeypatch.setattr(
+        auto_reframe, "compute_crop_path_from_custom_roi", lambda *_a, **_kw: fake_path
+    )
+    monkeypatch.setattr(
+        auto_reframe,
+        "compute_crop_path_from_point_track",
+        lambda *_a, **_kw: pytest.fail("must not call point_track for tracked_object_index=-1"),
+    )
+
+    asset = _FakeAsset(
+        tracked_object_index=-1,
+        custom_roi_json={"src_w": 1920, "src_h": 1080},
+    )
+    result = asset_variants._tracking_crop_path_for_asset(asset)
+
+    assert result is not None
+    mode, _ = result
+    assert mode == "tracking_custom_roi"
+
+
+def test_tracking_crop_path_falls_back_to_auto_tracking(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_path = _make_fake_crop_path(60)
+    monkeypatch.setattr(auto_reframe, "compute_crop_path", lambda *_a, **_kw: fake_path)
+
+    asset = _FakeAsset(
+        tracked_object_index=None,
+        tracking_json={"src_w": 1920, "src_h": 1080, "tracks": []},
+    )
+    result = asset_variants._tracking_crop_path_for_asset(asset)
+
+    assert result is not None
+    mode, _ = result
+    assert mode == "auto_tracking"
+
+
+def test_tracking_crop_path_returns_none_when_no_tracking_data(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(auto_reframe, "compute_crop_path", lambda *_a, **_kw: None)
+
+    asset = _FakeAsset(tracked_object_index=None, tracking_json=None)
+    result = asset_variants._tracking_crop_path_for_asset(asset)
+
+    assert result is None
+
+
+def test_tracking_crop_path_returns_none_when_too_few_points(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sparse_path = _make_fake_crop_path(asset_variants.TRACKING_STABILIZE_MIN_POINTS - 1)
+    monkeypatch.setattr(
+        auto_reframe, "compute_crop_path_from_point_track", lambda *_a, **_kw: sparse_path
+    )
+
+    asset = _FakeAsset(
+        tracked_object_index=-4,
+        point_tracking_json={"src_w": 1920, "src_h": 1080, "frames": []},
+    )
+    result = asset_variants._tracking_crop_path_for_asset(asset)
+
+    assert result is None
