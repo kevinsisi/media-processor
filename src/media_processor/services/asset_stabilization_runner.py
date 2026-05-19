@@ -198,11 +198,14 @@ async def run_asset_stabilization(asset_id: int, *, force: bool = False) -> dict
             row.active_asset_variant = asset_variants.STABILIZED_VARIANT
             row.stabilized_path = str(candidate_dst)
             row.stabilization_status = asset_variants.STABILIZATION_DONE
-            row.stabilization_error = (
-                f"tracking-based stabilization ({tracking_result.mode}); "
-                f"points={tracking_result.point_count}; "
-                f"crop={tracking_result.crop_w}x{tracking_result.crop_h}"
-            )
+            row.stabilization_error = None
+            row.stabilization_mode = "tracking"
+            row.stabilization_metrics_json = {
+                "mode": tracking_result.mode,
+                "point_count": tracking_result.point_count,
+                "crop_w": tracking_result.crop_w,
+                "crop_h": tracking_result.crop_h,
+            }
             await session.commit()
         _discard_previous_derivative(previous_stabilized_path, raw_path, candidate_dst)
         _discard_previous_derivative(replaced_stabilized_path, raw_path, candidate_dst)
@@ -269,9 +272,9 @@ async def run_asset_stabilization(asset_id: int, *, force: bool = False) -> dict
         row.active_asset_variant = asset_variants.STABILIZED_VARIANT
         row.stabilized_path = str(candidate_dst)
         row.stabilization_status = asset_variants.STABILIZATION_DONE
-        row.stabilization_error = (
-            f"{tracking_error}; vidstab fallback completed" if tracking_error else None
-        )
+        row.stabilization_error = tracking_error
+        row.stabilization_mode = "vidstab"
+        row.stabilization_metrics_json = None
         await session.commit()
     _discard_previous_derivative(previous_stabilized_path, raw_path, candidate_dst)
     _discard_previous_derivative(replaced_stabilized_path, raw_path, candidate_dst)

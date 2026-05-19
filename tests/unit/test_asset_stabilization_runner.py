@@ -288,8 +288,10 @@ async def test_run_asset_stabilization_prefers_tracking_derivative(
         assert asset is not None
         assert asset.stabilized_path == str(candidate)
         assert asset.stabilization_status == asset_variants.STABILIZATION_DONE
-        assert asset.stabilization_error is not None
-        assert "tracking-based stabilization (tracking_point)" in asset.stabilization_error
+        assert asset.stabilization_error is None
+        assert asset.stabilization_mode == "tracking"
+        assert asset.stabilization_metrics_json is not None
+        assert "tracking_point" in asset.stabilization_metrics_json["mode"]
     assert candidate.read_bytes() == b"tracking-stabilized"
 
 
@@ -497,9 +499,9 @@ async def test_run_asset_stabilization_records_tracking_fallback_reason(
         asset = await session.get(Asset, asset_id)
         assert asset is not None
         assert asset.stabilization_status == asset_variants.STABILIZATION_DONE
+        assert asset.stabilization_mode == "vidstab"
         assert asset.stabilization_error is not None
         assert "tracking output regressed jitter" in asset.stabilization_error
-        assert "vidstab fallback completed" in asset.stabilization_error
 
 
 @pytest.mark.asyncio
@@ -849,3 +851,101 @@ async def test_low_jitter_skip_enqueues_analysis_on_raw(
         assert asset is not None
         assert asset.active_asset_variant == asset_variants.RAW_VARIANT
     assert enqueue_calls == [(asset_id, False)]
+
+
+@pytest.mark.asyncio
+async def test_run_asset_stabilization_sets_mode_tracking(
+    session_maker: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """stabilization_mode must be 'tracking' after a successful tracking-based run."""
+    source = tmp_path / "raw.mp4"
+    source.write_bytes(b"raw")
+    asset_id = await _seed_asset(session_maker, source)
+    async with session_maker() as session:
+        asset = await session.get(Asset, asset_id)
+        assert asset is not None
+        asset.tracked_object_index = -4
+        asset.point_tracking_status = "done"
+        asset.point_tracking_json = {
+            "src_w": 1920, "src_h": 1080,
+            "frames": [{"t_ms": i * 33, "x": 960, "y": 540} for i in range(60)],
+        }
+        asset.duration_ms = 2000
+        await session.commit()
+
+    fake_result = asset_variants.TrackingStabilizationResult(
+        mode="tracking_point", point_count=60, crop_w=608, crop_h=1080
+    )
+    monkeypatch.setattr(asset_stabilization_runner, "async_session_maker", session_maker)
+    monkeypatch.setattr(
+        asset_variants, "stabilized_path_for_asset",
+        lambda a: tmp_path / f"{a.id}.stab.mp4",
+    )
+    monkeypatch.setattr(
+        asset_variants, "stabilize_source_from_tracking",
+        lambda *_args, **_kwargs: fake_result,
+    )
+    monkeypatch.setattr(
+        asset_stabilization_runner, "enqueue_asset_analysis",
+        lambda *_args, **_kwargs: None,
+    )
+
+    result = await asset_stabilization_runner.run_asset_stabilization(asset_id)
+
+    assert result["status"] == "done"
+    async with session_maker() as session:
+        asset = await session.get(Asset, asset_id)
+        assert asset is not None
+        assert asset.stabilization_mode == "tracking"
+        assert asset.stabilization_metrics_json is not None
+        assert asset.stabilization_metrics_json["mode"] == "tracking_point"
+        assert asset.stabilization_metrics_json["point_count"] == 60
+
+
+@pytest.mark.asyncio
+async def test_run_asset_stabilization_sets_mode_vidstab(
+    session_maker: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """stabilization_mode must be 'vidstab' after a vidstab fallback run."""
+    source = tmp_path / "raw.mp4"
+    source.write_bytes(b"raw")
+    asset_id = await _seed_asset(session_maker, source)
+
+    candidate = tmp_path / "vidstab.unique.mp4"
+    monkeypatch.setattr(asset_stabilization_runner, "async_session_maker", session_maker)
+    monkeypatch.setattr(
+        asset_variants, "stabilized_path_for_asset",
+        lambda a: tmp_path / f"{a.id}.stab.mp4",
+    )
+    monkeypatch.setattr(asset_stabilization_runner, "_candidate_path", lambda _dst: candidate)
+    monkeypatch.setattr(
+        asset_variants, "estimate_stabilization_need",
+        lambda _src: asset_variants.StabilizationNeedEstimate(
+            True, 313, 312, 1.2, 2.5, "jitter_rms=1.200px"
+        ),
+    )
+    monkeypatch.setattr(
+        asset_variants, "stabilize_source_from_tracking",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        asset_variants, "stabilize_source",
+        lambda _src, output, _scratch: output.write_bytes(b"stabilized"),
+    )
+    monkeypatch.setattr(
+        asset_stabilization_runner, "enqueue_asset_analysis",
+        lambda *_args, **_kwargs: None,
+    )
+
+    result = await asset_stabilization_runner.run_asset_stabilization(asset_id)
+
+    assert result["status"] == "done"
+    async with session_maker() as session:
+        asset = await session.get(Asset, asset_id)
+        assert asset is not None
+        assert asset.stabilization_mode == "vidstab"
+        assert asset.stabilization_metrics_json is None
