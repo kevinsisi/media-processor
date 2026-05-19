@@ -114,10 +114,7 @@ def test_compute_crop_path_keeps_slow_pan_after_smoothing() -> None:
 
 def test_compute_crop_path_centre_anchor_matches_no_anchor() -> None:
     """crop_region=(0.5, 0.5) must produce identical output to crop_region=None."""
-    frames = [
-        {"t_ms": i * 200, "x": 910, "y": 490, "w": 100, "h": 100}
-        for i in range(20)
-    ]
+    frames = [{"t_ms": i * 200, "x": 910, "y": 490, "w": 100, "h": 100} for i in range(20)]
     tracking = {"src_w": 1920, "src_h": 1080, "frames": frames}
 
     path_none = auto_reframe.compute_crop_path(
@@ -140,10 +137,7 @@ def test_compute_crop_path_centre_anchor_matches_no_anchor() -> None:
 
 def test_compute_crop_path_left_anchor_shifts_idle_x() -> None:
     """Left anchor (x_norm=0.2) shifts the idle crop window toward the left edge."""
-    frames = [
-        {"t_ms": i * 200, "x": 960, "y": 490, "w": 100, "h": 100}
-        for i in range(20)
-    ]
+    frames = [{"t_ms": i * 200, "x": 960, "y": 490, "w": 100, "h": 100} for i in range(20)]
     tracking = {"src_w": 1920, "src_h": 1080, "frames": frames}
 
     path_centre = auto_reframe.compute_crop_path(

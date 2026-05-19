@@ -684,7 +684,10 @@ async def test_tracking_success_auto_switches_to_stabilized_variant(
         asset_variants, "stabilized_path_for_asset", lambda _asset: tmp_path / "tracking.stab.mp4"
     )
     monkeypatch.setattr(asset_stabilization_runner, "_candidate_path", lambda _dst: candidate)
-    def _fake_tracking(_asset: Asset, _src: Path, output: Path, _scratch: Path) -> asset_variants.TrackingStabilizationResult:
+
+    def _fake_tracking(
+        _asset: Asset, _src: Path, output: Path, _scratch: Path
+    ) -> asset_variants.TrackingStabilizationResult:
         output.write_bytes(b"tracking-stabilized")
         return asset_variants.TrackingStabilizationResult(
             mode="tracking_point", point_count=80, crop_w=1080, crop_h=1920
@@ -734,8 +737,12 @@ async def test_vidstab_success_auto_switches_to_stabilized_variant(
         asset_variants,
         "estimate_stabilization_need",
         lambda _src: asset_variants.StabilizationNeedEstimate(
-            True, sampled_frames=300, usable_steps=299, jitter_rms_px=0.5,
-            jitter_p95_px=1.0, reason="jitter_rms=0.500px",
+            True,
+            sampled_frames=300,
+            usable_steps=299,
+            jitter_rms_px=0.5,
+            jitter_p95_px=1.0,
+            reason="jitter_rms=0.500px",
         ),
     )
     monkeypatch.setattr(
@@ -786,8 +793,12 @@ async def test_stabilization_fail_keeps_raw_variant_and_enqueues_analysis(
         asset_variants,
         "estimate_stabilization_need",
         lambda _src: asset_variants.StabilizationNeedEstimate(
-            True, sampled_frames=300, usable_steps=299, jitter_rms_px=0.5,
-            jitter_p95_px=1.0, reason="jitter_rms=0.500px",
+            True,
+            sampled_frames=300,
+            usable_steps=299,
+            jitter_rms_px=0.5,
+            jitter_p95_px=1.0,
+            reason="jitter_rms=0.500px",
         ),
     )
     monkeypatch.setattr(
@@ -826,15 +837,20 @@ async def test_low_jitter_skip_enqueues_analysis_on_raw(
 
     monkeypatch.setattr(asset_stabilization_runner, "async_session_maker", session_maker)
     monkeypatch.setattr(
-        asset_variants, "stabilized_path_for_asset",
+        asset_variants,
+        "stabilized_path_for_asset",
         lambda _asset: tmp_path / "skip.stab.mp4",
     )
     monkeypatch.setattr(
         asset_variants,
         "estimate_stabilization_need",
         lambda _src: asset_variants.StabilizationNeedEstimate(
-            False, sampled_frames=313, usable_steps=312, jitter_rms_px=0.10,
-            jitter_p95_px=0.22, reason="jitter_rms=0.100px",
+            False,
+            sampled_frames=313,
+            usable_steps=312,
+            jitter_rms_px=0.10,
+            jitter_p95_px=0.22,
+            reason="jitter_rms=0.100px",
         ),
     )
     enqueue_calls: list[tuple[int, bool]] = []
@@ -870,7 +886,8 @@ async def test_run_asset_stabilization_sets_mode_tracking(
         asset.tracked_object_index = -4
         asset.point_tracking_status = "done"
         asset.point_tracking_json = {
-            "src_w": 1920, "src_h": 1080,
+            "src_w": 1920,
+            "src_h": 1080,
             "frames": [{"t_ms": i * 33, "x": 960, "y": 540} for i in range(60)],
         }
         asset.duration_ms = 2000
@@ -881,15 +898,18 @@ async def test_run_asset_stabilization_sets_mode_tracking(
     )
     monkeypatch.setattr(asset_stabilization_runner, "async_session_maker", session_maker)
     monkeypatch.setattr(
-        asset_variants, "stabilized_path_for_asset",
+        asset_variants,
+        "stabilized_path_for_asset",
         lambda a: tmp_path / f"{a.id}.stab.mp4",
     )
     monkeypatch.setattr(
-        asset_variants, "stabilize_source_from_tracking",
+        asset_variants,
+        "stabilize_source_from_tracking",
         lambda *_args, **_kwargs: fake_result,
     )
     monkeypatch.setattr(
-        asset_stabilization_runner, "enqueue_asset_analysis",
+        asset_stabilization_runner,
+        "enqueue_asset_analysis",
         lambda *_args, **_kwargs: None,
     )
 
@@ -919,26 +939,31 @@ async def test_run_asset_stabilization_sets_mode_vidstab(
     candidate = tmp_path / "vidstab.unique.mp4"
     monkeypatch.setattr(asset_stabilization_runner, "async_session_maker", session_maker)
     monkeypatch.setattr(
-        asset_variants, "stabilized_path_for_asset",
+        asset_variants,
+        "stabilized_path_for_asset",
         lambda a: tmp_path / f"{a.id}.stab.mp4",
     )
     monkeypatch.setattr(asset_stabilization_runner, "_candidate_path", lambda _dst: candidate)
     monkeypatch.setattr(
-        asset_variants, "estimate_stabilization_need",
+        asset_variants,
+        "estimate_stabilization_need",
         lambda _src: asset_variants.StabilizationNeedEstimate(
             True, 313, 312, 1.2, 2.5, "jitter_rms=1.200px"
         ),
     )
     monkeypatch.setattr(
-        asset_variants, "stabilize_source_from_tracking",
+        asset_variants,
+        "stabilize_source_from_tracking",
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
-        asset_variants, "stabilize_source",
+        asset_variants,
+        "stabilize_source",
         lambda _src, output, _scratch: output.write_bytes(b"stabilized"),
     )
     monkeypatch.setattr(
-        asset_stabilization_runner, "enqueue_asset_analysis",
+        asset_stabilization_runner,
+        "enqueue_asset_analysis",
         lambda *_args, **_kwargs: None,
     )
 
