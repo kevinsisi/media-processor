@@ -39,7 +39,7 @@ from media_processor.services import (
     variant_analysis_snapshots,
     whisper_stt,
 )
-from media_processor.services.settings_store import get_llm_api_keys
+from media_processor.services.settings_store import build_opencode_config, get_llm_api_keys
 
 logger = logging.getLogger(__name__)
 
@@ -433,8 +433,9 @@ async def _run_tracking(
 
 async def _run_coverage(session: AsyncSession, asset: Asset) -> str:
     api_keys = await _api_keys(session)
-    if not api_keys:
-        raise script_coverage.ScriptCoverageError("LLM_API_KEYS not configured")
+    opencode_config = await build_opencode_config(session)
+    if not api_keys and opencode_config is None:
+        raise script_coverage.ScriptCoverageError("no AI provider configured for coverage")
 
     transcript = (
         await session.execute(select(AssetTranscript).where(AssetTranscript.asset_id == asset.id))
@@ -483,6 +484,7 @@ async def _run_coverage(session: AsyncSession, asset: Asset) -> str:
         model=settings.llm_model,
         base_url=_GEMINI_BASE_URL,
         timeout_s=settings.llm_timeout_s,
+        opencode_config=opencode_config,
     )
 
     # Replace any existing row.

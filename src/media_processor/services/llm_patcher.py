@@ -18,11 +18,14 @@ import logging
 import re
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
 from media_processor.profile.loader import EditingRules, ProfileSpec, RequiredSegments
+
+if TYPE_CHECKING:
+    from media_processor.services.opencode_client import OpenCodeConfig
 
 logger = logging.getLogger(__name__)
 
@@ -99,17 +102,19 @@ _SYSTEM_PROMPT = (
 
 
 class LLMPatcher:
-    """Drives a single Stage 4.5 patch request against a Gemini key pool."""
+    """Drives a single Stage 4.5 patch request — OpenCode primary, Gemini fallback."""
 
     def __init__(
         self,
         config: GeminiKeyPoolConfig,
         *,
+        opencode_config: "OpenCodeConfig | None" = None,
         client: httpx.AsyncClient | None = None,
     ) -> None:
-        if not config.api_keys:
-            raise LLMPatchError("no API keys configured for LLM patcher")
+        if not config.api_keys and opencode_config is None:
+            raise LLMPatchError("no API keys or OpenCode servers configured for LLM patcher")
         self._config = config
+        self._opencode_config = opencode_config
         self._client = client
 
     async def request_patch(
@@ -120,6 +125,32 @@ class LLMPatcher:
         user_feedback: str,
     ) -> ProfilePatch:
         prompt = _build_user_prompt(profile, segments, user_feedback)
+
+        # OpenCode primary
+        if self._opencode_config is not None:
+            from media_processor.services.opencode_client import call_opencode_text
+
+            for server_url in self._opencode_config.servers:
+                text = await call_opencode_text(
+                    prompt=prompt,
+                    system_prompt=_SYSTEM_PROMPT,
+                    server_url=server_url,
+                    password=self._opencode_config.password,
+                    model=self._opencode_config.model,
+                    variant=self._opencode_config.variant,
+                    timeout_s=self._opencode_config.timeout_s,
+                )
+                if text:
+                    try:
+                        return _parse_patch_from_text(text)
+                    except LLMResponseInvalidError as exc:
+                        logger.warning("opencode patch response invalid; trying next: %s", exc)
+            logger.warning("all OpenCode servers failed for patch; falling back to Gemini")
+
+        # Gemini fallback
+        if not self._config.api_keys:
+            raise LLMQuotaExhaustedError("no Gemini keys and all OpenCode servers failed")
+
         body = {
             "system_instruction": {"parts": [{"text": _SYSTEM_PROMPT}]},
             "contents": [{"role": "user", "parts": [{"text": prompt}]}],
@@ -226,8 +257,7 @@ def _build_user_prompt(
     )
 
 
-def _parse_response(payload: dict[str, Any]) -> ProfilePatch:
-    text = _extract_text(payload)
+def _parse_patch_from_text(text: str) -> ProfilePatch:
     cleaned = _strip_code_fence(text)
     try:
         data = json.loads(cleaned)
@@ -275,6 +305,11 @@ def _parse_response(payload: dict[str, Any]) -> ProfilePatch:
         required_segments_overrides=overrides,
         raw_response=text,
     )
+
+
+def _parse_response(payload: dict[str, Any]) -> ProfilePatch:
+    text = _extract_text(payload)
+    return _parse_patch_from_text(text)
 
 
 def _extract_text(payload: dict[str, Any]) -> str:

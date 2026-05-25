@@ -8,6 +8,9 @@
 
 import type {
   AnalyzeRequest,
+  OpenCodeModelsOut,
+  OpenCodeSettingsIn,
+  OpenCodeStatusOut,
   AnalyzeResponse,
   AssetBatchDeleteOut,
   AssetDeleteOut,
@@ -850,6 +853,30 @@ export class ApiClient {
         body: JSON.stringify(payload),
       },
     );
+  }
+
+  // ----- OpenCode settings -----
+
+  getOpenCodeStatus(): Promise<OpenCodeStatusOut> {
+    return this.get<OpenCodeStatusOut>("/settings/opencode");
+  }
+
+  saveOpenCodeSettings(payload: OpenCodeSettingsIn): Promise<OpenCodeStatusOut> {
+    return this.request<OpenCodeStatusOut>("/settings/opencode", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  }
+
+  clearOpenCodeSettings(): Promise<OpenCodeStatusOut> {
+    return this.request<OpenCodeStatusOut>("/settings/opencode", {
+      method: "DELETE",
+    });
+  }
+
+  getOpenCodeModels(): Promise<OpenCodeModelsOut> {
+    return this.get<OpenCodeModelsOut>("/settings/opencode/models");
   }
 
   private get<T>(path: string): Promise<T> {

@@ -16,9 +16,12 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field, replace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
+
+if TYPE_CHECKING:
+    from media_processor.services.opencode_client import OpenCodeConfig
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -923,23 +926,14 @@ def _dominant_motion_for_span(asset: Asset, span_ms: tuple[int, int]) -> str:
     return best_tag
 
 
-def _parse_asset_score(
-    payload: dict[str, Any],
+def _parse_asset_score_from_text(
+    text: str,
     *,
     asset_id: int,
     asset_duration_ms: int,
     style: StylePresetParams = STYLE_PRESET_CUSTOM,
 ) -> _AssetScore:
-    """Validate one per-asset Gemini response. Raises EditPlanInvalidError."""
-    candidates = payload.get("candidates")
-    if not isinstance(candidates, list) or not candidates:
-        raise EditPlanInvalidError(f"asset {asset_id}: response missing candidates")
-    parts = candidates[0].get("content", {}).get("parts", [])
-    if not isinstance(parts, list) or not parts:
-        raise EditPlanInvalidError(f"asset {asset_id}: missing content.parts")
-    text = parts[0].get("text", "")
-    if not isinstance(text, str) or not text.strip():
-        raise EditPlanInvalidError(f"asset {asset_id}: candidate text empty")
+    """Validate one per-asset score response from text. Raises EditPlanInvalidError."""
     try:
         data = json.loads(_strip_fence(text))
     except json.JSONDecodeError as exc:
@@ -1009,6 +1003,31 @@ def _parse_asset_score(
         source_kind=kind,
         reason=reason,
         transition_to_next=transition,
+    )
+
+
+def _parse_asset_score(
+    payload: dict[str, Any],
+    *,
+    asset_id: int,
+    asset_duration_ms: int,
+    style: StylePresetParams = STYLE_PRESET_CUSTOM,
+) -> _AssetScore:
+    """Validate one per-asset Gemini response. Raises EditPlanInvalidError."""
+    candidates = payload.get("candidates")
+    if not isinstance(candidates, list) or not candidates:
+        raise EditPlanInvalidError(f"asset {asset_id}: response missing candidates")
+    parts = candidates[0].get("content", {}).get("parts", [])
+    if not isinstance(parts, list) or not parts:
+        raise EditPlanInvalidError(f"asset {asset_id}: missing content.parts")
+    text = parts[0].get("text", "")
+    if not isinstance(text, str) or not text.strip():
+        raise EditPlanInvalidError(f"asset {asset_id}: candidate text empty")
+    return _parse_asset_score_from_text(
+        text,
+        asset_id=asset_id,
+        asset_duration_ms=asset_duration_ms,
+        style=style,
     )
 
 
@@ -1451,15 +1470,9 @@ async def _score_one_asset(
     client: httpx.AsyncClient,
     prior_feedback: str = "",
     style: StylePresetParams = STYLE_PRESET_CUSTOM,
+    opencode_config: "OpenCodeConfig | None" = None,
 ) -> _AssetScore:
-    """Single-asset Gemini call with key rotation on 429 / 5xx / transport.
-
-    Walks the key pool starting from ``key_offset`` so concurrent fanout
-    calls naturally start with different keys (and rotate through the
-    whole pool on retry). Raises ``EditPlanQuotaError`` if every key
-    exhausts; raises ``EditPlanInvalidError`` if a 200 came back with an
-    unparseable body.
-    """
+    """Single-asset score call — OpenCode primary, Gemini fallback."""
     prompt = _build_asset_prompt(
         asset,
         transcript,
@@ -1468,6 +1481,48 @@ async def _score_one_asset(
         prior_feedback=prior_feedback,
         style=style,
     )
+
+    # OpenCode primary
+    if opencode_config is not None:
+        from media_processor.services.opencode_client import call_opencode_text
+
+        for server_url in opencode_config.servers:
+            text = await call_opencode_text(
+                prompt=prompt,
+                server_url=server_url,
+                password=opencode_config.password,
+                model=opencode_config.model,
+                variant=opencode_config.variant,
+                timeout_s=opencode_config.timeout_s,
+            )
+            if text:
+                try:
+                    parsed = _parse_asset_score_from_text(
+                        text,
+                        asset_id=asset.id,
+                        asset_duration_ms=int(asset.duration_ms),
+                        style=style,
+                    )
+                    best_span_ms = _avoid_unstable_opening_span(asset, parsed.best_span_ms)
+                    return replace(
+                        parsed,
+                        best_span_ms=best_span_ms,
+                        dominant_motion=_dominant_motion_for_span(asset, best_span_ms),
+                        dominant_emotion=_dominant_emotion_for_asset(asset),
+                        asset_duration_ms=int(asset.duration_ms),
+                        has_face=_has_face_in_span(asset, best_span_ms),
+                    )
+                except EditPlanInvalidError as exc:
+                    logger.warning(
+                        "opencode score asset=%d invalid; trying next: %s",
+                        asset.id,
+                        exc,
+                    )
+        logger.warning(
+            "opencode score asset=%d: all servers failed; falling back to Gemini",
+            asset.id,
+        )
+
     body = {
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
         "generationConfig": {
@@ -1547,18 +1602,17 @@ async def plan(
     timeout_s: float,
     target_duration_ms: int = DEFAULT_TARGET_DURATION_MS,
     style_preset: str = "custom",
+    opencode_config: "OpenCodeConfig | None" = None,
 ) -> CutPlan:
-    """Build a CutPlan via per-asset parallel Gemini calls + local assembly.
+    """Build a CutPlan via per-asset parallel calls + local assembly.
 
-    Sends one small prompt per asset (transcript + script + tags + coverage
-    → score / position / best span / source_kind), fanned out concurrently
-    over httpx.AsyncClient with key rotation. Each call is independent, so
-    one slow / failed asset does not poison the batch — it just gets
-    excluded from the assembled plan. The caller falls back to
-    :func:`heuristic_fallback` if every asset call fails.
+    Tries OpenCode-primary per asset when configured; falls back to Gemini
+    key-pool rotation. Fanned out concurrently so one failed asset does not
+    poison the batch. The caller falls back to heuristic_fallback if every
+    asset call fails.
     """
-    if not api_keys:
-        raise EditPlanError("no API keys configured for edit planner")
+    if not api_keys and opencode_config is None:
+        raise EditPlanError("no API keys or OpenCode servers configured for edit planner")
 
     style = resolve_style_preset(style_preset)
     ctx = await _load_project_context(session, project_id)
@@ -1573,13 +1627,14 @@ async def plan(
                 ctx.coverage.get(asset.id),
                 ctx.script_body,
                 api_keys=api_keys,
-                key_offset=i,  # stagger so concurrent calls hit different keys
+                key_offset=i,
                 model=model,
                 base_url=base_url,
                 timeout_s=timeout_s,
                 client=client,
                 prior_feedback=ctx.prior_feedback,
                 style=style,
+                opencode_config=opencode_config,
             )
             for i, asset in enumerate(ctx.assets)
         ]

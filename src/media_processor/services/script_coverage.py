@@ -12,9 +12,12 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
+
+if TYPE_CHECKING:
+    from media_processor.services.opencode_client import OpenCodeConfig
 
 logger = logging.getLogger(__name__)
 
@@ -91,19 +94,7 @@ def _format_segments(segments: list[TranscriptSegmentInput]) -> str:
     return "\n".join(f"{seg.idx}, [{seg.start_ms} - {seg.end_ms}] {seg.text}" for seg in segments)
 
 
-def _validate_response(
-    payload: dict[str, Any],
-    valid_idxs: set[int],
-) -> list[CoverageMatch]:
-    candidates = payload.get("candidates")
-    if not isinstance(candidates, list) or not candidates:
-        raise ScriptCoverageError("Coverage payload missing candidates")
-    parts = candidates[0].get("content", {}).get("parts", [])
-    if not isinstance(parts, list) or not parts:
-        raise ScriptCoverageError("Coverage candidate missing content.parts")
-    text = parts[0].get("text", "")
-    if not isinstance(text, str) or not text.strip():
-        raise ScriptCoverageError("Coverage candidate text empty")
+def _validate_response_text(text: str, valid_idxs: set[int]) -> list[CoverageMatch]:
     cleaned = _strip_fence(text)
     try:
         data = json.loads(cleaned)
@@ -141,6 +132,22 @@ def _validate_response(
     return out
 
 
+def _validate_response(
+    payload: dict[str, Any],
+    valid_idxs: set[int],
+) -> list[CoverageMatch]:
+    candidates = payload.get("candidates")
+    if not isinstance(candidates, list) or not candidates:
+        raise ScriptCoverageError("Coverage payload missing candidates")
+    parts = candidates[0].get("content", {}).get("parts", [])
+    if not isinstance(parts, list) or not parts:
+        raise ScriptCoverageError("Coverage candidate missing content.parts")
+    text = parts[0].get("text", "")
+    if not isinstance(text, str) or not text.strip():
+        raise ScriptCoverageError("Coverage candidate text empty")
+    return _validate_response_text(text, valid_idxs)
+
+
 def _compute_coverage(
     segments: list[TranscriptSegmentInput],
     matches: list[CoverageMatch],
@@ -174,19 +181,56 @@ async def compare(
     model: str,
     base_url: str,
     timeout_s: float,
+    opencode_config: "OpenCodeConfig | None" = None,
 ) -> CoverageResult:
     """Run the semantic compare and return a fully validated CoverageResult."""
     if not script_body.strip():
         raise ScriptCoverageMissingScriptError("project script is empty")
     if not segments:
         raise ScriptCoverageError("transcript has no segments")
-    if not api_keys:
-        raise ScriptCoverageError("no API keys configured for coverage")
+    if not api_keys and opencode_config is None:
+        raise ScriptCoverageError("no API keys or OpenCode servers configured for coverage")
 
     prompt = _PROMPT_TEMPLATE.format(
         script_body=script_body.strip(),
         numbered_segments=_format_segments(segments),
     )
+    valid_idxs = {s.idx for s in segments}
+
+    # OpenCode primary
+    if opencode_config is not None:
+        from media_processor.services.opencode_client import call_opencode_text
+
+        for server_url in opencode_config.servers:
+            text = await call_opencode_text(
+                prompt=prompt,
+                server_url=server_url,
+                password=opencode_config.password,
+                model=opencode_config.model,
+                variant=opencode_config.variant,
+                timeout_s=opencode_config.timeout_s,
+            )
+            if text:
+                try:
+                    matches = _validate_response_text(text, valid_idxs)
+                    scripted_count, total_count, ratio_count, ratio_ms = _compute_coverage(
+                        segments, matches
+                    )
+                    return CoverageResult(
+                        model=opencode_config.model,
+                        scripted_segment_count=scripted_count,
+                        total_segment_count=total_count,
+                        coverage_ratio_by_count=ratio_count,
+                        coverage_ratio_by_duration_ms=ratio_ms,
+                        matches=tuple(matches),
+                    )
+                except ScriptCoverageError as exc:
+                    logger.warning("opencode coverage response invalid; trying next: %s", exc)
+        logger.warning("all OpenCode servers failed for coverage; falling back to Gemini")
+
+    if not api_keys:
+        raise ScriptCoverageQuotaError("no Gemini keys and all OpenCode servers failed")
+
     body = {
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
         "generationConfig": {
@@ -195,7 +239,6 @@ async def compare(
         },
     }
 
-    valid_idxs = {s.idx for s in segments}
     last_status = 0
     async with httpx.AsyncClient(timeout=timeout_s) as client:
         for key in api_keys:

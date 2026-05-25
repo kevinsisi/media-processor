@@ -14,7 +14,7 @@ from media_processor.core.db import async_session_maker
 from media_processor.profile import load_profile
 from media_processor.profile.loader import ProfileSpec, ProfileValidationError
 from media_processor.services.llm_patcher import GeminiKeyPoolConfig, LLMPatcher
-from media_processor.services.settings_store import get_llm_api_keys
+from media_processor.services.settings_store import build_opencode_config, get_llm_api_keys
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:
@@ -25,23 +25,24 @@ async def get_session() -> AsyncIterator[AsyncSession]:
 async def get_llm_patcher(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> LLMPatcher:
-    """Build an ``LLMPatcher`` from the configured key pool.
+    """Build an LLMPatcher — OpenCode primary, Gemini fallback.
 
-    Resolves keys from the DB-backed settings store (set via the Settings UI)
-    with env fallback. Raises ``503`` when no keys are configured.
+    Resolves settings from DB with env fallback. Raises 503 when neither
+    OpenCode servers nor Gemini keys are configured.
     """
     keys = await get_llm_api_keys(session)
-    if not keys:
+    opencode_config = await build_opencode_config(session)
+    if not keys and opencode_config is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="LLM patcher not configured: set LLM_API_KEYS in Settings or env",
+            detail="LLM patcher not configured: set OPENCODE_SERVERS or LLM_API_KEYS",
         )
     config = GeminiKeyPoolConfig(
         api_keys=keys,
         model=settings.llm_model,
         timeout_s=settings.llm_timeout_s,
     )
-    return LLMPatcher(config)
+    return LLMPatcher(config, opencode_config=opencode_config)
 
 
 def get_profile_loader() -> Callable[[str], ProfileSpec]:

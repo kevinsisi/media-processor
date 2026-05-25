@@ -974,6 +974,43 @@ export interface QueueStatusOut {
 }
 
 
+// ----- OpenCode settings -----
+
+export type OpenCodeSource = "setting" | "env" | "default" | "none";
+
+export interface OpenCodeServerOut {
+  id: string;
+  label: string;
+  base_url: string;
+}
+
+export interface OpenCodeStatusOut {
+  servers: OpenCodeServerOut[];
+  servers_source: OpenCodeSource;
+  text_model: string;
+  text_model_source: OpenCodeSource;
+  text_variant: string;
+  text_variant_source: OpenCodeSource;
+}
+
+export interface OpenCodeSettingsIn {
+  servers?: string;
+  text_model?: string;
+  text_variant?: string;
+}
+
+export interface OpenCodeModelOut {
+  id: string;
+  name: string;
+  provider: string;
+}
+
+export interface OpenCodeModelsOut {
+  models: OpenCodeModelOut[];
+  source_server_id: string | null;
+  warning: string | null;
+}
+
 // v0.27.1 — one active-draft reference returned alongside a delete
 // outcome. Lets the FE render "v3, v5 still using this — really
 // delete?" without making a separate fetch for draft state.

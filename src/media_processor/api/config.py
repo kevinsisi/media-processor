@@ -26,6 +26,14 @@ class Settings(BaseSettings):
     llm_model: str = Field(default="gemini-2.5-flash")
     llm_timeout_s: float = Field(default=30.0)
 
+    # OpenCode provider — primary text AI route. Falls back to Gemini key pool
+    # when OpenCode is unavailable. Password stays env-only (HomeProject canonical
+    # deployment at provider-amd.sisihome.org is no-auth).
+    opencode_servers: str = Field(default="")  # comma or newline separated base URLs
+    opencode_model: str = Field(default="openai/gpt-5.5")
+    opencode_variant: str = Field(default="medium")
+    opencode_server_password: str = Field(default="")
+
     profiles_dir: str = Field(default="profiles")
 
     # Storage roots — bind-mounted by docker-compose.

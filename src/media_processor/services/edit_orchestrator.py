@@ -45,7 +45,7 @@ from media_processor.services import (
     video_renderer,
 )
 from media_processor.services.edit_planner import CutPlan
-from media_processor.services.settings_store import get_llm_api_keys
+from media_processor.services.settings_store import build_opencode_config, get_llm_api_keys
 
 logger = logging.getLogger(__name__)
 
@@ -626,12 +626,13 @@ async def _plan_stage(
     *,
     style_preset: str = "custom",
 ) -> CutPlan:
-    """Run the Gemini planner with key-pool + fallback."""
+    """Run the planner (OpenCode-primary, Gemini fallback) with heuristic fallback."""
     async with async_session_maker() as session:
         api_keys = await get_llm_api_keys(session)
+        opencode_config = await build_opencode_config(session)
 
     fallback_reason: str | None = None
-    if api_keys:
+    if api_keys or opencode_config is not None:
         try:
             async with async_session_maker() as session:
                 return await edit_planner.plan(
@@ -643,14 +644,15 @@ async def _plan_stage(
                     timeout_s=settings.llm_timeout_s,
                     target_duration_ms=target_duration_ms,
                     style_preset=style_preset,
+                    opencode_config=opencode_config,
                 )
         except edit_planner.EditPlanEmptyError:
             raise
         except edit_planner.EditPlanError as exc:
             logger.warning("edit-planner failed; falling back to heuristic: %s", exc)
-            fallback_reason = f"gemini failed ({type(exc).__name__}); used heuristic"
+            fallback_reason = f"planner failed ({type(exc).__name__}); used heuristic"
     else:
-        fallback_reason = "no LLM_API_KEYS configured; used heuristic"
+        fallback_reason = "no AI provider configured; used heuristic"
 
     async with async_session_maker() as session:
         return await edit_planner.heuristic_fallback(

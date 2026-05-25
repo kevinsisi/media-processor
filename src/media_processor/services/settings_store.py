@@ -155,3 +155,129 @@ async def clear_llm_api_keys(session: AsyncSession) -> None:
     )
     await session.execute(stmt)
     await session.commit()
+
+
+# ---------- OpenCode settings ----------
+
+OPENCODE_SERVERS_KEY = "opencode_servers"
+OPENCODE_TEXT_MODEL_KEY = "opencode_text_model"
+OPENCODE_TEXT_VARIANT_KEY = "opencode_text_variant"
+
+
+@dataclass(frozen=True)
+class OpenCodeServer:
+    id: str
+    label: str
+    base_url: str
+
+
+async def _get_setting(session: AsyncSession, key: str) -> str | None:
+    return (
+        await session.execute(select(AppSetting.value).where(AppSetting.key == key))
+    ).scalar_one_or_none()
+
+
+async def _upsert_setting(session: AsyncSession, key: str, value: str) -> None:
+    stmt = pg_insert(AppSetting).values(key=key, value=value, updated_at=datetime.now(UTC))
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["key"],
+        set_={"value": stmt.excluded.value, "updated_at": stmt.excluded.updated_at},
+    )
+    await session.execute(stmt)
+
+
+def _parse_server_urls(raw: str) -> list[str]:
+    urls: list[str] = []
+    for chunk in raw.replace("\r\n", "\n").replace(",", "\n").split("\n"):
+        u = chunk.strip()
+        if u and (u.startswith("http://") or u.startswith("https://")):
+            urls.append(u)
+    return list(dict.fromkeys(urls))  # dedupe, preserve order
+
+
+def _servers_from_urls(urls: list[str]) -> list[OpenCodeServer]:
+    return [
+        OpenCodeServer(id=f"opencode-{i + 1}", label=f"OpenCode {i + 1}", base_url=url)
+        for i, url in enumerate(urls)
+    ]
+
+
+async def get_opencode_servers(session: AsyncSession) -> tuple[list[OpenCodeServer], str]:
+    """Resolve OpenCode servers (DB → env → empty). Returns (servers, source)."""
+    row = await _get_setting(session, OPENCODE_SERVERS_KEY)
+    if row and row.strip():
+        urls = _parse_server_urls(row)
+        if urls:
+            return _servers_from_urls(urls), "setting"
+    env_val = settings.opencode_servers
+    if env_val and env_val.strip():
+        urls = _parse_server_urls(env_val)
+        if urls:
+            return _servers_from_urls(urls), "env"
+    return [], "none"
+
+
+async def get_opencode_text_model(session: AsyncSession) -> tuple[str, str]:
+    """Returns (model, source). source: 'setting' | 'env' | 'default'."""
+    row = await _get_setting(session, OPENCODE_TEXT_MODEL_KEY)
+    if row and row.strip():
+        return row.strip(), "setting"
+    env_val = settings.opencode_model
+    if env_val and env_val.strip():
+        return env_val.strip(), "env"
+    return "openai/gpt-5.5", "default"
+
+
+async def get_opencode_text_variant(session: AsyncSession) -> tuple[str, str]:
+    """Returns (variant, source). source: 'setting' | 'env' | 'default'."""
+    row = await _get_setting(session, OPENCODE_TEXT_VARIANT_KEY)
+    if row and row.strip():
+        return row.strip(), "setting"
+    env_val = settings.opencode_variant
+    if env_val and env_val.strip():
+        return env_val.strip(), "env"
+    return "medium", "default"
+
+
+async def set_opencode_settings(
+    session: AsyncSession,
+    *,
+    servers_raw: str | None = None,
+    text_model: str | None = None,
+    text_variant: str | None = None,
+) -> None:
+    """Persist OpenCode settings. Pass empty string to clear a field."""
+    if servers_raw is not None:
+        await _upsert_setting(session, OPENCODE_SERVERS_KEY, servers_raw)
+    if text_model is not None:
+        await _upsert_setting(session, OPENCODE_TEXT_MODEL_KEY, text_model)
+    if text_variant is not None:
+        await _upsert_setting(session, OPENCODE_TEXT_VARIANT_KEY, text_variant)
+    await session.commit()
+
+
+async def clear_opencode_settings(session: AsyncSession) -> None:
+    """Clear all DB-stored OpenCode settings (falls through to env on next read)."""
+    for key in (OPENCODE_SERVERS_KEY, OPENCODE_TEXT_MODEL_KEY, OPENCODE_TEXT_VARIANT_KEY):
+        await _upsert_setting(session, key, "")
+    await session.commit()
+
+
+async def build_opencode_config(
+    session: AsyncSession,
+) -> "OpenCodeConfig | None":
+    """Resolve OpenCode settings and return a ready-to-use config, or None if not configured."""
+    from media_processor.services.opencode_client import OpenCodeConfig
+
+    servers, _ = await get_opencode_servers(session)
+    if not servers:
+        return None
+    model, _ = await get_opencode_text_model(session)
+    variant, _ = await get_opencode_text_variant(session)
+    return OpenCodeConfig(
+        servers=tuple(s.base_url for s in servers),
+        model=model,
+        variant=variant,
+        password=settings.opencode_server_password,
+        timeout_s=settings.llm_timeout_s,
+    )

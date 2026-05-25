@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react";
 import { ApiError, apiClient } from "../api/client";
-import type { SettingsOut } from "../api/types";
+import type {
+  OpenCodeModelOut,
+  OpenCodeStatusOut,
+  SettingsOut,
+} from "../api/types";
 import "./Settings.css";
 
 const DEFAULT_KEY_MANAGER_URL = "http://key.sisihome.org:7823";
@@ -16,6 +20,19 @@ interface FlashMessage {
   text: string;
 }
 
+const OC_VARIANT_LABELS: Record<string, string> = {
+  default: "預設",
+  medium: "中等",
+  high: "高品質",
+};
+
+const OC_SOURCE_LABEL: Record<string, string> = {
+  setting: "DB 設定",
+  env: "環境變數",
+  default: "預設值",
+  none: "未設定",
+};
+
 export default function Settings() {
   const [data, setData] = useState<SettingsOut | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -24,6 +41,17 @@ export default function Settings() {
   const [managerUrl, setManagerUrl] = useState(DEFAULT_KEY_MANAGER_URL);
   const [busy, setBusy] = useState<null | "save" | "sync" | "clear">(null);
   const [flash, setFlash] = useState<FlashMessage | null>(null);
+
+  // OpenCode settings state
+  const [ocStatus, setOcStatus] = useState<OpenCodeStatusOut | null>(null);
+  const [ocModels, setOcModels] = useState<OpenCodeModelOut[]>([]);
+  const [ocModelsLoading, setOcModelsLoading] = useState(false);
+  const [ocModelSearch, setOcModelSearch] = useState("");
+  const [ocServersInput, setOcServersInput] = useState("");
+  const [ocTextModel, setOcTextModel] = useState("");
+  const [ocTextVariant, setOcTextVariant] = useState("");
+  const [ocSaving, setOcSaving] = useState(false);
+  const [ocFlash, setOcFlash] = useState<FlashMessage | null>(null);
 
   const refresh = async () => {
     try {
@@ -35,8 +63,39 @@ export default function Settings() {
     }
   };
 
+  const loadOpenCode = async () => {
+    try {
+      const status = await apiClient.getOpenCodeStatus();
+      setOcStatus(status);
+      setOcServersInput(status.servers.map((s) => s.base_url).join("\n"));
+      setOcTextModel(status.text_model_source === "setting" ? status.text_model : "");
+      setOcTextVariant(status.text_variant_source === "setting" ? status.text_variant : "");
+    } catch {
+      // non-fatal
+    }
+  };
+
+  const loadOpenCodeModels = async () => {
+    setOcModelsLoading(true);
+    try {
+      const result = await apiClient.getOpenCodeModels();
+      setOcModels(result.models);
+      if (result.warning) {
+        setOcFlash({ kind: "error", text: result.warning });
+      }
+    } catch (err) {
+      setOcFlash({
+        kind: "error",
+        text: err instanceof ApiError ? err.message : String(err),
+      });
+    } finally {
+      setOcModelsLoading(false);
+    }
+  };
+
   useEffect(() => {
     void refresh();
+    void loadOpenCode();
   }, []);
 
   const handleSave = async () => {
@@ -121,6 +180,65 @@ export default function Settings() {
       setBusy(null);
     }
   };
+
+  const handleSaveOpenCode = async () => {
+    setOcSaving(true);
+    setOcFlash(null);
+    try {
+      const updated = await apiClient.saveOpenCodeSettings({
+        servers: ocServersInput,
+        text_model: ocTextModel,
+        text_variant: ocTextVariant,
+      });
+      setOcStatus(updated);
+      setOcFlash({ kind: "ok", text: "OpenCode 設定已儲存。" });
+      await loadOpenCodeModels();
+    } catch (err) {
+      setOcFlash({
+        kind: "error",
+        text: err instanceof ApiError ? `儲存失敗：${err.message}` : String(err),
+      });
+    } finally {
+      setOcSaving(false);
+    }
+  };
+
+  const handleClearOpenCode = async () => {
+    if (!confirm("確定要清除 DB 中的 OpenCode 設定？清除後將改讀環境變數。")) return;
+    setOcSaving(true);
+    setOcFlash(null);
+    try {
+      const updated = await apiClient.clearOpenCodeSettings();
+      setOcStatus(updated);
+      setOcServersInput(updated.servers.map((s) => s.base_url).join("\n"));
+      setOcTextModel(updated.text_model_source === "setting" ? updated.text_model : "");
+      setOcTextVariant(updated.text_variant_source === "setting" ? updated.text_variant : "");
+      setOcFlash({ kind: "ok", text: "OpenCode DB 設定已清除。" });
+    } catch (err) {
+      setOcFlash({
+        kind: "error",
+        text: err instanceof ApiError ? `清除失敗：${err.message}` : String(err),
+      });
+    } finally {
+      setOcSaving(false);
+    }
+  };
+
+  const filteredModels = ocModelSearch
+    ? ocModels.filter(
+        (m) =>
+          m.id.toLowerCase().includes(ocModelSearch.toLowerCase()) ||
+          m.name.toLowerCase().includes(ocModelSearch.toLowerCase()),
+      )
+    : ocModels;
+
+  const modelsByProvider = filteredModels.reduce<Record<string, OpenCodeModelOut[]>>(
+    (acc, m) => {
+      (acc[m.provider] ??= []).push(m);
+      return acc;
+    },
+    {},
+  );
 
   return (
     <main className="settings page">
@@ -254,6 +372,159 @@ export default function Settings() {
           {flash.text}
         </div>
       )}
+
+      <section className="settings__panel">
+        <div className="settings__panel-head">
+          <h2>OpenCode AI 服務設定</h2>
+          <p className="settings__hint">
+            文字生成走 OpenCode → Gemini 降級；視覺辨識維持 Gemini。未填寫時會讀取主機環境設定。
+          </p>
+        </div>
+
+        {ocStatus && (
+          <dl className="settings__kv">
+            <dt>伺服器</dt>
+            <dd className="mono">
+              {ocStatus.servers.length === 0
+                ? "—"
+                : ocStatus.servers.map((s) => s.base_url).join(", ")}{" "}
+              <span style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)", fontSize: "var(--t-xs)" }}>
+                [{OC_SOURCE_LABEL[ocStatus.servers_source] ?? ocStatus.servers_source}]
+              </span>
+            </dd>
+            <dt>文字模型</dt>
+            <dd className="mono">
+              {ocStatus.text_model}{" "}
+              <span style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)", fontSize: "var(--t-xs)" }}>
+                [{OC_SOURCE_LABEL[ocStatus.text_model_source] ?? ocStatus.text_model_source}]
+              </span>
+            </dd>
+            <dt>品質</dt>
+            <dd className="mono">
+              {OC_VARIANT_LABELS[ocStatus.text_variant] ?? ocStatus.text_variant}{" "}
+              <span style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)", fontSize: "var(--t-xs)" }}>
+                [{OC_SOURCE_LABEL[ocStatus.text_variant_source] ?? ocStatus.text_variant_source}]
+              </span>
+            </dd>
+          </dl>
+        )}
+
+        <div className="settings__row settings__row--top" style={{ marginTop: "var(--space-5)" }}>
+          <label className="settings__field" style={{ flex: "1 1 100%" }}>
+            <span>OpenCode 伺服器（一行一個 URL）</span>
+            <textarea
+              className="settings__textarea mono"
+              rows={3}
+              placeholder="https://provider-amd.sisihome.org"
+              value={ocServersInput}
+              onChange={(e) => setOcServersInput(e.target.value)}
+              spellCheck={false}
+            />
+          </label>
+        </div>
+
+        <div className="settings__row settings__row--top">
+          <label className="settings__field">
+            <span>搜尋模型</span>
+            <input
+              type="search"
+              className="settings__input"
+              placeholder="gpt / gemini / …"
+              value={ocModelSearch}
+              onChange={(e) => setOcModelSearch(e.target.value)}
+            />
+          </label>
+          <div className="settings__actions" style={{ alignSelf: "flex-end" }}>
+            <button
+              type="button"
+              className="cta cta--quiet"
+              onClick={() => void loadOpenCodeModels()}
+              disabled={ocModelsLoading}
+            >
+              {ocModelsLoading ? "載入中…" : "重新整理模型"}
+            </button>
+          </div>
+        </div>
+
+        <div className="settings__row settings__row--top">
+          <label className="settings__field">
+            <span>文字模型</span>
+            <select
+              className="settings__input"
+              value={ocTextModel}
+              onChange={(e) => setOcTextModel(e.target.value)}
+            >
+              <option value="">
+                — 使用預設（{ocStatus ? ocStatus.text_model : "openai/gpt-5.5"}）—
+              </option>
+              {Object.entries(modelsByProvider)
+                .sort(([a], [b]) => a.localeCompare(b))
+                .map(([provider, models]) => (
+                  <optgroup key={provider} label={provider}>
+                    {[...models]
+                      .sort((a, b) => a.id.localeCompare(b.id))
+                      .map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.name || m.id}
+                        </option>
+                      ))}
+                  </optgroup>
+                ))}
+            </select>
+          </label>
+          <label className="settings__field">
+            <span>品質等級</span>
+            <select
+              className="settings__input"
+              value={ocTextVariant}
+              onChange={(e) => setOcTextVariant(e.target.value)}
+            >
+              <option value="">
+                — 使用預設（
+                {ocStatus
+                  ? (OC_VARIANT_LABELS[ocStatus.text_variant] ?? ocStatus.text_variant)
+                  : "中等"}
+                ）—
+              </option>
+              {Object.entries(OC_VARIANT_LABELS).map(([v, label]) => (
+                <option key={v} value={v}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <div className="settings__row">
+          <div className="settings__actions">
+            <button
+              type="button"
+              className="cta cta--primary"
+              onClick={() => void handleSaveOpenCode()}
+              disabled={ocSaving}
+            >
+              {ocSaving ? "儲存中…" : "儲存 OpenCode 設定"}
+            </button>
+            <button
+              type="button"
+              className="cta cta--quiet"
+              onClick={() => void handleClearOpenCode()}
+              disabled={ocSaving}
+            >
+              清除 DB 設定
+            </button>
+          </div>
+        </div>
+
+        {ocFlash && (
+          <div
+            className={`settings__notice settings__notice--${ocFlash.kind}`}
+            role={ocFlash.kind === "error" ? "alert" : "status"}
+          >
+            {ocFlash.text}
+          </div>
+        )}
+      </section>
     </main>
   );
 }

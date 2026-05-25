@@ -19,10 +19,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from media_processor.api.config import settings as app_settings
 from media_processor.api.deps import get_session
 from media_processor.services.settings_store import (
+    OpenCodeServer,
     clear_llm_api_keys,
+    clear_opencode_settings,
+    get_opencode_servers,
+    get_opencode_text_model,
+    get_opencode_text_variant,
     get_pool_summary,
     parse_keys_input,
     set_llm_api_keys,
+    set_opencode_settings,
 )
 
 logger = logging.getLogger(__name__)
@@ -73,6 +79,139 @@ class SyncFromManagerOut(BaseModel):
     imported: int
     skipped: int
     stored_count: int
+
+
+class OpenCodeServerOut(BaseModel):
+    id: str
+    label: str
+    base_url: str
+
+
+class OpenCodeStatusOut(BaseModel):
+    servers: list[OpenCodeServerOut]
+    servers_source: str
+    text_model: str
+    text_model_source: str
+    text_variant: str
+    text_variant_source: str
+
+
+class OpenCodeSettingsIn(BaseModel):
+    servers: str | None = None
+    text_model: str | None = None
+    text_variant: str | None = None
+
+
+class OpenCodeModelOut(BaseModel):
+    id: str
+    name: str
+    provider: str
+
+
+class OpenCodeModelsOut(BaseModel):
+    models: list[OpenCodeModelOut]
+    source_server_id: str | None
+    warning: str | None
+
+
+def _oc_server_out(s: OpenCodeServer) -> OpenCodeServerOut:
+    return OpenCodeServerOut(id=s.id, label=s.label, base_url=s.base_url)
+
+
+async def _build_opencode_status(session: SessionDep) -> OpenCodeStatusOut:
+    servers, srv_source = await get_opencode_servers(session)
+    model, model_source = await get_opencode_text_model(session)
+    variant, variant_source = await get_opencode_text_variant(session)
+    return OpenCodeStatusOut(
+        servers=[_oc_server_out(s) for s in servers],
+        servers_source=srv_source,
+        text_model=model,
+        text_model_source=model_source,
+        text_variant=variant,
+        text_variant_source=variant_source,
+    )
+
+
+@router.get("/opencode", response_model=OpenCodeStatusOut)
+async def get_opencode_settings(session: SessionDep) -> OpenCodeStatusOut:
+    return await _build_opencode_status(session)
+
+
+@router.put("/opencode", response_model=OpenCodeStatusOut)
+async def update_opencode_settings(
+    payload: OpenCodeSettingsIn,
+    session: SessionDep,
+) -> OpenCodeStatusOut:
+    await set_opencode_settings(
+        session,
+        servers_raw=payload.servers,
+        text_model=payload.text_model,
+        text_variant=payload.text_variant,
+    )
+    return await _build_opencode_status(session)
+
+
+@router.delete("/opencode", response_model=OpenCodeStatusOut)
+async def delete_opencode_settings(session: SessionDep) -> OpenCodeStatusOut:
+    await clear_opencode_settings(session)
+    return await _build_opencode_status(session)
+
+
+@router.get("/opencode/models", response_model=OpenCodeModelsOut)
+async def get_opencode_models(session: SessionDep) -> OpenCodeModelsOut:
+    servers, _ = await get_opencode_servers(session)
+    if not servers:
+        return OpenCodeModelsOut(models=[], source_server_id=None, warning="no OpenCode servers configured")
+
+    password = app_settings.opencode_server_password
+    headers: dict[str, str] = {}
+    if password:
+        import base64
+        token = base64.b64encode(f"opencode:{password}".encode()).decode()
+        headers["Authorization"] = f"Basic {token}"
+
+    last_warning: str | None = None
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        for server in servers:
+            try:
+                resp = await client.get(f"{server.base_url.rstrip('/')}/provider", headers=headers)
+            except httpx.HTTPError as exc:
+                last_warning = f"server {server.id} unreachable: {exc}"
+                logger.warning("opencode /provider failed (%s): %s", server.base_url, exc)
+                continue
+            if resp.status_code != 200:
+                last_warning = f"server {server.id} returned HTTP {resp.status_code}"
+                logger.warning("opencode /provider HTTP %d (%s)", resp.status_code, server.base_url)
+                continue
+            try:
+                data = resp.json()
+            except Exception as exc:  # noqa: BLE001
+                last_warning = f"server {server.id} response parse failed: {exc}"
+                continue
+            models: list[OpenCodeModelOut] = []
+            providers = data if isinstance(data, list) else []
+            for provider_entry in providers:
+                if not isinstance(provider_entry, dict):
+                    continue
+                provider_id = str(provider_entry.get("id") or "")
+                for m in provider_entry.get("models") or []:
+                    if not isinstance(m, dict):
+                        continue
+                    m_id = str(m.get("id") or "")
+                    m_name = str(m.get("name") or m_id)
+                    if m_id:
+                        models.append(OpenCodeModelOut(
+                            id=f"{provider_id}/{m_id}" if provider_id else m_id,
+                            name=m_name,
+                            provider=provider_id,
+                        ))
+            if models:
+                return OpenCodeModelsOut(
+                    models=models,
+                    source_server_id=server.id,
+                    warning=None,
+                )
+    return OpenCodeModelsOut(models=[], source_server_id=None, warning=last_warning or "all servers returned empty model list")
 
 
 @router.get("", response_model=SettingsOut)
