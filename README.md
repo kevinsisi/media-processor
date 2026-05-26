@@ -2,7 +2,7 @@
 
 Content factory pipeline for novice-friendly Instagram and Facebook short-video production.
 
-**Status:** v0.43.2 / M9.15.31 — human-readable stabilization skip state.
+**Status:** v0.43.3 / M9.15.32 — resilient web proxy API DNS resolution.
 
 ## Spec
 

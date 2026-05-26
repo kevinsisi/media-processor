@@ -3,7 +3,7 @@
   "status": "no_findings",
   "evidence": "No findings",
   "notes": [
-    "Reviewed v0.43.2 low-jitter skipped stabilization UI and force-generate behavior.",
-    "Local gates: npm run build, ruff check src/media_processor/api/main.py, mypy src/media_processor/api/main.py, and OpenSpec strict validate passed."
+    "Reviewed v0.43.3 nginx Docker DNS resolver fix after stale API upstream 502 incident.",
+    "Local gates: nginx -t, runtime nginx /api/health proxy smoke test, npm run build, ruff check src/media_processor/api/main.py, and OpenSpec strict validate passed."
   ]
 }
