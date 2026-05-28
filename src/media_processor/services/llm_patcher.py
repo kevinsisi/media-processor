@@ -108,7 +108,7 @@ class LLMPatcher:
         self,
         config: GeminiKeyPoolConfig,
         *,
-        opencode_config: "OpenCodeConfig | None" = None,
+        opencode_config: OpenCodeConfig | None = None,
         client: httpx.AsyncClient | None = None,
     ) -> None:
         if not config.api_keys and opencode_config is None:

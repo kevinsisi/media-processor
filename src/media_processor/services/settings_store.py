@@ -16,6 +16,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -23,6 +24,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from media_processor.api.config import settings
 from media_processor.models.app_setting import AppSetting
+
+if TYPE_CHECKING:
+    from media_processor.services.opencode_client import OpenCodeConfig
 
 LLM_API_KEYS_KEY = "llm_api_keys"
 
@@ -265,7 +269,7 @@ async def clear_opencode_settings(session: AsyncSession) -> None:
 
 async def build_opencode_config(
     session: AsyncSession,
-) -> "OpenCodeConfig | None":
+) -> OpenCodeConfig | None:
     """Resolve OpenCode settings and return a ready-to-use config, or None if not configured."""
     from media_processor.services.opencode_client import OpenCodeConfig
 

@@ -1470,7 +1470,7 @@ async def _score_one_asset(
     client: httpx.AsyncClient,
     prior_feedback: str = "",
     style: StylePresetParams = STYLE_PRESET_CUSTOM,
-    opencode_config: "OpenCodeConfig | None" = None,
+    opencode_config: OpenCodeConfig | None = None,
 ) -> _AssetScore:
     """Single-asset score call — OpenCode primary, Gemini fallback."""
     prompt = _build_asset_prompt(
@@ -1602,7 +1602,7 @@ async def plan(
     timeout_s: float,
     target_duration_ms: int = DEFAULT_TARGET_DURATION_MS,
     style_preset: str = "custom",
-    opencode_config: "OpenCodeConfig | None" = None,
+    opencode_config: OpenCodeConfig | None = None,
 ) -> CutPlan:
     """Build a CutPlan via per-asset parallel calls + local assembly.
 

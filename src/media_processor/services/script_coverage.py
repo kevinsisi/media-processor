@@ -181,7 +181,7 @@ async def compare(
     model: str,
     base_url: str,
     timeout_s: float,
-    opencode_config: "OpenCodeConfig | None" = None,
+    opencode_config: OpenCodeConfig | None = None,
 ) -> CoverageResult:
     """Run the semantic compare and return a fully validated CoverageResult."""
     if not script_body.strip():
