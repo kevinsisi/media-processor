@@ -42,7 +42,7 @@ def _parse_model_ref(model: str) -> tuple[str, str]:
     """Split "provider/id" → (providerID, id). Defaults to ("openai", model)."""
     slash = model.find("/")
     if 0 < slash < len(model) - 1:
-        return model[:slash], model[slash + 1:]
+        return model[:slash], model[slash + 1 :]
     return "openai", model
 
 

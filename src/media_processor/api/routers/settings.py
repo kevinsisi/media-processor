@@ -161,12 +161,15 @@ async def delete_opencode_settings(session: SessionDep) -> OpenCodeStatusOut:
 async def get_opencode_models(session: SessionDep) -> OpenCodeModelsOut:
     servers, _ = await get_opencode_servers(session)
     if not servers:
-        return OpenCodeModelsOut(models=[], source_server_id=None, warning="no OpenCode servers configured")
+        return OpenCodeModelsOut(
+            models=[], source_server_id=None, warning="no OpenCode servers configured"
+        )
 
     password = app_settings.opencode_server_password
     headers: dict[str, str] = {}
     if password:
         import base64
+
         token = base64.b64encode(f"opencode:{password}".encode()).decode()
         headers["Authorization"] = f"Basic {token}"
 
@@ -200,18 +203,24 @@ async def get_opencode_models(session: SessionDep) -> OpenCodeModelsOut:
                     m_id = str(m.get("id") or "")
                     m_name = str(m.get("name") or m_id)
                     if m_id:
-                        models.append(OpenCodeModelOut(
-                            id=f"{provider_id}/{m_id}" if provider_id else m_id,
-                            name=m_name,
-                            provider=provider_id,
-                        ))
+                        models.append(
+                            OpenCodeModelOut(
+                                id=f"{provider_id}/{m_id}" if provider_id else m_id,
+                                name=m_name,
+                                provider=provider_id,
+                            )
+                        )
             if models:
                 return OpenCodeModelsOut(
                     models=models,
                     source_server_id=server.id,
                     warning=None,
                 )
-    return OpenCodeModelsOut(models=[], source_server_id=None, warning=last_warning or "all servers returned empty model list")
+    return OpenCodeModelsOut(
+        models=[],
+        source_server_id=None,
+        warning=last_warning or "all servers returned empty model list",
+    )
 
 
 @router.get("", response_model=SettingsOut)
