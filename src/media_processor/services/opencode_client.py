@@ -88,7 +88,7 @@ async def call_opencode_text(
             return None
 
         # Step 2: send message
-        message_body: dict = {
+        message_body: dict[str, object] = {
             "agent": "user",
             "model": {"providerID": provider_id, "modelID": model_id},
             "parts": [{"type": "text", "text": prompt}],
