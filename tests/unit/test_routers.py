@@ -187,6 +187,23 @@ def test_get_project_detail_404(app: FastAPI) -> None:
     assert resp.status_code == 404
 
 
+def test_create_upload_session_accepts_large_video_size(app: FastAPI) -> None:
+    client = TestClient(app)
+    five_gib_video_size = 5_352_736_653
+    resp = client.post(
+        "/projects/1/uploads",
+        json={
+            "kind": "video",
+            "filename": "DJI_20260507180107_0178_D.MP4",
+            "total_size": five_gib_video_size,
+            "chunk_size": 4 * 1024 * 1024,
+        },
+    )
+
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["total_size"] == five_gib_video_size
+
+
 def test_get_project_drafts(app: FastAPI) -> None:
     client = TestClient(app)
     resp = client.get("/projects/1/drafts")

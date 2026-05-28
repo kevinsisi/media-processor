@@ -8,6 +8,7 @@ from typing import Any
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -46,7 +47,7 @@ class UploadSession(Base):
     )
     kind: Mapped[str] = mapped_column(String(16), nullable=False)
     filename: Mapped[str] = mapped_column(String(512), nullable=False)
-    total_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    total_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
     chunk_size: Mapped[int] = mapped_column(Integer, nullable=False)
     sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
     received_chunks: Mapped[Any] = mapped_column(JSON, nullable=False, default=list)

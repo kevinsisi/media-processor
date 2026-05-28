@@ -3,7 +3,7 @@
   "status": "no_findings",
   "evidence": "No findings",
   "notes": [
-    "Reviewed v0.43.3 nginx Docker DNS resolver fix after stale API upstream 502 incident.",
-    "Local gates: nginx -t, runtime nginx /api/health proxy smoke test, npm run build, ruff check src/media_processor/api/main.py, and OpenSpec strict validate passed."
+    "Reviewed v0.43.4 upload_sessions.total_size BIGINT fix after project 13 5GB+ DJI upload-session creation failed with int32 overflow.",
+    "Local gates: ruff check focused files, pytest tests/unit/test_routers.py -k large_video_size, pytest tests/unit/test_routers.py, npm run build, and OpenSpec strict validate passed."
   ]
 }

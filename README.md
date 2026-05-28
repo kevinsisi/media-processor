@@ -2,7 +2,7 @@
 
 Content factory pipeline for novice-friendly Instagram and Facebook short-video production.
 
-**Status:** v0.43.3 / M9.15.32 — resilient web proxy API DNS resolution.
+**Status:** v0.43.4 / M9.15.33 — upload sessions accept 5GB+ video sources.
 
 ## Spec
 

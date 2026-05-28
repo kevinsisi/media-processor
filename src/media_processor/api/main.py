@@ -76,7 +76,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(
     title="media-processor API",
-    version="0.43.3",
+    version="0.43.4",
     lifespan=lifespan,
 )
 
