@@ -530,6 +530,9 @@ def test_reorder_body_override_beats_legacy_null_snapshot(
         "auto_reframe": True,
         # v0.30.0 — smart camera defaults False on legacy rows.
         "smart_camera": False,
+        # v0.43.5 — legacy drafts settle onto the backward-compatible
+        # default edit mode the first time we backfill render flags.
+        "edit_mode": "standard",
     }
 
 
