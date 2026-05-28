@@ -122,6 +122,14 @@ class ClipStylePreset(StrEnum):
     CUSTOM = "custom"
 
 
+class EditMode(StrEnum):
+    """Draft-scoped creative direction selected when starting an edit."""
+
+    STANDARD = "standard"
+    LUXURY_AUTO = "luxury_auto"
+    VIRAL_SHORT = "viral_short"
+
+
 PROJECT_STATUS_VALUES: tuple[str, ...] = tuple(s.value for s in ProjectStatus)
 DRAFT_STATUS_VALUES: tuple[str, ...] = tuple(s.value for s in DraftStatus)
 REVIEW_ACTION_VALUES: tuple[str, ...] = tuple(a.value for a in ReviewAction)
@@ -133,3 +141,4 @@ ANALYSIS_STEP_VALUES: tuple[str, ...] = tuple(s.value for s in AnalysisStep)
 EDIT_STEP_VALUES: tuple[str, ...] = tuple(s.value for s in EditStep)
 CUT_SOURCE_KIND_VALUES: tuple[str, ...] = tuple(s.value for s in CutSourceKind)
 CLIP_STYLE_PRESET_VALUES: tuple[str, ...] = tuple(s.value for s in ClipStylePreset)
+EDIT_MODE_VALUES: tuple[str, ...] = tuple(s.value for s in EditMode)

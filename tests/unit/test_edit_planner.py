@@ -150,6 +150,50 @@ async def test_plan_happy_path(session: AsyncSession, monkeypatch: pytest.Monkey
     assert "per-asset fanout" in plan.notes
 
 
+@pytest.mark.asyncio
+async def test_plan_injects_edit_mode_prompt(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured_prompts: list[str] = []
+    asset_score_payload = {
+        "schema_version": ASSET_SCORE_SCHEMA_VERSION,
+        "score": 80,
+        "position": "opening",
+        "best_span_ms": [0, 4000],
+        "source_kind": "scripted",
+        "transition_to_next": "wipeleft",
+        "reason": "matches line 1",
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content.decode("utf-8"))
+        captured_prompts.append(body["contents"][0]["parts"][0]["text"])
+        return _build_response(asset_score_payload)
+
+    transport = _mock_transport(handler)
+    real_async_client = httpx.AsyncClient
+
+    def patched_async_client(*args: Any, **kwargs: Any) -> httpx.AsyncClient:
+        kwargs["transport"] = transport
+        return real_async_client(*args, **kwargs)
+
+    monkeypatch.setattr(edit_planner.httpx, "AsyncClient", patched_async_client)
+
+    await edit_planner.plan(
+        project_id=1,
+        session=session,
+        api_keys=("k1",),
+        model=_MODEL,
+        base_url=_BASE_URL,
+        timeout_s=5.0,
+        target_duration_ms=3_000,
+        edit_mode="viral_short",
+    )
+
+    assert captured_prompts
+    assert "【剪輯模式 = 短片特效型】" in captured_prompts[0]
+
+
 def test_emotion_shift_escalates_transition_to_circlecrop() -> None:
     """Adjacent cuts whose dominant emotion buckets differ should burn a circlecrop."""
     from media_processor.services.edit_planner import (

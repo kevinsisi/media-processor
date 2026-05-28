@@ -5,7 +5,7 @@ from __future__ import annotations
 import shutil
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy import delete, func, select
@@ -29,6 +29,7 @@ from media_processor.api.schemas import (
     CropRegionPatch,
     DetectedClassOut,
     DraftSummary,
+    EditModeLiteral,
     EditTriggerRequest,
     EditTriggerResponse,
     EmotionRangeOut,
@@ -69,6 +70,16 @@ from media_processor.services.object_tracking import aggregate_detected_classes
 from media_processor.services.queue import enqueue_asset_stabilization, enqueue_project_edit
 
 router = APIRouter(prefix="/projects", tags=["projects"])
+
+
+def _draft_edit_mode(draft: Draft) -> EditModeLiteral:
+    flags = draft.render_flags_json if isinstance(draft.render_flags_json, dict) else {}
+    raw = flags.get("edit_mode")
+    return (
+        cast(EditModeLiteral, raw)
+        if raw in {"standard", "luxury_auto", "viral_short"}
+        else "standard"
+    )
 
 
 def _watermark_url(project: Project) -> str | None:
@@ -120,6 +131,7 @@ def _draft_summary_with_urls(draft: Draft) -> DraftSummary:
         mp4_url=_url_for("mp4", draft.mp4_preview_path),
         subtitle_url=_url_for("srt", draft.subtitle_path),
         style_preset=getattr(draft, "style_preset", "custom") or "custom",
+        edit_mode=_draft_edit_mode(draft),
     )
 
 
@@ -416,6 +428,7 @@ async def trigger_project_edit(
             # v0.30.0 — snapshot the resolved smart-camera flag so a
             # later skip-plan re-render replays the same choice.
             "smart_camera": effective_smart_camera,
+            "edit_mode": payload.edit_mode,
         },
     )
     session.add(new_draft)
@@ -440,6 +453,7 @@ async def trigger_project_edit(
             initial_voice_volume=payload.initial_voice_volume,
             smart_camera=effective_smart_camera,
             style_preset=payload.style_preset,
+            edit_mode=payload.edit_mode,
         )
     except Exception as exc:  # noqa: BLE001 — keep durable state truthful.
         new_draft.status = DraftStatus.FAILED.value

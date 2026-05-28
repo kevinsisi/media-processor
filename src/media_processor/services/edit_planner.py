@@ -192,6 +192,43 @@ STYLE_PRESETS: dict[str, StylePresetParams] = {
 }
 
 
+@dataclass(frozen=True)
+class EditModeParams:
+    name: str
+    prompt_hint: str
+
+
+EDIT_MODE_STANDARD = EditModeParams(name="standard", prompt_hint="")
+EDIT_MODE_LUXURY_AUTO = EditModeParams(
+    name="luxury_auto",
+    prompt_hint=(
+        "【剪輯模式 = 高級車質感】把成片當精品車款 / 高信任品牌短片處理："
+        "優先選清楚、穩定、有質感的產品或駕乘細節；文案語氣克制、專業、少喊口號；"
+        "字幕與理由避免爆字、驚嘆號、浮誇促銷語，保留高級感與留白。"
+    ),
+)
+EDIT_MODE_VIRAL_SHORT = EditModeParams(
+    name="viral_short",
+    prompt_hint=(
+        "【剪輯模式 = 短片特效型】把成片當 Reels/TikTok punch short 處理："
+        "開頭優先選有鉤子、反差、問題或最強承諾的段落；中段保留能堆疊資訊與情緒的片段；"
+        "reason 可指出適合強調的關鍵字，但仍需避開低品質或離題素材。"
+    ),
+)
+
+EDIT_MODES: dict[str, EditModeParams] = {
+    "standard": EDIT_MODE_STANDARD,
+    "luxury_auto": EDIT_MODE_LUXURY_AUTO,
+    "viral_short": EDIT_MODE_VIRAL_SHORT,
+}
+
+
+def resolve_edit_mode(name: str | None) -> EditModeParams:
+    if not name:
+        return EDIT_MODE_STANDARD
+    return EDIT_MODES.get(name.strip().lower(), EDIT_MODE_STANDARD)
+
+
 def resolve_style_preset(name: str | None) -> StylePresetParams:
     """Map a preset string (or None) to its parameter bundle.
 
@@ -476,6 +513,7 @@ MAX_SEGMENT_DURATION_S = 6.0
 _ASSET_SCORE_PROMPT = (
     "你是影片剪輯助手，正在評估「一段」素材是否適合放進最終剪輯。\n"
     "你只需要看這段素材本身——其他素材會由其他助手獨立評估，最後由系統合併。\n\n"
+    "{edit_mode_block}"
     "{style_preset_block}"
     "{prior_feedback_block}"
     "整支片要傳達的腳本：\n{script_body}\n\n"
@@ -525,6 +563,12 @@ def _format_style_preset_block(style: StylePresetParams) -> str:
     return f"{style.prompt_hint}\n\n"
 
 
+def _format_edit_mode_block(mode: EditModeParams) -> str:
+    if not mode.prompt_hint:
+        return ""
+    return f"{mode.prompt_hint}\n\n"
+
+
 def _format_prior_feedback_block(prior_feedback: str) -> str:
     """Render the optional ``上一版回饋`` section of the per-asset prompt.
 
@@ -546,10 +590,12 @@ def _build_asset_prompt(
     *,
     prior_feedback: str = "",
     style: StylePresetParams = STYLE_PRESET_CUSTOM,
+    edit_mode: EditModeParams = EDIT_MODE_STANDARD,
 ) -> str:
     transition_choices = " / ".join(sorted(style.transition_allowlist))
     return _ASSET_SCORE_PROMPT.format(
         style_preset_block=_format_style_preset_block(style),
+        edit_mode_block=_format_edit_mode_block(edit_mode),
         prior_feedback_block=_format_prior_feedback_block(prior_feedback),
         script_body=script_body.strip() or "（無腳本）",
         asset_id=asset.id,
@@ -1470,6 +1516,7 @@ async def _score_one_asset(
     client: httpx.AsyncClient,
     prior_feedback: str = "",
     style: StylePresetParams = STYLE_PRESET_CUSTOM,
+    edit_mode: EditModeParams = EDIT_MODE_STANDARD,
     opencode_config: OpenCodeConfig | None = None,
 ) -> _AssetScore:
     """Single-asset score call — OpenCode primary, Gemini fallback."""
@@ -1480,6 +1527,7 @@ async def _score_one_asset(
         script_body,
         prior_feedback=prior_feedback,
         style=style,
+        edit_mode=edit_mode,
     )
 
     # OpenCode primary
@@ -1602,6 +1650,7 @@ async def plan(
     timeout_s: float,
     target_duration_ms: int = DEFAULT_TARGET_DURATION_MS,
     style_preset: str = "custom",
+    edit_mode: str = "standard",
     opencode_config: OpenCodeConfig | None = None,
 ) -> CutPlan:
     """Build a CutPlan via per-asset parallel calls + local assembly.
@@ -1615,6 +1664,7 @@ async def plan(
         raise EditPlanError("no API keys or OpenCode servers configured for edit planner")
 
     style = resolve_style_preset(style_preset)
+    mode = resolve_edit_mode(edit_mode)
     ctx = await _load_project_context(session, project_id)
     if not ctx.assets:
         raise EditPlanEmptyError("no assets to score")
@@ -1634,6 +1684,7 @@ async def plan(
                 client=client,
                 prior_feedback=ctx.prior_feedback,
                 style=style,
+                edit_mode=mode,
                 opencode_config=opencode_config,
             )
             for i, asset in enumerate(ctx.assets)
@@ -1906,6 +1957,7 @@ __all__ = [
     "ASSET_SCORE_SCHEMA_VERSION",
     "DEFAULT_TARGET_DURATION_MS",
     "SCHEMA_VERSION",
+    "EDIT_MODES",
     "STYLE_PRESETS",
     "CutPlan",
     "CutPlanSegment",
@@ -1913,10 +1965,12 @@ __all__ = [
     "EditPlanError",
     "EditPlanInvalidError",
     "EditPlanQuotaError",
+    "EditModeParams",
     "StylePresetParams",
     "deserialise_plan",
     "heuristic_fallback",
     "plan",
+    "resolve_edit_mode",
     "resolve_style_preset",
     "serialise_plan",
 ]

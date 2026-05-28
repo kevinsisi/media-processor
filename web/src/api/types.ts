@@ -268,6 +268,8 @@ export type ClipStylePreset =
   | "artistic"
   | "custom";
 
+export type EditMode = "standard" | "luxury_auto" | "viral_short";
+
 export interface DraftSummary {
   id: number;
   project_id: number;
@@ -285,6 +287,7 @@ export interface DraftSummary {
   // v0.18 — clip-style preset that biased the planner for this draft.
   // Old rows that pre-date the column come back as "custom".
   style_preset?: ClipStylePreset;
+  edit_mode?: EditMode;
 }
 
 export interface DraftSegmentOut {
@@ -355,6 +358,7 @@ export interface EditTriggerRequest {
   // free-form behaviour; the four named presets steer span / transition
   // / BGM hint together so the user gets a coherent rhythm.
   style_preset?: ClipStylePreset;
+  edit_mode?: EditMode;
 }
 
 export interface EditTriggerResponse {

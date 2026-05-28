@@ -132,6 +132,7 @@ def enqueue_project_edit(
     initial_voice_volume: float = 1.0,
     smart_camera: bool | None = None,
     style_preset: str = "custom",
+    edit_mode: str = "standard",
 ) -> str:
     """Schedule ``render_draft(project_id, draft_id=…, force=…, target_duration_ms=…)``.
 
@@ -183,6 +184,8 @@ def enqueue_project_edit(
     # so legacy job-record dumps stay readable.
     if style_preset and style_preset != "custom":
         job_kwargs["style_preset"] = style_preset
+    if edit_mode and edit_mode != "standard":
+        job_kwargs["edit_mode"] = edit_mode
     job = queue.enqueue(
         RENDER_DRAFT_FN,
         args=(project_id,),
@@ -192,7 +195,7 @@ def enqueue_project_edit(
         "enqueued render_draft(project_id=%d, draft_id=%d, force=%s, skip_plan=%s, "
         "subtitles_from_db=%s, stabilize=%s, subtitles=%s, transitions=%s, "
         "auto_reframe=%s, initial_voice_volume=%s, smart_camera=%s, "
-        "style_preset=%s, target_duration_ms=%s) "
+        "style_preset=%s, edit_mode=%s, target_duration_ms=%s) "
         "as job %s",
         project_id,
         draft_id,
@@ -206,6 +209,7 @@ def enqueue_project_edit(
         initial_voice_volume,
         smart_camera,
         style_preset,
+        edit_mode,
         target_duration_ms,
         job.id,
     )

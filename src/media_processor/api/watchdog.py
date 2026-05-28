@@ -93,6 +93,14 @@ _LEGACY_FLAG_DEFAULTS: dict[str, bool] = {
     "smart_camera": False,
 }
 
+_VALID_EDIT_MODES = {"standard", "luxury_auto", "viral_short"}
+
+
+def _resolve_edit_mode(draft: Draft) -> str:
+    snapshot = draft.render_flags_json if isinstance(draft.render_flags_json, dict) else {}
+    raw = snapshot.get("edit_mode")
+    return str(raw) if raw in _VALID_EDIT_MODES else "standard"
+
 
 def _resolve_render_flags(draft: Draft) -> dict[str, bool]:
     """Pick the four render flags for an orphan re-enqueue.
@@ -222,6 +230,7 @@ async def _handle_orphan(session: Any, draft: Draft) -> None:
             initial_voice_volume=initial_voice_volume,
             smart_camera=flags["smart_camera"],
             style_preset=str(draft.style_preset or "custom"),
+            edit_mode=_resolve_edit_mode(draft),
         )
     except Exception:  # noqa: BLE001 — Redis enqueue failed; revert.
         logger.exception(

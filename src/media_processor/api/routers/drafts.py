@@ -30,6 +30,7 @@ from media_processor.api.schemas import (
     DraftSegmentOut,
     DraftSegmentPatch,
     DraftSegmentSplitRequest,
+    EditModeLiteral,
     RenderFlagsOverride,
     SegmentVolumeOut,
     SegmentVolumePatch,
@@ -74,6 +75,13 @@ ProfileLoaderDep = Annotated[Callable[[str], ProfileSpec], Depends(get_profile_l
 # "/api/" → api:8000, so the full URL the browser sees is
 # "/api/media/drafts/{project_id}/v{N}.mp4".
 DRAFT_URL_PREFIX = "/api/media/drafts"
+_VALID_EDIT_MODES = {"standard", "luxury_auto", "viral_short"}
+
+
+def _draft_edit_mode(draft: Draft) -> EditModeLiteral:
+    flags = draft.render_flags_json if isinstance(draft.render_flags_json, dict) else {}
+    raw = flags.get("edit_mode")
+    return cast(EditModeLiteral, raw) if raw in _VALID_EDIT_MODES else "standard"
 
 
 def _draft_filename(version: int, suffix: str) -> str:
@@ -259,6 +267,7 @@ def serialise_draft_detail(draft: Draft) -> DraftDetail:
     Centralised here so both ``GET /drafts/{id}`` and the M5 trigger
     endpoint emit the same shape.
     """
+    edit_mode = _draft_edit_mode(draft)
     return DraftDetail(
         id=draft.id,
         project_id=draft.project_id,
@@ -275,6 +284,7 @@ def serialise_draft_detail(draft: Draft) -> DraftDetail:
         cut_plan=_cut_plan_out(draft.cut_plan_json),
         prompt_feedback=draft.prompt_feedback,
         style_preset=getattr(draft, "style_preset", "custom") or "custom",
+        edit_mode=edit_mode,
         segments=[
             DraftSegmentOut(
                 id=s.id,
@@ -682,7 +692,8 @@ async def reorder_draft_segments(
     # re-renders (skip-plan or otherwise) stay consistent without the
     # FE having to keep re-sending the override. This is what makes
     # legacy NULL rows "settle" into a known state on first re-render.
-    draft.render_flags_json = flags
+    edit_mode = _draft_edit_mode(draft)
+    draft.render_flags_json = {**flags, "edit_mode": edit_mode}
     await session.commit()
 
     try:
@@ -696,6 +707,7 @@ async def reorder_draft_segments(
             subtitles=flags["subtitles"],
             auto_reframe=flags["auto_reframe"],
             smart_camera=flags["smart_camera"],
+            edit_mode=edit_mode,
         )
     except Exception as exc:  # noqa: BLE001 — do not leave pending without RQ job.
         await _mark_draft_enqueue_failed(session, draft, exc)
@@ -1068,7 +1080,8 @@ async def re_render_draft(
     draft.render_retry_count = 0
     override = payload.render_flags if payload is not None else None
     flags = _draft_render_flags(draft, override)
-    draft.render_flags_json = flags
+    edit_mode = _draft_edit_mode(draft)
+    draft.render_flags_json = {**flags, "edit_mode": edit_mode}
     await session.commit()
 
     try:
@@ -1083,6 +1096,7 @@ async def re_render_draft(
             subtitles=flags["subtitles"],
             auto_reframe=flags["auto_reframe"],
             smart_camera=flags["smart_camera"],
+            edit_mode=edit_mode,
         )
     except Exception as exc:  # noqa: BLE001 — do not leave pending without RQ job.
         await _mark_draft_enqueue_failed(session, draft, exc)
@@ -1126,7 +1140,8 @@ async def rebuild_subtitles(
     draft.render_retry_count = 0
     override = payload.render_flags if payload is not None else None
     flags = _draft_render_flags(draft, override)
-    draft.render_flags_json = flags
+    edit_mode = _draft_edit_mode(draft)
+    draft.render_flags_json = {**flags, "edit_mode": edit_mode}
     await session.commit()
 
     try:
@@ -1141,6 +1156,7 @@ async def rebuild_subtitles(
             subtitles=flags["subtitles"],
             auto_reframe=flags["auto_reframe"],
             smart_camera=flags["smart_camera"],
+            edit_mode=edit_mode,
         )
     except Exception as exc:  # noqa: BLE001 — do not leave pending without RQ job.
         await _mark_draft_enqueue_failed(session, draft, exc)

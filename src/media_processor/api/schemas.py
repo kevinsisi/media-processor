@@ -48,6 +48,7 @@ SUBTITLE_COLOR_PATTERN = r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$"
 
 # v0.18 — clip-style preset that biases planner span / transition / BGM hint.
 ClipStylePresetLiteral = Literal["fast", "slow", "commercial", "artistic", "custom"]
+EditModeLiteral = Literal["standard", "luxury_auto", "viral_short"]
 DraftExportStatusLiteral = Literal["queued", "running", "done", "failed"]
 AssetVariantLiteral = Literal["raw", "stabilized"]
 
@@ -447,6 +448,7 @@ class DraftSummary(BaseModel):
     # ``custom`` keeps legacy behaviour for old rows that pre-date the
     # column.
     style_preset: ClipStylePresetLiteral = "custom"
+    edit_mode: EditModeLiteral = "standard"
 
 
 class DraftSegmentOut(BaseModel):
@@ -530,6 +532,10 @@ class EditTriggerRequest(BaseModel):
     # BGM hint. ``custom`` keeps the legacy free-form behaviour; the
     # four named presets steer the model toward a coherent rhythm.
     style_preset: ClipStylePresetLiteral = "custom"
+    # Draft-scoped creative direction selected at edit start. Unlike
+    # ``style_preset`` (pace / transition bundle), this controls the
+    # planner's content language: restrained premium cut vs punchy short.
+    edit_mode: EditModeLiteral = "standard"
 
 
 class EditTriggerResponse(BaseModel):

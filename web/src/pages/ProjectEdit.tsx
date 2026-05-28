@@ -22,6 +22,7 @@ import type {
   DraftComment,
   DraftDetail,
   DraftSummary,
+  EditMode,
   ProjectDetail,
   SubtitlePosition,
   SubtitleSize,
@@ -394,6 +395,78 @@ const STYLE_PRESET_CARDS: readonly StylePresetCard[] = [
   },
 ] as const;
 
+interface EditModeCard {
+  value: EditMode;
+  label: string;
+  eyebrow: string;
+  hint: string;
+}
+
+const EDIT_MODE_CARDS: readonly EditModeCard[] = [
+  {
+    value: "standard",
+    label: "一般剪輯",
+    eyebrow: "Balanced",
+    hint: "依素材與腳本平衡敘事、節奏與商業感。",
+  },
+  {
+    value: "luxury_auto",
+    label: "高級車質感",
+    eyebrow: "Premium Auto",
+    hint: "乾淨、克制、保留留白；適合品牌信任與高單價商品。",
+  },
+  {
+    value: "viral_short",
+    label: "短片特效型",
+    eyebrow: "Punch Short",
+    hint: "先抓鉤子與反差，字幕語氣更有節奏，方便後續疊關鍵字特效。",
+  },
+];
+
+interface EditModePickerProps {
+  value: EditMode;
+  onChange: (next: EditMode) => void;
+  disabled?: boolean;
+}
+
+function EditModePicker({ value, onChange, disabled }: EditModePickerProps) {
+  return (
+    <fieldset className="style-preset-picker edit-mode-picker" disabled={disabled}>
+      <legend className="style-preset-picker__legend">剪輯模式</legend>
+      <p className="style-preset-picker__hint mono">
+        這是每次產生版本的方向，不會永久綁住整個專案。
+      </p>
+      <div
+        className="style-preset-picker__grid edit-mode-picker__grid"
+        role="radiogroup"
+        aria-label="剪輯模式"
+      >
+        {EDIT_MODE_CARDS.map((card) => {
+          const selected = card.value === value;
+          return (
+            <button
+              key={card.value}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              className={
+                "style-preset-card edit-mode-card" +
+                (selected ? " style-preset-card--selected" : "")
+              }
+              disabled={disabled}
+              onClick={() => onChange(card.value)}
+            >
+              <span className="edit-mode-card__eyebrow mono">{card.eyebrow}</span>
+              <span className="style-preset-card__label">{card.label}</span>
+              <span className="style-preset-card__hint mono">{card.hint}</span>
+            </button>
+          );
+        })}
+      </div>
+    </fieldset>
+  );
+}
+
 interface StylePresetPickerProps {
   value: ClipStylePreset;
   onChange: (next: ClipStylePreset) => void;
@@ -630,9 +703,16 @@ const STYLE_PRESET_LABELS: Record<ClipStylePreset, string> = {
   custom: "自訂",
 };
 
+const EDIT_MODE_LABELS: Record<EditMode, string> = {
+  standard: "一般剪輯",
+  luxury_auto: "高級車質感",
+  viral_short: "短片特效型",
+};
+
 function formatBasicSummary(opts: {
   durationSec: number;
   stylePreset: ClipStylePreset;
+  editMode: EditMode;
   stabilize: boolean;
   subtitlesOn: boolean;
   transitionsOn: boolean;
@@ -644,7 +724,7 @@ function formatBasicSummary(opts: {
   if (opts.autoReframe) flags.push("自動構圖");
   if (opts.stabilize) flags.push("畫面更穩");
   const flagText = flags.length > 0 ? flags.join(" / ") : "直接銜接";
-  return `${opts.durationSec} 秒 · ${STYLE_PRESET_LABELS[opts.stylePreset]} · ${flagText}`;
+  return `${opts.durationSec} 秒 · ${EDIT_MODE_LABELS[opts.editMode]} · ${STYLE_PRESET_LABELS[opts.stylePreset]} · ${flagText}`;
 }
 
 function formatBgmSummary(opts: {
@@ -750,6 +830,8 @@ function SettingsGroup({ title, summary, children }: SettingsGroupProps) {
 interface EditSettingsBlockProps {
   durationSec: number;
   setDurationSec: (n: number) => void;
+  editMode: EditMode;
+  setEditMode: (v: EditMode) => void;
   stylePreset: ClipStylePreset;
   setStylePreset: (v: ClipStylePreset) => void;
   stabilize: boolean;
@@ -785,6 +867,7 @@ function EditSettingsBlock(props: EditSettingsBlockProps) {
   const bgmFilename = bgmFilenameFromPath(props.project?.bgm_path);
   const basicSummary = formatBasicSummary({
     durationSec: props.durationSec,
+    editMode: props.editMode,
     stylePreset: props.stylePreset,
     stabilize: props.stabilize,
     subtitlesOn: props.subtitlesOn,
@@ -811,6 +894,11 @@ function EditSettingsBlock(props: EditSettingsBlockProps) {
         <DurationPicker
           value={props.durationSec}
           onChange={props.setDurationSec}
+          disabled={props.triggering}
+        />
+        <EditModePicker
+          value={props.editMode}
+          onChange={props.setEditMode}
           disabled={props.triggering}
         />
         <StylePresetPicker
@@ -989,6 +1077,7 @@ export default function ProjectEdit() {
   // v0.18 — clip-style preset (fast / slow / commercial / artistic /
   // custom). ``custom`` is the legacy free-form default.
   const [stylePreset, setStylePreset] = useState<ClipStylePreset>("custom");
+  const [editMode, setEditMode] = useState<EditMode>("standard");
   // v0.30.11 — first-render default for source/original audio. Before
   // DraftSegment rows exist, the old per-segment sliders cannot mute the
   // footage; this value is applied when the planner creates segments.
@@ -1270,6 +1359,14 @@ export default function ProjectEdit() {
     [markSettingsChanged],
   );
 
+  const handleEditModeChange = useCallback(
+    (next: EditMode) => {
+      setEditMode(next);
+      markSettingsChanged("剪輯模式已更新");
+    },
+    [markSettingsChanged],
+  );
+
   const handleStabilizeChange = useCallback(
     (next: boolean) => {
       setStabilize(next);
@@ -1377,6 +1474,7 @@ export default function ProjectEdit() {
           initial_voice_volume: sourceAudioVolume,
           smart_camera: smartCamera,
           style_preset: stylePreset,
+          edit_mode: editMode,
         });
         // The API now creates the Draft row synchronously, so resp.draft_id
         // is always a real id. Switch the selected version to it immediately
@@ -1412,6 +1510,7 @@ export default function ProjectEdit() {
       sourceAudioVolume,
       smartCamera,
       stylePreset,
+      editMode,
       refreshDrafts,
     ],
   );
@@ -1709,6 +1808,8 @@ export default function ProjectEdit() {
           <EditSettingsBlock
             durationSec={durationSec}
             setDurationSec={handleDurationChange}
+            editMode={editMode}
+            setEditMode={handleEditModeChange}
             stylePreset={stylePreset}
             setStylePreset={handleStylePresetChange}
             stabilize={stabilize}
@@ -1926,6 +2027,8 @@ export default function ProjectEdit() {
                 <EditSettingsBlock
                   durationSec={durationSec}
                   setDurationSec={handleDurationChange}
+                  editMode={editMode}
+                  setEditMode={handleEditModeChange}
                   stylePreset={stylePreset}
                   setStylePreset={handleStylePresetChange}
                   stabilize={stabilize}

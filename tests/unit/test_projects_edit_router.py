@@ -22,8 +22,8 @@ from media_processor.api.main import app as production_app
 from media_processor.api.routers import projects as projects_router
 from media_processor.models import Asset, Base, Draft, Project
 
-# (project_id, draft_id, force, target_duration_ms, initial_voice_volume)
-EnqueueCall = tuple[int, int, bool, int | None, float]
+# (project_id, draft_id, force, target_duration_ms, initial_voice_volume, style_preset, edit_mode)
+EnqueueCall = tuple[int, int, bool, int | None, float, str, str]
 
 
 def _make_engine_and_session() -> tuple[Any, async_sessionmaker[AsyncSession]]:
@@ -91,12 +91,24 @@ def fake_enqueue(
         target_duration_ms: int | None = None,
         stabilize: bool = True,
         initial_voice_volume: float = 1.0,
+        style_preset: str = "custom",
+        edit_mode: str = "standard",
         **_extra: object,
     ) -> str:
         # ``stabilize`` was added in v0.14.3; tests that don't care about it
         # rely on the default. Extra kwargs are absorbed so future toggles
         # don't break unrelated assertions.
-        calls.append((project_id, draft_id, force, target_duration_ms, initial_voice_volume))
+        calls.append(
+            (
+                project_id,
+                draft_id,
+                force,
+                target_duration_ms,
+                initial_voice_volume,
+                style_preset,
+                edit_mode,
+            )
+        )
         return f"job-{project_id}"
 
     monkeypatch.setattr(projects_router, "enqueue_project_edit", _record)
@@ -141,7 +153,7 @@ def test_edit_trigger_enqueues_and_returns_job_id(
     # we returned before this fix), and the row should be in `pending`
     # with all four progress steps initialised.
     assert isinstance(body["draft_id"], int) and body["draft_id"] > 0
-    assert fake_enqueue == [(1, body["draft_id"], False, None, 1.0)]
+    assert fake_enqueue == [(1, body["draft_id"], False, None, 1.0, "custom", "standard")]
 
 
 def test_edit_trigger_passes_target_duration_seconds(
@@ -152,7 +164,7 @@ def test_edit_trigger_passes_target_duration_seconds(
     resp = client.post("/projects/1/edit", json={"target_duration_seconds": 90})
     assert resp.status_code == 202, resp.text
     body = resp.json()
-    assert fake_enqueue == [(1, body["draft_id"], False, 90_000, 1.0)]
+    assert fake_enqueue == [(1, body["draft_id"], False, 90_000, 1.0, "custom", "standard")]
 
 
 def test_edit_trigger_passes_initial_voice_volume(
@@ -163,7 +175,26 @@ def test_edit_trigger_passes_initial_voice_volume(
     resp = client.post("/projects/1/edit", json={"initial_voice_volume": 0})
     assert resp.status_code == 202, resp.text
     body = resp.json()
-    assert fake_enqueue == [(1, body["draft_id"], False, None, 0.0)]
+    assert fake_enqueue == [(1, body["draft_id"], False, None, 0.0, "custom", "standard")]
+
+
+def test_edit_trigger_persists_and_enqueues_edit_mode(
+    app: FastAPI, fake_enqueue: list[EnqueueCall]
+) -> None:
+    client = TestClient(app)
+    resp = client.post(
+        "/projects/1/edit",
+        json={"style_preset": "commercial", "edit_mode": "luxury_auto"},
+    )
+    assert resp.status_code == 202, resp.text
+    body = resp.json()
+    assert fake_enqueue == [(1, body["draft_id"], False, None, 1.0, "commercial", "luxury_auto")]
+
+    drafts_resp = client.get("/projects/1/drafts")
+    assert drafts_resp.status_code == 200
+    draft = drafts_resp.json()[0]
+    assert draft["style_preset"] == "commercial"
+    assert draft["edit_mode"] == "luxury_auto"
 
 
 def test_edit_trigger_rejects_out_of_range_duration(
@@ -313,7 +344,7 @@ def test_edit_trigger_409_when_draft_processing(
         assert resp_force.status_code == 202
         body = resp_force.json()
         assert body["draft_id"] > 1  # version 1 already exists from the seed
-        assert fake_enqueue == [(1, body["draft_id"], True, None, 1.0)]
+        assert fake_enqueue == [(1, body["draft_id"], True, None, 1.0, "custom", "standard")]
     finally:
         production_app.dependency_overrides.clear()
         asyncio.run(engine.dispose())

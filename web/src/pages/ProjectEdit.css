@@ -529,6 +529,24 @@
   line-height: 1.5;
 }
 
+.edit-mode-picker__grid {
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+}
+
+.edit-mode-card {
+  min-height: 132px;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.04), transparent),
+    rgba(255, 255, 255, 0.015);
+}
+
+.edit-mode-card__eyebrow {
+  font-size: 0.68rem;
+  letter-spacing: 0.18em;
+  color: var(--accent, #f6c177);
+  text-transform: uppercase;
+}
+
 /* ---- BGM uploader (v0.14.5 — explicit "上傳配樂" entry point) ---- */
 
 .bgm-uploader {

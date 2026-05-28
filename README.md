@@ -2,7 +2,7 @@
 
 Content factory pipeline for novice-friendly Instagram and Facebook short-video production.
 
-**Status:** v0.43.4 / M9.15.33 — upload sessions accept 5GB+ video sources.
+**Status:** v0.43.5 / M9.15.34 — edit-time mode selection for premium auto vs punch shorts.
 
 ## Spec
 

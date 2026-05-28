@@ -625,6 +625,7 @@ async def _plan_stage(
     target_duration_ms: int,
     *,
     style_preset: str = "custom",
+    edit_mode: str = "standard",
 ) -> CutPlan:
     """Run the planner (OpenCode-primary, Gemini fallback) with heuristic fallback."""
     async with async_session_maker() as session:
@@ -644,6 +645,7 @@ async def _plan_stage(
                     timeout_s=settings.llm_timeout_s,
                     target_duration_ms=target_duration_ms,
                     style_preset=style_preset,
+                    edit_mode=edit_mode,
                     opencode_config=opencode_config,
                 )
         except edit_planner.EditPlanEmptyError:
@@ -691,6 +693,7 @@ async def run_render(
     initial_voice_volume: float = 1.0,
     smart_camera_enabled: bool | None = None,
     style_preset: str = "custom",
+    edit_mode: str = "standard",
 ) -> dict[str, Any]:
     """Run the full M5 pipeline for ``project_id`` and return a summary.
 
@@ -769,6 +772,7 @@ async def run_render(
                 project_id,
                 target_duration_ms,
                 style_preset=style_preset,
+                edit_mode=edit_mode,
             )
             await _persist_plan(handle, plan, initial_voice_volume=initial_voice_volume)
     except Exception as exc:  # noqa: BLE001 — record + abort.
