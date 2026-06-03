@@ -753,14 +753,38 @@ async def _documentary_plan_stage(
         if not assets:
             raise story_script.StoryScriptInputError("no assets for documentary mode")
 
-        fa_assets = [a for a in assets if getattr(a, "frame_analysis_status", "") == "done"]
-
         project_obj = await session.get(Project, project_id)
         project_name = project_obj.name if project_obj else f"project-{project_id}"
         script_obj = (
             await session.execute(select(Script).where(Script.project_id == project_id).limit(1))
         ).scalar_one_or_none()
         project_brief = script_obj.body[:500] if script_obj else ""
+
+        api_keys = await get_llm_api_keys(session)
+        opencode_config = await build_opencode_config(session)
+        if api_keys or opencode_config is not None:
+            for asset in assets:
+                if getattr(asset, "frame_analysis_status", "") == "done":
+                    continue
+                try:
+                    asset.frame_analysis_status = "running"
+                    await session.commit()
+                    fa_result = await frame_analysis_service.analyse_asset(
+                        str(asset.file_path),
+                        api_keys=tuple(api_keys),
+                        opencode_config=opencode_config,
+                    )
+                    asset.frame_analysis_json = fa_result
+                    asset.frame_analysis_status = "done"
+                    asset.frame_analysis_error = None
+                    await session.commit()
+                except Exception as exc:  # noqa: BLE001 - one bad asset should not block all footage.
+                    logger.warning("inline frame analysis failed for asset %d: %s", asset.id, exc)
+                    asset.frame_analysis_status = "failed"
+                    asset.frame_analysis_error = str(exc)[:1000]
+                    await session.commit()
+
+        fa_assets = [a for a in assets if getattr(a, "frame_analysis_status", "") == "done"]
 
         if fa_assets:
             try:
@@ -782,35 +806,8 @@ async def _documentary_plan_stage(
                 "no frame_analysis_done asset for project %d; triggering analysis then falling back to story",
                 project_id,
             )
-            # Enqueue frame analysis for all assets and fall back to story for this render
-            api_keys = await get_llm_api_keys(session)
-            opencode_config = await build_opencode_config(session)
-            if (api_keys or opencode_config is not None) and assets:
-                first_asset = assets[0]
-                try:
-                    fa_result = await frame_analysis_service.analyse_asset(
-                        str(first_asset.file_path),
-                        api_keys=tuple(api_keys),
-                        opencode_config=opencode_config,
-                    )
-                    first_asset.frame_analysis_json = fa_result
-                    first_asset.frame_analysis_status = "done"
-                    first_asset.frame_analysis_error = None
-                    await session.commit()
-                    document = await narration_script_generator.generate_documentary_script(
-                        session,
-                        first_asset,
-                        project_name=project_name,
-                        project_brief=project_brief,
-                    )
-                    await story_script.save_story_script(session, document, draft_id=draft_id)
-                except Exception as exc:
-                    logger.warning("inline frame analysis failed: %s; falling back to story", exc)
-                    document = await story_script.generate_story_script(session, project_id)
-                    await story_script.save_story_script(session, document, draft_id=draft_id)
-            else:
-                document = await story_script.generate_story_script(session, project_id)
-                await story_script.save_story_script(session, document, draft_id=draft_id)
+            document = await story_script.generate_story_script(session, project_id)
+            await story_script.save_story_script(session, document, draft_id=draft_id)
 
         narration_rows: dict[int, StoryNarrationAsset] = {}
         if narration_enabled:

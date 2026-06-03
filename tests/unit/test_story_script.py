@@ -137,6 +137,24 @@ def test_story_document_to_srt_paginates_long_narration() -> None:
     assert all(len(line) <= 12 for line in text_lines)
 
 
+def test_story_document_to_srt_prefers_punctuation_pages() -> None:
+    payload = _valid_payload()
+    payload["items"] = [
+        {
+            **payload["items"][0],
+            "source_end_ms": 6_000,
+            "narration": "先看第一個反差。接著第二個畫面更誇張！最後收在疑問？",
+        }
+    ]
+    document = validate_story_script(payload, project_id=1, asset_durations={10: 10_000})
+
+    srt = story_document_to_srt(document)
+
+    assert "先看第一個反差。" in srt
+    assert "接著第二個畫面更誇張！" in srt
+    assert "最後收在疑問？" in srt
+
+
 def test_gather_story_inputs_uses_transcripts_without_gpu_analysis() -> None:
     async def run() -> None:
         engine = create_async_engine(

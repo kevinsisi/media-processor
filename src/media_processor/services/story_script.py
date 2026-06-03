@@ -675,7 +675,7 @@ def story_document_to_srt(
         duration = max(700, item.duration_ms, (narration_durations_ms or {}).get(item.order, 0))
         text = item.narration.strip()
         if text:
-            pages = [text[i : i + max_chars] for i in range(0, len(text), max_chars)] or [text]
+            pages = _split_narration_subtitle_pages(text, max_chars=max_chars)
             for index, page in enumerate(pages):
                 start_ms = cursor + int(duration * index / len(pages))
                 end_ms = cursor + int(duration * (index + 1) / len(pages))
@@ -690,3 +690,18 @@ def story_document_to_srt(
                 )
         cursor += duration
     return render_srt(cues)
+
+
+def _split_narration_subtitle_pages(text: str, *, max_chars: int) -> list[str]:
+    """Split narration like NarratoAI: punctuation first, width fallback second."""
+    parts = [part.strip() for part in re.split(r"(?<=[。！？!?，,、；;：:])", text) if part.strip()]
+    if not parts:
+        parts = [text]
+
+    pages: list[str] = []
+    for part in parts:
+        if len(part) > max_chars:
+            pages.extend(part[i : i + max_chars] for i in range(0, len(part), max_chars))
+        else:
+            pages.append(part)
+    return pages or [text[:max_chars]]
