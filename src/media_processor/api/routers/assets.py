@@ -56,6 +56,7 @@ from media_processor.services.queue import (
     enqueue_asset_analysis,
     enqueue_asset_stabilization,
     enqueue_asset_translate,
+    enqueue_frame_analysis,
     enqueue_point_tracking,
 )
 
@@ -947,3 +948,67 @@ async def trigger_asset_subtitle_translation(
         job_id=job_id,
         lang=payload.lang,
     )
+
+
+# ----- NarratoAI frame analysis -----
+
+
+@router.post(
+    "/{asset_id}/frame-analysis",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def trigger_frame_analysis(
+    asset_id: int,
+    session: SessionDep,
+    interval_s: float = 3.0,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Enqueue NarratoAI documentary frame analysis for an asset.
+
+    Extracts keyframes at *interval_s* seconds and runs Gemini Vision in
+    batches to produce per-frame observations. Results are cached on disk
+    and persisted to ``Asset.frame_analysis_json``.
+    """
+    asset = await session.get(Asset, asset_id)
+    if asset is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="asset not found")
+    fa_status = getattr(asset, "frame_analysis_status", "not_started")
+    if fa_status in ("pending", "running") and not force:
+        return {
+            "asset_id": asset_id,
+            "status": fa_status,
+            "message": "frame analysis already in progress; pass force=true to re-enqueue",
+        }
+    try:
+        job_id = enqueue_frame_analysis(asset_id, interval_s=interval_s, force=force)
+        asset.frame_analysis_status = "pending"
+        asset.frame_analysis_error = None
+        await session.commit()
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"frame analysis enqueue failed: {exc}",
+        ) from exc
+    return {"asset_id": asset_id, "job_id": job_id, "status": "pending"}
+
+
+@router.get(
+    "/{asset_id}/frame-analysis",
+)
+async def get_frame_analysis(
+    asset_id: int,
+    session: SessionDep,
+) -> dict[str, Any]:
+    """Return frame analysis status and summary for an asset."""
+    asset = await session.get(Asset, asset_id)
+    if asset is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="asset not found")
+    fa = asset.frame_analysis_json
+    return {
+        "asset_id": asset_id,
+        "status": getattr(asset, "frame_analysis_status", "not_started"),
+        "error": getattr(asset, "frame_analysis_error", None),
+        "frame_count": fa.get("frame_count", 0) if isinstance(fa, dict) else 0,
+        "batch_count": fa.get("batch_count", 0) if isinstance(fa, dict) else 0,
+        "interval_seconds": fa.get("interval_seconds") if isinstance(fa, dict) else None,
+    }

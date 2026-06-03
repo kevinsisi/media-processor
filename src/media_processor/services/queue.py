@@ -117,6 +117,32 @@ def enqueue_asset_translate(asset_id: int, *, lang: str = "en") -> str:
     return job.id
 
 
+FRAME_ANALYSIS_FN = "media_processor.workers.frame_analysis_jobs.analyse_asset_frames"
+FRAME_ANALYSIS_JOB_TIMEOUT_SECONDS = 60 * 60  # 1 h — Vision LLM fan-out for long videos
+
+
+def enqueue_frame_analysis(asset_id: int, *, interval_s: float = 3.0, force: bool = False) -> str:
+    """Schedule NarratoAI documentary frame analysis for one asset (analysis queue)."""
+    queue = Queue(
+        ANALYSIS_QUEUE,
+        connection=_redis(),
+        default_timeout=FRAME_ANALYSIS_JOB_TIMEOUT_SECONDS,
+    )
+    job = queue.enqueue(
+        FRAME_ANALYSIS_FN,
+        args=(asset_id,),
+        kwargs={"interval_s": interval_s, "force": force},
+    )
+    logger.info(
+        "enqueued frame_analysis(asset_id=%d, interval_s=%.1f, force=%s) as job %s",
+        asset_id,
+        interval_s,
+        force,
+        job.id,
+    )
+    return job.id
+
+
 def enqueue_project_edit(
     project_id: int,
     *,

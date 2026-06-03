@@ -61,6 +61,9 @@ class Settings(BaseSettings):
     story_tts_timeout_s: float = Field(default=45.0)
     story_narration_dir: str = Field(default="/app/media/story_narration")
 
+    # Frame analysis — keyframe cache for documentary/narration Vision LLM pipeline.
+    frame_cache_dir: str = Field(default="/app/media/frame_cache")
+
     # M4 — Whisper local STT in the worker container.
     # WHISPER_FAKE=1 swaps the engine for a deterministic canned zh-Hant
     # transcript so CI / non-GPU dev boxes can drive the rest of the pipeline.

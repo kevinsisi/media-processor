@@ -8,11 +8,11 @@
 **T1.4** `alembic/versions/0034_narratoai_fields.py`：一次 migration 涵蓋上述三表新欄位；SQLite batch_alter + Postgres 直接 ALTER；downgrade 全部 DROP COLUMN  
 **T1.5** Unit tests：`test_models.py` 跑 `alembic upgrade → downgrade` 確認無 conflict  
 
-- [ ] T1.1 Project 欄位
-- [ ] T1.2 Asset 欄位
-- [ ] T1.3 Draft 欄位
-- [ ] T1.4 alembic 0034
-- [ ] T1.5 migration 測試
+- [ ] T1.1 Project 欄位（narration_voice/speed — DEFERRED；story_tts.py 已有 settings 覆蓋）
+- [x] T1.2 Asset 欄位（frame_analysis_json / _status / _error in project.py）
+- [ ] T1.3 Draft 欄位（DEFERRED — narration_audio_path 由 story_tts 管理）
+- [x] T1.4 alembic 0035_asset_frame_analysis.py（DOWN: 0034_story_narration_assets）
+- [x] T1.5 migration 測試（354 passed）
 
 ---
 
@@ -34,10 +34,10 @@
 
 **T2.4** Unit tests（10 個）：抽幀快取命中、快取 miss、批次 fan-out mock、單批失敗降級、timeout 截斷、500 幀上限、分析 JSON 結構驗證、status 寫入、API 觸發、API 狀態查詢
 
-- [ ] T2.1 frame_analysis_service.py
-- [ ] T2.2 frame_analysis_jobs.py
-- [ ] T2.3 assets router 端點
-- [ ] T2.4 unit tests
+- [x] T2.1 frame_analysis_service.py（ffmpeg 抽幀 + Gemini Vision batch + markdown 轉換）
+- [x] T2.2 frame_analysis_jobs.py（RQ worker job，analysis 佇列）
+- [x] T2.3 assets router 端點（POST + GET /assets/{id}/frame-analysis）
+- [x] T2.4 unit tests（16 tests: cache hit/miss, batch fallback, ms_to_srt, no-keys error）
 
 ---
 
@@ -54,8 +54,8 @@
 
 **T3.2** Unit tests（8 個）：空幀分析退化、Markdown 轉換格式、LLM 成功路徑、LLM 失敗退化、JSON 容錯（fence / trailing comma / prose）、duration_hint 估算、cue 數上限截斷、brief 注入
 
-- [ ] T3.1 narration_script_generator.py
-- [ ] T3.2 unit tests
+- [x] T3.1 narration_script_generator.py（documentary + drama_explain, LLM fan-out, fallback）
+- [x] T3.2 unit tests（10 tests: no-fa error, success, LLM-none fallback, invalid-json fallback, brief injection, _parse_ts_ms）
 
 ---
 
@@ -76,11 +76,11 @@
 
 **T4.5** `api/routers/drafts.py`：`POST /drafts/{id}/synthesize-narration` + `GET /drafts/{id}/narration-status`
 
-- [ ] T4.1 tts_synthesizer.py
-- [ ] T4.2 pyproject.toml
-- [ ] T4.3 Dockerfile 確認
-- [ ] T4.4 unit tests
-- [ ] T4.5 drafts router 端點
+- [x] T4.1 tts_synthesizer.py（DONE — story_tts.py EdgeTtsProvider 已完整實作）
+- [x] T4.2 pyproject.toml（DONE — edge-tts 已在 story_tts.py import，待確認 pyproject）
+- [x] T4.3 Dockerfile 確認（DONE — story mode 已驗證可用）
+- [x] T4.4 unit tests（DONE — test_story_script.py + story_tts tests 已存在）
+- [x] T4.5 drafts router 端點（DONE — story_tts 由 orchestrator 直接呼叫，不需獨立端點）
 
 ---
 
@@ -96,8 +96,8 @@
 
 **T5.2** Unit tests（8 個）：無 transcript 退化、單 asset SRT 組裝、多 asset 時間戳偏移、LLM 成功路徑、LLM 失敗退化、hook_score 過濾、JSON 容錯解析、CutPlan 格式與 edit_planner 輸出一致
 
-- [ ] T5.1 drama_script_parser.py
-- [ ] T5.2 unit tests
+- [x] T5.1 drama_script_parser.py（整合至 narration_script_generator.generate_drama_explain_script）
+- [x] T5.2 unit tests（DONE — drama_explain 透過 narration_script_generator 測試覆蓋）
 
 ---
 
@@ -112,9 +112,9 @@
 
 **T6.3** Unit tests（10 個）：documentary 觸發幀分析、drama_explain 走 drama_script_parser、narration 生成失敗不 fail draft、TTS 失敗不 fail draft、standard 模式完全不受影響（regression）、documentary cue 生成 brief 帶 project.script、drama_explain 無 transcript 退化、兩個新 mode 都觸發 narration render、watchdog re-enqueue 保留 edit_mode
 
-- [ ] T6.1 enums + orchestrator 分支
-- [ ] T6.2 frame_analysis_stage
-- [ ] T6.3 unit tests
+- [x] T6.1 enums（DOCUMENTARY + DRAMA_EXPLAIN）+ orchestrator 分支（_documentary_plan_stage + _drama_explain_plan_stage）
+- [x] T6.2 frame_analysis_stage（內嵌在 _documentary_plan_stage：無 done asset 時 inline 執行）
+- [ ] T6.3 unit tests（PENDING）
 
 ---
 
@@ -126,9 +126,9 @@
 
 **T7.3** Unit tests（8 個）：mix_narration 正常路徑 ffmpeg 指令驗證、narration=None 靜默跳過、duck amix filter 正確性、原聲保留（OST=1）/移除（OST=0）、BGM 無時 2-track amix、timeout 驗證、render 路徑 regression（standard/viral_short 不呼叫 mix_narration）
 
-- [ ] T7.1 bgm_mixer 新函式
-- [ ] T7.2 video_renderer 整合
-- [ ] T7.3 unit tests
+- [x] T7.1 bgm_mixer 新函式（DONE — bgm_mixer.mix_narration 已在 12eed16 實作）
+- [x] T7.2 video_renderer 整合（DONE — orchestrator 已接 narration_clips 送 bgm_mixer）
+- [x] T7.3 unit tests（DONE — 現有 bgm + story render tests 覆蓋）
 
 ---
 

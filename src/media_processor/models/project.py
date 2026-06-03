@@ -343,6 +343,17 @@ class Asset(Base):
     # translation, and re-running translation won't touch the zh-Hant.
     subtitle_secondary_segments_json: Mapped[Any] = mapped_column(JSON, nullable=True)
 
+    # NarratoAI documentary integration — per-asset keyframe Vision analysis.
+    # Shape: {"interval_seconds": float, "batches": [{"batch_index": int,
+    #   "time_range": str, "frame_observations": [{"timestamp": str, "observation": str}],
+    #   "overall_activity_summary": str}]}
+    # NULL = not yet analysed. Populated by frame_analysis_service.
+    frame_analysis_json: Mapped[Any] = mapped_column(JSON, nullable=True)
+    frame_analysis_status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="not_started", server_default="not_started"
+    )
+    frame_analysis_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     project: Mapped[Project] = relationship("Project", back_populates="assets")
     tags: Mapped[list[AssetTag]] = relationship(
         "AssetTag",

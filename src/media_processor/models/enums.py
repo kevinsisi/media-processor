@@ -129,6 +129,8 @@ class EditMode(StrEnum):
     LUXURY_AUTO = "luxury_auto"
     VIRAL_SHORT = "viral_short"
     STORY = "story"
+    DOCUMENTARY = "documentary"   # NarratoAI: frame analysis → narration → TTS
+    DRAMA_EXPLAIN = "drama_explain"  # NarratoAI: transcript → drama explanation → TTS
 
 
 PROJECT_STATUS_VALUES: tuple[str, ...] = tuple(s.value for s in ProjectStatus)
