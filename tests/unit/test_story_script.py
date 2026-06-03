@@ -10,7 +10,16 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-from media_processor.models import Asset, AssetTranscript, Base, Draft, DraftSegment, Project, Script, StoryScript
+from media_processor.models import (
+    Asset,
+    AssetTranscript,
+    Base,
+    Draft,
+    DraftSegment,
+    Project,
+    Script,
+    StoryScript,
+)
 from media_processor.services import edit_orchestrator
 from media_processor.services.story_script import (
     StoryScriptValidationError,
