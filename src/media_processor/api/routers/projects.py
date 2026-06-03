@@ -75,7 +75,10 @@ from media_processor.services import (
     story_script as story_scripts,
 )
 from media_processor.services.object_tracking import aggregate_detected_classes
-from media_processor.services.queue import enqueue_asset_stabilization, enqueue_project_edit
+from media_processor.services.queue import (
+    enqueue_asset_stabilization,
+    enqueue_project_edit,
+)
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
