@@ -46,6 +46,14 @@ def _parse_model_ref(model: str) -> tuple[str, str]:
     return "openai", model
 
 
+def _text_part(prompt: str, system_prompt: str | None) -> dict[str, object]:
+    if system_prompt and system_prompt.strip():
+        text = f"[system]\n{system_prompt.strip()}\n\n{prompt}"
+    else:
+        text = prompt
+    return {"type": "text", "text": text}
+
+
 async def call_opencode_text(
     *,
     prompt: str,
@@ -68,7 +76,7 @@ async def call_opencode_text(
                 f"{base}/session",
                 json={
                     "title": "media-processor",
-                    "agent": "user",
+                    "agent": "general",
                     "model": {"providerID": provider_id, "id": model_id, "variant": variant},
                 },
                 headers=headers,
@@ -89,12 +97,11 @@ async def call_opencode_text(
 
         # Step 2: send message
         message_body: dict[str, object] = {
-            "agent": "user",
+            "agent": "general",
             "model": {"providerID": provider_id, "modelID": model_id},
-            "parts": [{"type": "text", "text": prompt}],
+            "variant": variant,
+            "parts": [_text_part(prompt, system_prompt)],
         }
-        if system_prompt:
-            message_body["system"] = system_prompt
 
         try:
             resp = await client.post(
@@ -155,7 +162,7 @@ async def call_opencode_vision(
                 f"{base}/session",
                 json={
                     "title": "media-processor-vision",
-                    "agent": "user",
+                    "agent": "general",
                     "model": {"providerID": provider_id, "id": model_id, "variant": variant},
                 },
                 headers=headers,
@@ -173,7 +180,7 @@ async def call_opencode_vision(
             logger.warning("opencode vision /session response parse failed (%s): %s", base, exc)
             return None
 
-        parts: list[dict[str, object]] = [{"type": "text", "text": prompt}]
+        parts: list[dict[str, object]] = [_text_part(prompt, system_prompt)]
         parts.extend(
             {
                 "type": "file",
@@ -184,12 +191,11 @@ async def call_opencode_vision(
             for mime_type, data in images
         )
         body: dict[str, object] = {
-            "agent": "user",
+            "agent": "general",
             "model": {"providerID": provider_id, "modelID": model_id},
+            "variant": variant,
             "parts": parts,
         }
-        if system_prompt:
-            body["system"] = system_prompt
 
         try:
             resp = await client.post(
