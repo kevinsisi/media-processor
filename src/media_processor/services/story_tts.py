@@ -59,7 +59,7 @@ class EdgeTtsProvider:
         self, *, text: str, voice: str, output_path: Path, timeout_s: float
     ) -> None:
         try:
-            import edge_tts  # type: ignore[import-not-found]
+            import edge_tts
         except Exception as exc:  # pragma: no cover - depends on optional runtime package.
             raise StoryTtsError("Edge TTS provider is not installed") from exc
 
