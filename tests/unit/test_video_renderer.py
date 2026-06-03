@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -47,6 +48,34 @@ def test_aspect_filter_rejects_unknown_ratio() -> None:
 def test_video_preset_uses_nvenc_compatible_value() -> None:
     assert video_renderer._video_preset("libx264") == "veryfast"
     assert video_renderer._video_preset("h264_nvenc") == "p4"
+
+
+def test_best_video_codec_skips_nvenc_when_cuda_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[list[str]] = []
+
+    def fake_run(cmd: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        calls.append(cmd)
+        if "-encoders" in cmd:
+            return subprocess.CompletedProcess(
+                cmd,
+                0,
+                stdout=" V..... h264_nvenc\n V..... libx264\n",
+                stderr="",
+            )
+        return subprocess.CompletedProcess(
+            cmd,
+            1,
+            stdout="",
+            stderr="Cannot load libcuda.so.1",
+        )
+
+    monkeypatch.setattr(video_renderer, "_detected_hw_codec", None)
+    monkeypatch.setattr(video_renderer.subprocess, "run", fake_run)
+
+    assert video_renderer._best_video_codec() == "libx264"
+    assert any("h264_nvenc" in call for call in calls)
 
 
 def test_aspect_filter_centre_crop_omits_xy() -> None:

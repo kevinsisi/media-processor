@@ -64,8 +64,52 @@ _HW_CODEC_CANDIDATES: tuple[str, ...] = (
 _detected_hw_codec: str | None = None  # cached after first probe
 
 
+def _encoder_preset(codec: str) -> str:
+    if codec == "h264_nvenc":
+        return "p4"
+    return VIDEO_PRESET
+
+
+def _encoder_smoke_test(codec: str) -> bool:
+    """Return true only when ffmpeg can initialize the selected encoder."""
+    if codec == "libx264":
+        return True
+    result = subprocess.run(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=black:s=16x16:d=0.1",
+            "-frames:v",
+            "1",
+            "-an",
+            "-c:v",
+            codec,
+            "-pix_fmt",
+            VIDEO_PIX_FMT,
+            "-preset",
+            _encoder_preset(codec),
+            "-f",
+            "null",
+            "-",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=8,
+    )
+    if result.returncode == 0:
+        return True
+    stderr = (result.stderr or result.stdout or "").strip()
+    logger.info("video_renderer: encoder %s unavailable: %s", codec, stderr)
+    return False
+
+
 def _best_video_codec() -> str:
-    """Probe ffmpeg for the fastest available H.264 encoder (cached per process)."""
+    """Probe ffmpeg for the fastest usable H.264 encoder (cached per process)."""
     global _detected_hw_codec
     if _detected_hw_codec is not None:
         return _detected_hw_codec
@@ -78,7 +122,7 @@ def _best_video_codec() -> str:
         )
         available = result.stdout + result.stderr
         for codec in _HW_CODEC_CANDIDATES:
-            if codec in available:
+            if codec in available and _encoder_smoke_test(codec):
                 _detected_hw_codec = codec
                 logger.info("video_renderer: selected encoder %s", codec)
                 return codec
@@ -90,9 +134,7 @@ def _best_video_codec() -> str:
 
 def _video_preset(codec: str) -> str:
     """Return a preset value accepted by the selected H.264 encoder."""
-    if codec == "h264_nvenc":
-        return "p4"
-    return VIDEO_PRESET
+    return _encoder_preset(codec)
 
 
 # Subtitle burn-in style — white text + 2 px black edge + bottom-centre.
