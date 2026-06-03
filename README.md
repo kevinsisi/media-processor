@@ -2,7 +2,7 @@
 
 Content factory pipeline for novice-friendly Instagram and Facebook short-video production.
 
-**Status:** v0.43.5 / M9.15.34 — edit-time mode selection for premium auto vs punch shorts.
+**Status:** v0.43.5 / M9.15.34–M9.15.36 — edit-time mode selection, Narrato Story mode, and optional Story TTS narration.
 
 ## Spec
 
@@ -131,6 +131,31 @@ The React/Vite app is API-backed. Main routes:
 | `/health` | Developer-facing status dashboard |
 
 `/projects/:id/review` is a legacy route and redirects to `/projects/:id/edit`.
+
+## Story / Narrato Mode
+
+- The analysis and edit pages can render drafts with `Narrato 故事模式` in addition
+  to `一般剪輯`, `高級車質感`, and `短片特效型`.
+- Story mode stores a validated StoryScript with source ranges, narration text,
+  picture guidance, and per-item audio intent (`narration`, `original`, or
+  `narration_with_original`).
+- Story mode works without generated audio: when TTS is disabled or no provider is
+  configured, the renderer keeps the subtitle-only Story/Narrato path.
+- Generated TTS narration is opt-in from the Story/Narrato controls. When enabled,
+  narration artifacts are stored under the existing media storage and matched by
+  text hash, provider, model, voice, and StoryScript item identity.
+- Measured narration duration drives the Story timeline. If spoken narration is
+  longer than the selected source span, the renderer extends the visual segment
+  with a cloned final frame instead of hard-cutting audio or adding black tail.
+
+Operational notes:
+
+- `story_tts_provider` unset or disabled is the safe rollback path; Story mode
+  remains available with burned-in narration subtitles only.
+- The first TTS phase does not include multi-speaker casting or word-level karaoke
+  timing. Subtitle cue timing is segment-level and based on measured narration
+  durations when audio exists.
+- Non-story modes do not generate StoryScript narration audio.
 
 ## v0.30.0 AI Smart Camera Notes
 

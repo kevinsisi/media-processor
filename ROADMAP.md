@@ -2,7 +2,7 @@
 
 > **單一定位**：沒有剪輯背景的小白也能「拍完就上傳，AI 直接給大量 IG / FB 短影音」的工具。
 > 目標 UX：手機優先、繁體中文、高級感、最少手動編輯。
-> 目前版本：**0.43.5**（M9.15.34 — edit-time mode selection for premium auto vs punch shorts）
+> 目前版本：**0.43.5**（M9.15.34–M9.15.36 — edit-time modes + Narrato Story mode + optional Story TTS narration）
 > 下一個 milestone：M10.2 — 多專案批次 + 社群直接發布 + AI 自動縮圖。
 
 > **2026-05-13 camera-motion note**：`0.30.23` 到 `0.30.38` 的 camera-motion 修補已被否決；`0.30.39`/`0.30.40` 只保留 Smart Camera `none` 不套殘留 tracking / vidstab 的 no-extra-correction 修正。`0.40.0` 改走素材級 raw / stabilized 版本工作流，未來運鏡 / 焦點追蹤 / 數位防手震變更必須先遵守 `skills/video-camera-movement/SKILL.md`。
@@ -73,6 +73,8 @@
 | **M9.15.32** | **Web proxy API DNS resilience：nginx 透過 Docker DNS 動態重新解析 API upstream，避免 API container 重建後 web proxy 持續指向舊 IP 造成 502** | ✅ done | **0.43.3** |
 | **M9.15.33** | **Large upload session sizes：upload session `total_size` 改用 BIGINT，避免 5GB+ DJI 影片建立 session 時因 int32 overflow 回 500** | ✅ done | **0.43.4** |
 | **M9.15.34** | **Edit-time mode selection：開始剪輯時可選一般剪輯 / 高級車質感 / 短片特效型，draft-scoped 保存並影響 planner prompt** | ✅ done | **0.43.5** |
+| **M9.15.35** | **Narrato Story mode：分析頁可產生 StoryScript，剪輯頁可選 Narrato 故事模式，沿用既有 draft / renderer / review / export 工作流** | ✅ done | **0.43.5** |
+| **M9.15.36** | **Story TTS narration：StoryScript 可選產生旁白音訊，依實測音訊長度延展畫面，TTS 不可用時保留字幕-only fallback** | ✅ done | **0.43.5** |
 | **M9.15.39** | **Smart Camera `none` 明確代表靜態構圖：不再讓殘留 point/custom tracking 覆蓋 AI no-move 決策** | ✅ done | **0.30.39** |
 | **M9.15.40** | **Smart Camera `none` 明確代表不做額外修正：跳過 vidstab，避免低紋理/高反光 no-move cut 被補償成左右飄** | ✅ done | **0.30.40** |
 | **M9.16** | **素材級防抖版本工作流：每個素材保留 raw、可產生 stabilized derivative，素材卡可預覽/切換版本，分析 / 追蹤 / render 走同一 active variant** | ✅ done | **0.40.0** |

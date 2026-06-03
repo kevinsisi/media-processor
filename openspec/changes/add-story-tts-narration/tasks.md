@@ -43,6 +43,6 @@
 
 ## 6. Operational Documentation
 
-- [ ] 6.1 Document required TTS provider configuration and disabled-provider fallback behavior
-- [ ] 6.2 Document rollback path: disable narration generation while preserving subtitle-only Story mode
-- [ ] 6.3 Document known first-phase limitations such as no multi-speaker casting and no word-level karaoke timing
+- [x] 6.1 Document required TTS provider configuration and disabled-provider fallback behavior
+- [x] 6.2 Document rollback path: disable narration generation while preserving subtitle-only Story mode
+- [x] 6.3 Document known first-phase limitations such as no multi-speaker casting and no word-level karaoke timing
