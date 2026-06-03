@@ -180,7 +180,7 @@ async def _find_artifact(
     digest: str,
     config: NarrationSettings,
 ) -> StoryNarrationAsset | None:
-    row = (
+    return (
         await session.execute(
             select(StoryNarrationAsset)
             .where(StoryNarrationAsset.project_id == project_id)
@@ -193,7 +193,6 @@ async def _find_artifact(
             .limit(1)
         )
     ).scalar_one_or_none()
-    return row
 
 
 def _artifact_is_reusable(row: StoryNarrationAsset) -> bool:

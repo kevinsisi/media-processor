@@ -43,8 +43,8 @@ from media_processor.models.profile import Profile
 from media_processor.models.project import Asset, AssetSegment, AssetTag, Project
 from media_processor.models.review import Review
 from media_processor.models.script import Script
-from media_processor.models.story_script import StoryScript
 from media_processor.models.story_narration import StoryNarrationAsset
+from media_processor.models.story_script import StoryScript
 from media_processor.models.subtitle_cue import SubtitleCueRow
 from media_processor.models.transcript import AssetTranscript
 from media_processor.models.upload_session import UploadSession
