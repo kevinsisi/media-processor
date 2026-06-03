@@ -63,7 +63,8 @@ RUN pip install --upgrade pip \
         "redis>=5.2.0" \
         "rq>=2.0.0" \
         "pyyaml>=6.0.2" \
-        "httpx>=0.28.0"
+        "httpx>=0.28.0" \
+        "edge-tts>=6.1.9"
 
 # Heavy analysis deps — the [analysis] extras group from pyproject.
 # mediapipe (Phase 8.1) drives services/emotion.py via the Face

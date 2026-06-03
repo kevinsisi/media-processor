@@ -29,7 +29,8 @@ RUN pip install --no-cache-dir --upgrade pip \
         "rq>=2.0.0" \
         "python-multipart>=0.0.17" \
         "pyyaml>=6.0.2" \
-        "httpx>=0.28.0"
+        "httpx>=0.28.0" \
+        "edge-tts>=6.1.9"
 
 # v0.23.1 / v0.28.0 — OpenCV remains needed by the api container for
 # synchronous custom ROI tracking (mode=custom, services/object_tracking.
