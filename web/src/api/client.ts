@@ -79,6 +79,9 @@ import type {
   WatermarkPresetOut,
   WatermarkPresetSaveRequest,
   WatermarkSettingsPatch,
+  PexelsSearchResponse,
+  PexelsImportRequest,
+  PexelsImportResponse,
 } from "./types";
 
 const DEFAULT_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
@@ -911,6 +914,32 @@ export class ApiClient {
 
   getOpenCodeModels(): Promise<OpenCodeModelsOut> {
     return this.get<OpenCodeModelsOut>("/settings/opencode/models");
+  }
+
+  // ----- Pexels stock footage -----
+
+  searchPexels(params: {
+    q: string;
+    per_page?: number;
+    orientation?: "landscape" | "portrait" | "square";
+    min_duration_s?: number;
+    max_duration_s?: number;
+  }): Promise<PexelsSearchResponse> {
+    const qs = new URLSearchParams();
+    qs.set("q", params.q);
+    if (params.per_page) qs.set("per_page", String(params.per_page));
+    if (params.orientation) qs.set("orientation", params.orientation);
+    if (params.min_duration_s) qs.set("min_duration_s", String(params.min_duration_s));
+    if (params.max_duration_s) qs.set("max_duration_s", String(params.max_duration_s));
+    return this.get<PexelsSearchResponse>(`/materials/pexels/search?${qs}`);
+  }
+
+  importPexelsVideo(payload: PexelsImportRequest): Promise<PexelsImportResponse> {
+    return this.request<PexelsImportResponse>("/materials/pexels/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
   }
 
   private get<T>(path: string): Promise<T> {

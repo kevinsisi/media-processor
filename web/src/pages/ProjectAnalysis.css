@@ -1274,3 +1274,91 @@
     flex: 1;
   }
 }
+
+/* ---- Pexels 股票素材搜尋面板 ---- */
+
+.pexels-panel {
+  margin-top: var(--space-7);
+  border-top: 1px solid var(--border-subtle, rgba(255,255,255,0.08));
+  padding-top: var(--space-5);
+}
+
+.pexels-panel__toggle {
+  font-size: var(--t-sm);
+  opacity: 0.75;
+}
+
+.pexels-panel__body {
+  margin-top: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.pexels-panel__desc {
+  font-size: var(--t-xs);
+  color: var(--text-secondary);
+}
+
+.pexels-panel__search-row {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.pexels-panel__input {
+  flex: 1;
+  background: var(--ink-base);
+  border: 1px solid var(--border-subtle, rgba(255,255,255,0.12));
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: var(--t-sm);
+  padding: 8px 12px;
+}
+
+.pexels-panel__results {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--space-3);
+}
+
+.pexels-card {
+  background: var(--ink-raised, rgba(255,255,255,0.05));
+  border: 1px solid var(--border-subtle, rgba(255,255,255,0.08));
+  border-radius: 8px;
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  font-size: var(--t-xs);
+}
+
+.pexels-card__meta {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  color: var(--text-secondary);
+}
+
+.pexels-card__author {
+  color: var(--text-secondary);
+  font-size: var(--t-2xs, 0.65rem);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pexels-card__link {
+  color: var(--accent-primary, var(--gold));
+  font-size: var(--t-2xs, 0.65rem);
+  text-decoration: none;
+}
+
+.pexels-card__link:hover {
+  text-decoration: underline;
+}
+
+.pexels-card__import {
+  margin-top: auto;
+  font-size: var(--t-xs);
+}

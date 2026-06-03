@@ -5,6 +5,7 @@ import type {
   AnalysisStep,
   AssetAnalysisItem,
   AssetVariant,
+  PexelsVideoOut,
   StoryScriptOut,
   TranscriptOut,
   TranscriptSegmentIn,
@@ -1109,6 +1110,44 @@ export default function ProjectAnalysis() {
   const [storyRendering, setStoryRendering] = useState(false);
   const [storyScript, setStoryScript] = useState<StoryScriptOut | null>(null);
   const [storyNarration, setStoryNarration] = useState(false);
+  // Pexels stock footage search
+  const [pexelsOpen, setPexelsOpen] = useState(false);
+  const [pexelsQuery, setPexelsQuery] = useState("");
+  const [pexelsResults, setPexelsResults] = useState<PexelsVideoOut[]>([]);
+  const [pexelsSearching, setPexelsSearching] = useState(false);
+  const [pexelsImporting, setPexelsImporting] = useState<number | null>(null);
+  const [pexelsError, setPexelsError] = useState<string | null>(null);
+
+  const handlePexelsSearch = useCallback(async () => {
+    if (!pexelsQuery.trim() || !validProjectId) return;
+    setPexelsSearching(true);
+    setPexelsError(null);
+    try {
+      const res = await apiClient.searchPexels({ q: pexelsQuery.trim(), per_page: 12 });
+      setPexelsResults(res.videos);
+    } catch (err) {
+      setPexelsError(err instanceof Error ? err.message : String(err));
+      setPexelsResults([]);
+    } finally {
+      setPexelsSearching(false);
+    }
+  }, [pexelsQuery, validProjectId]);
+
+  const handlePexelsImport = useCallback(async (video: PexelsVideoOut) => {
+    if (!validProjectId) return;
+    setPexelsImporting(video.id);
+    setPexelsError(null);
+    try {
+      await apiClient.importPexelsVideo({ pexels_video_id: video.id, project_id: validProjectId });
+      polling.refresh();
+      setPexelsError(null);
+    } catch (err) {
+      setPexelsError(err instanceof Error ? `匯入失敗：${err.message}` : String(err));
+    } finally {
+      setPexelsImporting(null);
+    }
+  }, [validProjectId, polling]);
+
   // v0.18 — track per-asset translate-button busy state. The job runs
   // on the worker (poll picks up the new ``secondary_subtitle_summary``
   // when done); the local set just keeps the button disabled long
@@ -1983,6 +2022,78 @@ export default function ProjectAnalysis() {
           />
         ))}
       </section>
+
+      {/* Pexels 股票素材搜尋 */}
+      <section className="pexels-panel">
+        <button
+          type="button"
+          className="cta cta--quiet pexels-panel__toggle"
+          onClick={() => setPexelsOpen((v) => !v)}
+        >
+          {pexelsOpen ? "▲ 收起 Pexels 素材搜尋" : "▼ 從 Pexels 搜尋素材"}
+        </button>
+        {pexelsOpen && (
+          <div className="pexels-panel__body">
+            <p className="pexels-panel__desc mono">
+              在 Pexels 免費股票素材庫搜尋並直接匯入至本專案，自動觸發分析。
+            </p>
+            <div className="pexels-panel__search-row">
+              <input
+                type="text"
+                className="pexels-panel__input"
+                placeholder="關鍵字，例如：城市夜景、汽車、商務"
+                value={pexelsQuery}
+                onChange={(e) => setPexelsQuery(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") void handlePexelsSearch(); }}
+              />
+              <button
+                type="button"
+                className="cta"
+                disabled={pexelsSearching || !pexelsQuery.trim()}
+                onClick={() => void handlePexelsSearch()}
+              >
+                {pexelsSearching ? "搜尋中…" : "搜尋"}
+              </button>
+            </div>
+            {pexelsError && (
+              <p className="analysis-error" role="alert">{pexelsError}</p>
+            )}
+            {pexelsResults.length > 0 && (
+              <div className="pexels-panel__results">
+                {pexelsResults.map((v) => (
+                  <article key={v.id} className="pexels-card">
+                    <div className="pexels-card__meta">
+                      <span className="pexels-card__duration mono">{v.duration_s}s</span>
+                      <span className="pexels-card__ratio mono">{v.aspect_ratio}</span>
+                      <span className="pexels-card__size mono">
+                        {v.best_file ? `${v.best_file.width}×${v.best_file.height}` : "—"}
+                      </span>
+                    </div>
+                    <p className="pexels-card__author mono">by {v.user_name}</p>
+                    <a
+                      href={v.pexels_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="pexels-card__link"
+                    >
+                      在 Pexels 預覽 ↗
+                    </a>
+                    <button
+                      type="button"
+                      className="cta cta--quiet pexels-card__import"
+                      disabled={pexelsImporting === v.id}
+                      onClick={() => void handlePexelsImport(v)}
+                    >
+                      {pexelsImporting === v.id ? "匯入中…" : "匯入"}
+                    </button>
+                  </article>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </section>
+
       {confirmDialog}
     </main>
   );

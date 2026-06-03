@@ -415,7 +415,7 @@ def mix_narration(
         mix_inputs.append(f"[{label}]")
     filter_parts.append(
         "".join(mix_inputs)
-        + f"amix=inputs={len(mix_inputs)}:duration=first:dropout_transition=0[aout]"
+        + f"amix=inputs={len(mix_inputs)}:duration=longest:dropout_transition=0[aout]"
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     cmd += [

@@ -44,6 +44,7 @@ ASPECT_DIMENSIONS: dict[str, tuple[int, int]] = {
 
 # Per-segment encoding knobs. CRF 20 + libx264 + faststart matches the
 # IG upload spec; AAC 128 k mono/stereo is the smallest sane default.
+# GPU codec is auto-detected at first use (see _detected_hw_codec / _best_video_codec).
 VIDEO_CODEC: str = "libx264"
 VIDEO_PIX_FMT: str = "yuv420p"
 VIDEO_PRESET: str = "veryfast"
@@ -51,6 +52,38 @@ VIDEO_CRF: int = 20
 VIDEO_FPS: int = 30
 AUDIO_CODEC: str = "aac"
 AUDIO_BITRATE: str = "128k"
+
+# Hardware-accelerated codec priority list (NarratoAI 7-level fallback pattern).
+_HW_CODEC_CANDIDATES: tuple[str, ...] = (
+    "h264_nvenc",    # NVIDIA NVENC
+    "h264_amf",      # AMD AMF
+    "h264_qsv",      # Intel QuickSync
+    "h264_videotoolbox",  # macOS VideoToolbox
+    "libx264",       # software fallback (always available)
+)
+_detected_hw_codec: str | None = None  # cached after first probe
+
+
+def _best_video_codec() -> str:
+    """Probe ffmpeg for the fastest available H.264 encoder (cached per process)."""
+    global _detected_hw_codec
+    if _detected_hw_codec is not None:
+        return _detected_hw_codec
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-encoders"],
+            capture_output=True, text=True, timeout=8,
+        )
+        available = result.stdout + result.stderr
+        for codec in _HW_CODEC_CANDIDATES:
+            if codec in available:
+                _detected_hw_codec = codec
+                logger.info("video_renderer: selected encoder %s", codec)
+                return codec
+    except Exception as exc:
+        logger.warning("video_renderer: encoder probe failed (%s), defaulting to libx264", exc)
+    _detected_hw_codec = "libx264"
+    return _detected_hw_codec
 
 
 # Subtitle burn-in style — white text + 2 px black edge + bottom-centre.
@@ -826,7 +859,7 @@ def _cut_segment(
         "-r",
         str(VIDEO_FPS),
         "-c:v",
-        VIDEO_CODEC,
+        _best_video_codec(),
         "-pix_fmt",
         VIDEO_PIX_FMT,
         "-preset",
@@ -1005,7 +1038,7 @@ def _stabilize_segment(src: Path, dst: Path, scratch_dir: Path) -> None:
         "-vf",
         transform_filter,
         "-c:v",
-        VIDEO_CODEC,
+        _best_video_codec(),
         "-pix_fmt",
         VIDEO_PIX_FMT,
         "-preset",
@@ -1200,7 +1233,7 @@ def concat_segments(
             "-map",
             "[aout]",
             "-c:v",
-            VIDEO_CODEC,
+            _best_video_codec(),
             "-pix_fmt",
             VIDEO_PIX_FMT,
             "-preset",
@@ -1446,7 +1479,7 @@ def burn_subtitles(
         ]
     cmd += [
         "-c:v",
-        VIDEO_CODEC,
+        _best_video_codec(),
         "-pix_fmt",
         VIDEO_PIX_FMT,
         "-preset",
@@ -1751,7 +1784,7 @@ def apply_watermark(
         "-map",
         "0:a?",
         "-c:v",
-        VIDEO_CODEC,
+        _best_video_codec(),
         "-pix_fmt",
         VIDEO_PIX_FMT,
         "-preset",

@@ -19,6 +19,7 @@ from media_processor.api.routers import (
     assets,
     drafts,
     health,
+    materials,
     music,
     projects,
     queue,
@@ -90,6 +91,7 @@ app.include_router(uploads.router)
 app.include_router(music.router)
 app.include_router(watermark_presets.router)
 app.include_router(queue.router)
+app.include_router(materials.router)
 
 # Static-serve generated thumbnail JPEGs. The directory is the in-container
 # path; on the dispatch host this resolves under MEDIA_STORAGE_DIR. mkdir on

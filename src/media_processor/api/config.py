@@ -64,6 +64,17 @@ class Settings(BaseSettings):
     # Frame analysis — keyframe cache for documentary/narration Vision LLM pipeline.
     frame_cache_dir: str = Field(default="/app/media/frame_cache")
 
+    # Azure TTS (provider="azure") — REST API, no SDK required.
+    tts_azure_key: str = Field(default="")
+    tts_azure_region: str = Field(default="eastasia")
+
+    # Tencent TTS (provider="tencent") — REST API with HMAC-SHA256 signing.
+    tts_tencent_secret_id: str = Field(default="")
+    tts_tencent_secret_key: str = Field(default="")
+
+    # Pexels stock footage search.
+    pexels_api_key: str = Field(default="")
+
     # M4 — Whisper local STT in the worker container.
     # WHISPER_FAKE=1 swaps the engine for a deterministic canned zh-Hant
     # transcript so CI / non-GPU dev boxes can drive the rest of the pipeline.

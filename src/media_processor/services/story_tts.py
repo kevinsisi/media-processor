@@ -55,12 +55,18 @@ class TtsProvider(Protocol):
 
 
 class EdgeTtsProvider:
+    """Microsoft Edge TTS via edge-tts package.
+
+    Supports word-boundary subtitle generation: call synthesize_with_srt()
+    to get both the audio file and a parallel SRT of word timings.
+    """
+
     async def synthesize(
         self, *, text: str, voice: str, output_path: Path, timeout_s: float
     ) -> None:
         try:
             import edge_tts
-        except Exception as exc:  # pragma: no cover - depends on optional runtime package.
+        except Exception as exc:  # pragma: no cover
             raise StoryTtsError("Edge TTS provider is not installed") from exc
 
         async def _run() -> None:
@@ -68,6 +74,182 @@ class EdgeTtsProvider:
             await communicate.save(str(output_path))
 
         await asyncio.wait_for(_run(), timeout=timeout_s)
+
+    async def synthesize_with_srt(
+        self, *, text: str, voice: str, output_path: Path, timeout_s: float
+    ) -> str:
+        """Synthesize audio and return SRT content built from WordBoundary events.
+
+        Writes audio to output_path. Returns SRT string (empty if no boundaries).
+        """
+        try:
+            import edge_tts
+        except Exception as exc:  # pragma: no cover
+            raise StoryTtsError("Edge TTS provider is not installed") from exc
+
+        word_events: list[dict] = []
+        audio_chunks: list[bytes] = []
+
+        async def _stream() -> None:
+            communicate = edge_tts.Communicate(text, voice)
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    audio_chunks.append(chunk["data"])
+                elif chunk["type"] == "WordBoundary":
+                    word_events.append({
+                        "offset": chunk.get("offset", 0),   # 100-ns units
+                        "duration": chunk.get("duration", 0),
+                        "text": chunk.get("text", ""),
+                    })
+
+        await asyncio.wait_for(_stream(), timeout=timeout_s)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"".join(audio_chunks))
+
+        if not word_events:
+            return ""
+
+        return _word_events_to_srt(word_events)
+
+
+def _word_events_to_srt(events: list[dict]) -> str:
+    """Convert edge-tts WordBoundary events (100-ns offsets) to SRT."""
+    lines: list[str] = []
+    for idx, ev in enumerate(events, 1):
+        start_ms = ev["offset"] // 10_000        # 100-ns → ms
+        dur_ms = max(200, ev["duration"] // 10_000)
+        end_ms = start_ms + dur_ms
+        lines.append(str(idx))
+        lines.append(f"{_ms_to_srt(start_ms)} --> {_ms_to_srt(end_ms)}")
+        lines.append(ev["text"])
+        lines.append("")
+    return "\n".join(lines)
+
+
+def _ms_to_srt(ms: int) -> str:
+    h = ms // 3_600_000
+    m = (ms % 3_600_000) // 60_000
+    s = (ms % 60_000) // 1000
+    rest = ms % 1000
+    return f"{h:02d}:{m:02d}:{s:02d},{rest:03d}"
+
+
+class AzureTtsProvider:
+    """Azure Cognitive Services TTS via REST API (no SDK required).
+
+    Configure via env vars:
+      TTS_AZURE_KEY    — Ocp-Apim-Subscription-Key
+      TTS_AZURE_REGION — e.g. "eastasia", "japaneast"
+    """
+
+    async def synthesize(
+        self, *, text: str, voice: str, output_path: Path, timeout_s: float
+    ) -> None:
+        import httpx
+
+        from media_processor.api.config import settings as _cfg
+
+        key = _cfg.tts_azure_key.strip()
+        region = _cfg.tts_azure_region.strip() or "eastasia"
+        if not key:
+            raise StoryTtsError("TTS_AZURE_KEY not configured for azure provider")
+
+        ssml = (
+            f'<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="zh-TW">'
+            f'<voice name="{voice}">{text}</voice></speak>'
+        )
+        url = f"https://{region}.tts.speech.microsoft.com/cognitiveservices/v1"
+        headers = {
+            "Ocp-Apim-Subscription-Key": key,
+            "Content-Type": "application/ssml+xml",
+            "X-Microsoft-OutputFormat": "audio-16khz-128kbitrate-mono-mp3",
+        }
+        async with httpx.AsyncClient(timeout=timeout_s) as client:
+            resp = await client.post(url, content=ssml.encode("utf-8"), headers=headers)
+        if resp.status_code != 200:
+            raise StoryTtsError(
+                f"Azure TTS error {resp.status_code}: {resp.text[:300]}"
+            )
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(resp.content)
+
+
+class TencentTtsProvider:
+    """Tencent Cloud TTS via simple REST API.
+
+    Configure via env vars:
+      TTS_TENCENT_SECRET_ID
+      TTS_TENCENT_SECRET_KEY
+      TTS_TENCENT_APPID (optional, falls back to key derivation)
+    Voice code examples: 101001 (zh female), 101002 (zh male).
+    """
+
+    async def synthesize(
+        self, *, text: str, voice: str, output_path: Path, timeout_s: float
+    ) -> None:
+        import base64
+        import hashlib
+        import hmac
+        import json
+        import time
+
+        import httpx
+
+        from media_processor.api.config import settings as _cfg
+
+        secret_id = _cfg.tts_tencent_secret_id.strip()
+        secret_key = _cfg.tts_tencent_secret_key.strip()
+        if not secret_id or not secret_key:
+            raise StoryTtsError("TTS_TENCENT_SECRET_ID / SECRET_KEY not configured")
+
+        # voice is expected to be an integer voice_type (e.g. "101001")
+        try:
+            voice_type = int(voice)
+        except ValueError:
+            voice_type = 101001  # default zh-TW female
+
+        timestamp = int(time.time())
+        payload = {
+            "Action": "TextToVoice",
+            "Nonce": timestamp & 0xFFFFFF,
+            "Region": "ap-guangzhou",
+            "SecretId": secret_id,
+            "SignatureMethod": "HmacSHA256",
+            "Text": text,
+            "Timestamp": timestamp,
+            "VoiceType": voice_type,
+            "Codec": "mp3",
+            "SampleRate": 16000,
+            "Volume": 0,
+            "Speed": 0,
+            "SessionId": hashlib.md5(text.encode()).hexdigest()[:16],
+        }
+        # Build signature string
+        sorted_params = "&".join(f"{k}={v}" for k, v in sorted(payload.items()))
+        sign_str = f"POSTtts.tencentcloudapi.com/?{sorted_params}"
+        sig = base64.b64encode(
+            hmac.new(secret_key.encode(), sign_str.encode(), hashlib.sha256).digest()
+        ).decode()
+        payload["Signature"] = sig
+
+        async with httpx.AsyncClient(timeout=timeout_s) as client:
+            resp = await client.post(
+                "https://tts.tencentcloudapi.com",
+                data=payload,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+
+        data = resp.json()
+        if "Error" in data.get("Response", {}):
+            err = data["Response"]["Error"]
+            raise StoryTtsError(f"Tencent TTS error {err.get('Code')}: {err.get('Message')}")
+
+        audio_b64 = data.get("Response", {}).get("Audio", "")
+        if not audio_b64:
+            raise StoryTtsError("Tencent TTS: empty audio in response")
+
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(base64.b64decode(audio_b64))
 
 
 class SilentTestProvider:
@@ -119,6 +301,10 @@ def narration_settings() -> NarrationSettings | None:
 def provider_for(name: str) -> TtsProvider:
     if name == "edge":
         return EdgeTtsProvider()
+    if name in {"azure", "azure_v2"}:
+        return AzureTtsProvider()
+    if name in {"tencent", "qcloud"}:
+        return TencentTtsProvider()
     if name in {"silent", "test"}:
         return SilentTestProvider()
     raise StoryTtsError(f"unsupported story TTS provider: {name}")

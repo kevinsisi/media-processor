@@ -268,7 +268,13 @@ export type ClipStylePreset =
   | "artistic"
   | "custom";
 
-export type EditMode = "standard" | "luxury_auto" | "viral_short" | "story";
+export type EditMode =
+  | "standard"
+  | "luxury_auto"
+  | "viral_short"
+  | "story"
+  | "documentary"
+  | "drama_explain";
 
 export interface DraftSummary {
   id: number;
@@ -1120,4 +1126,46 @@ export interface AssetDeleteOut {
   deleted: boolean;
   affected_drafts: AffectedDraftOut[];
   invalidated_versions: number[];
+}
+
+// ----- Pexels stock footage -----
+
+export interface PexelsVideoFileOut {
+  url: string;
+  width: number;
+  height: number;
+  fps: number;
+  quality: string;
+}
+
+export interface PexelsVideoOut {
+  id: number;
+  pexels_url: string;
+  duration_s: number;
+  width: number;
+  height: number;
+  aspect_ratio: string;
+  user_name: string;
+  best_file: PexelsVideoFileOut | null;
+}
+
+export interface PexelsSearchResponse {
+  query: string;
+  total: number;
+  videos: PexelsVideoOut[];
+}
+
+export interface PexelsImportRequest {
+  pexels_video_id: number;
+  project_id: number;
+  prefer_hd?: boolean;
+}
+
+export interface PexelsImportResponse {
+  asset_id: number;
+  project_id: number;
+  pexels_video_id: number;
+  file_path: string;
+  duration_ms: number;
+  resolution: string | null;
 }

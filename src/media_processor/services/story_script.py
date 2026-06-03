@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from media_processor.api.config import settings
+from media_processor.services.opencc_converter import to_traditional
 from media_processor.models import (
     Asset,
     AssetTranscript,
@@ -144,6 +145,22 @@ class StoryInputBundle:
             "used_script_text": self.used_script_text,
             "used_visual_context": self.used_visual_context,
         }
+
+
+def _apply_traditional_chinese(payload: dict[str, Any]) -> None:
+    """Convert all text fields in a raw StoryScript JSON payload to Traditional Chinese."""
+    if "title" in payload:
+        payload["title"] = to_traditional(str(payload.get("title") or ""))
+    if "summary" in payload:
+        payload["summary"] = to_traditional(str(payload.get("summary") or ""))
+    for item in payload.get("items", []):
+        if isinstance(item, dict):
+            if "narration" in item:
+                item["narration"] = to_traditional(str(item.get("narration") or ""))
+            if "picture" in item:
+                item["picture"] = to_traditional(str(item.get("picture") or ""))
+            if "reason" in item:
+                item["reason"] = to_traditional(str(item.get("reason") or ""))
 
 
 def _strip_fence(text: str) -> str:
@@ -527,13 +544,14 @@ async def generate_story_script(
 
     if raw_text:
         payload = _repair_json_payload(raw_text)
+        _apply_traditional_chinese(payload)
         document = validate_story_script(
             payload, project_id=project_id, asset_durations=bundle.asset_durations
         )
         return StoryScriptDocument(
             project_id=document.project_id,
-            title=document.title,
-            summary=document.summary,
+            title=to_traditional(document.title),
+            summary=to_traditional(document.summary),
             items=document.items,
             metadata={
                 **bundle.metadata(),
@@ -546,8 +564,8 @@ async def generate_story_script(
     document = _heuristic_document(bundle, target_items=target_items)
     return StoryScriptDocument(
         project_id=document.project_id,
-        title=document.title,
-        summary=document.summary,
+        title=to_traditional(document.title),
+        summary=to_traditional(document.summary),
         items=document.items,
         metadata={**document.metadata, "provider": provider, "model": model},
     )

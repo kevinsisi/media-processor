@@ -714,6 +714,8 @@ const EDIT_MODE_LABELS: Record<EditMode, string> = {
   luxury_auto: "高級車質感",
   viral_short: "短片特效型",
   story: "Narrato 故事模式",
+  documentary: "紀錄片解說",
+  drama_explain: "短劇解說",
 };
 
 function formatBasicSummary(opts: {
