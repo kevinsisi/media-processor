@@ -753,11 +753,7 @@ async def _documentary_plan_stage(
         if not assets:
             raise story_script.StoryScriptInputError("no assets for documentary mode")
 
-        # Prefer the first asset with completed frame analysis
-        fa_asset = next(
-            (a for a in assets if getattr(a, "frame_analysis_status", "") == "done"),
-            None,
-        )
+        fa_assets = [a for a in assets if getattr(a, "frame_analysis_status", "") == "done"]
 
         project_obj = await session.get(Project, project_id)
         project_name = project_obj.name if project_obj else f"project-{project_id}"
@@ -766,11 +762,11 @@ async def _documentary_plan_stage(
         ).scalar_one_or_none()
         project_brief = script_obj.body[:500] if script_obj else ""
 
-        if fa_asset is not None:
+        if fa_assets:
             try:
-                document = await narration_script_generator.generate_documentary_script(
+                document = await narration_script_generator.generate_documentary_script_for_assets(
                     session,
-                    fa_asset,
+                    fa_assets,
                     project_name=project_name,
                     project_brief=project_brief,
                 )

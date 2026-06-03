@@ -115,6 +115,28 @@ def test_story_document_to_srt_uses_narration_timeline() -> None:
     assert "00:00:02,500 --> 00:00:04,500" in srt
 
 
+def test_story_document_to_srt_paginates_long_narration() -> None:
+    payload = _valid_payload()
+    payload["items"] = [
+        {
+            **payload["items"][0],
+            "source_end_ms": 9_000,
+            "narration": "這是一段很長很長的旁白字幕如果整句直接丟給drawtext就會超出畫面被裁切",
+        }
+    ]
+    document = validate_story_script(payload, project_id=1, asset_durations={10: 10_000})
+
+    srt = story_document_to_srt(document)
+
+    assert "00:00:00,000 --> 00:00:04,500" in srt
+    assert "00:00:04,500 --> 00:00:09,000" in srt
+    assert "這是一段很長很長的旁白" in srt
+    text_lines = [
+        line for line in srt.splitlines() if line and "-->" not in line and not line.isdigit()
+    ]
+    assert all(len(line) <= 12 for line in text_lines)
+
+
 def test_gather_story_inputs_uses_transcripts_without_gpu_analysis() -> None:
     async def run() -> None:
         engine = create_async_engine(

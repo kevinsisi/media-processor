@@ -151,6 +151,34 @@ class TestGenerateDocumentaryScript:
         assert captured_prompt, "LLM was not called"
         assert "汽車廣告風格" in captured_prompt[0]
 
+    @pytest.mark.asyncio
+    async def test_multi_asset_documentary_prompt_allows_different_assets(self):
+        session = MagicMock()
+        assets = [
+            _make_asset(asset_id=10, fa_json=_minimal_fa_json()),
+            _make_asset(asset_id=11, fa_json=_minimal_fa_json()),
+        ]
+        captured_prompt = []
+
+        async def mock_llm(prompt, _session):
+            captured_prompt.append(prompt)
+            return _valid_story_script_json(asset_id=11)
+
+        with patch(
+            "media_processor.services.narration_script_generator._call_llm",
+            side_effect=mock_llm,
+        ):
+            doc = await nsg.generate_documentary_script_for_assets(
+                session,
+                assets,
+                project_name="TestProject",
+            )
+
+        assert "asset_id=10" in captured_prompt[0]
+        assert "asset_id=11" in captured_prompt[0]
+        assert doc.items[0].asset_id == 11
+        assert doc.metadata.get("asset_ids") == [10, 11]
+
 
 class TestParseTsMs:
     def test_zero(self):

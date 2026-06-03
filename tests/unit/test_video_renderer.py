@@ -191,6 +191,63 @@ def test_concat_rejects_empty(tmp_path: Path) -> None:
         video_renderer.concat_segments([], tmp_path / "out.mp4", tmp_path / "list.txt")
 
 
+def test_render_pipeline_uses_timeline_durations_for_xfade(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    src = tmp_path / "asset.mp4"
+    src.write_bytes(b"fake")
+    plan = CutPlan(
+        schema_version="story.cut-plan.v1",
+        target_duration_ms=15_000,
+        target_aspect_ratio="9:16",
+        profile_name="universal",
+        segments=(
+            CutPlanSegment(
+                0,
+                1,
+                0,
+                3_000,
+                "scripted",
+                "r1",
+                timeline_duration_ms=7_000,
+            ),
+            CutPlanSegment(
+                1,
+                1,
+                3_000,
+                6_000,
+                "scripted",
+                "r2",
+                timeline_duration_ms=8_000,
+            ),
+        ),
+    )
+    captured: dict[str, list[int] | None] = {}
+    real_concat = video_renderer.concat_segments
+
+    def capture_concat(*args: object, **kwargs: object) -> None:
+        captured["durations_ms"] = kwargs.get("durations_ms")  # type: ignore[assignment]
+        real_concat(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(video_renderer, "concat_segments", capture_concat)
+
+    video_renderer.render(
+        plan=plan,
+        draft_id=1,
+        asset_paths={1: src},
+        output_path=tmp_path / "final.mp4",
+        srt_path=None,
+        secondary_srt_path=None,
+        scratch_dir=tmp_path / "scratch",
+        target_aspect="9:16",
+        stabilize=False,
+        transitions_enabled=True,
+    )
+
+    assert captured["durations_ms"] == [7_000, 8_000]
+
+
 def test_zoompan_filter_emits_canvas_size_and_increment() -> None:
     """Phase 8.1 — zoompan chain ends at ZOOMPAN_END_ZOOM and matches canvas size."""
     chain = video_renderer._zoompan_filter("9:16", duration_s=2.0)

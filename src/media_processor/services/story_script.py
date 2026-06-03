@@ -28,7 +28,7 @@ from media_processor.services.edit_planner import (
 from media_processor.services.opencc_converter import to_traditional
 from media_processor.services.opencode_client import call_opencode_text
 from media_processor.services.settings_store import build_opencode_config, get_llm_api_keys
-from media_processor.services.subtitles import SubtitleCue, render_srt
+from media_processor.services.subtitles import MAX_LINE_CHARS, MAX_LINES, SubtitleCue, render_srt
 
 logger = logging.getLogger(__name__)
 
@@ -670,17 +670,23 @@ def story_document_to_srt(
     """Build timeline subtitles from StoryScript narration text."""
     cues: list[SubtitleCue] = []
     cursor = 0
+    max_chars = MAX_LINE_CHARS * MAX_LINES
     for item in document.items:
         duration = max(700, item.duration_ms, (narration_durations_ms or {}).get(item.order, 0))
         text = item.narration.strip()
         if text:
-            cues.append(
-                SubtitleCue(
-                    sequence=len(cues) + 1,
-                    timeline_start_ms=cursor,
-                    timeline_end_ms=cursor + duration,
-                    text=text,
+            pages = [text[i : i + max_chars] for i in range(0, len(text), max_chars)] or [text]
+            for index, page in enumerate(pages):
+                start_ms = cursor + int(duration * index / len(pages))
+                end_ms = cursor + int(duration * (index + 1) / len(pages))
+                lines = [page[i : i + MAX_LINE_CHARS] for i in range(0, len(page), MAX_LINE_CHARS)]
+                cues.append(
+                    SubtitleCue(
+                        sequence=len(cues) + 1,
+                        timeline_start_ms=start_ms,
+                        timeline_end_ms=end_ms,
+                        text="\n".join(lines[:MAX_LINES]),
+                    )
                 )
-            )
         cursor += duration
     return render_srt(cues)

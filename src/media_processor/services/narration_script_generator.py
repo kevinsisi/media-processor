@@ -46,6 +46,7 @@ _DOCUMENTARY_PROMPT_TEMPLATE = """
 - narration 是解說旁白，不是原聲字幕。
 - 所有片段使用 audio_intent="narration"（解說旁白覆蓋原聲）。
 - source_start_ms / source_end_ms 必須落在幀分析時間範圍內。
+- 優先使用不同 asset_id 的素材，不要整支影片只重複同一個畫面。
 - 每段時長建議 3–10 秒，合計不超過 {max_duration_s} 秒。
 
 專案名稱：{project_name}
@@ -62,7 +63,7 @@ _DOCUMENTARY_PROMPT_TEMPLATE = """
   "items": [
     {{
       "order": 1,
-      "asset_id": {asset_id},
+      "asset_id": <int>,
       "source_start_ms": <int>,
       "source_end_ms": <int>,
       "picture": "畫面描述",
@@ -235,6 +236,119 @@ async def generate_documentary_script(
         summary=document.summary,
         items=document.items,
         metadata={"mode": "documentary", "asset_id": asset.id, "used_fallback": True},
+    )
+
+
+async def generate_documentary_script_for_assets(
+    session: AsyncSession,
+    assets: list[Asset],
+    *,
+    project_name: str,
+    project_brief: str = "",
+    target_items: int = 8,
+    max_duration_s: int = 90,
+) -> StoryScriptDocument:
+    """Generate a documentary StoryScript using frame analysis across assets."""
+    analysed_assets = [
+        asset
+        for asset in assets
+        if isinstance(asset.frame_analysis_json, dict) and asset.frame_analysis_json.get("batches")
+    ]
+    if not analysed_assets:
+        raise StoryScriptInputError("no assets have frame_analysis_json; run frame analysis first")
+    if len(analysed_assets) == 1:
+        return await generate_documentary_script(
+            session,
+            analysed_assets[0],
+            project_name=project_name,
+            project_brief=project_brief,
+            target_items=target_items,
+            max_duration_s=max_duration_s,
+        )
+
+    asset_durations = {asset.id: int(asset.duration_ms) for asset in analysed_assets}
+    markdown_parts = []
+    for asset in analysed_assets:
+        markdown_parts.append(
+            f"## asset_id={asset.id} duration_ms={int(asset.duration_ms)}\n"
+            f"{analysis_to_markdown(asset.frame_analysis_json)}"
+        )
+    brief_block = f"創作方向：{project_brief.strip()}" if project_brief.strip() else ""
+    prompt = _DOCUMENTARY_PROMPT_TEMPLATE.format(
+        target_items=target_items,
+        max_duration_s=max_duration_s,
+        project_name=project_name,
+        brief_block=brief_block,
+        frame_markdown="\n\n".join(markdown_parts),
+        schema_version=STORY_SCRIPT_SCHEMA_VERSION,
+    )
+
+    raw = await _call_llm(prompt, session)
+    if raw:
+        try:
+            payload = _repair_json_payload(raw)
+            document = validate_story_script(
+                payload,
+                project_id=analysed_assets[0].project_id,
+                asset_durations=asset_durations,
+            )
+            return StoryScriptDocument(
+                project_id=document.project_id,
+                title=document.title,
+                summary=document.summary,
+                items=document.items,
+                metadata={
+                    "mode": "documentary",
+                    "asset_ids": list(asset_durations),
+                    "used_fallback": False,
+                },
+            )
+        except Exception as exc:
+            logger.warning("multi-asset documentary script parse failed, using fallback: %s", exc)
+
+    segments: list[StoryInputSegment] = []
+    per_asset_limit = max(1, target_items // len(analysed_assets))
+    for asset in analysed_assets:
+        fa = asset.frame_analysis_json
+        assert isinstance(fa, dict)
+        interval_s = float(fa.get("interval_seconds", 3.0))
+        for batch in fa.get("batches", [])[:per_asset_limit]:
+            obs_list = batch.get("frame_observations", [])
+            if not obs_list:
+                continue
+            first_obs = obs_list[0]
+            start_ms = _parse_ts_ms(first_obs.get("timestamp", "00:00:00,000"))
+            end_ms = min(int(asset.duration_ms), start_ms + int(interval_s * len(obs_list) * 1000))
+            if end_ms > start_ms:
+                segments.append(
+                    StoryInputSegment(
+                        asset_id=asset.id,
+                        asset_duration_ms=int(asset.duration_ms),
+                        start_ms=start_ms,
+                        end_ms=end_ms,
+                        text=batch.get("overall_activity_summary", "") or "（自動選段）",
+                    )
+                )
+            if len(segments) >= target_items:
+                break
+        if len(segments) >= target_items:
+            break
+
+    bundle = StoryInputBundle(
+        project_id=analysed_assets[0].project_id,
+        project_name=project_name,
+        segments=tuple(segments),
+        asset_durations=asset_durations,
+        used_transcripts=False,
+        used_visual_context=True,
+    )
+    document = _heuristic_document(bundle, target_items=target_items)
+    return StoryScriptDocument(
+        project_id=document.project_id,
+        title=document.title,
+        summary=document.summary,
+        items=document.items,
+        metadata={"mode": "documentary", "asset_ids": list(asset_durations), "used_fallback": True},
     )
 
 

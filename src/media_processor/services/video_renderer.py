@@ -1236,6 +1236,15 @@ def _build_xfade_filter(
     return ";".join(v_parts), ";".join(a_parts)
 
 
+def _segment_render_duration_ms(segment: CutPlanSegment) -> int:
+    """Duration of a rendered segment, including narration-driven holds."""
+    base_ms = max(1, segment.asset_end_ms - segment.asset_start_ms)
+    timeline_ms = getattr(segment, "timeline_duration_ms", None)
+    if timeline_ms is None:
+        return base_ms
+    return max(base_ms, int(timeline_ms))
+
+
 def concat_segments(
     intermediate_paths: list[Path],
     output_path: Path,
@@ -1672,7 +1681,7 @@ def render(
     # the helper fall through to the plain concat-demuxer ``-c copy``
     # path, which is hard-cut + no re-encode.
     if transitions_enabled and len(plan.segments) > 1:
-        durations_ms: list[int] | None = [s.asset_end_ms - s.asset_start_ms for s in plan.segments]
+        durations_ms: list[int] | None = [_segment_render_duration_ms(s) for s in plan.segments]
         transitions: list[str] | None = [s.transition_to_next for s in plan.segments[:-1]]
     else:
         durations_ms = None
