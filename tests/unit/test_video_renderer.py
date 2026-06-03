@@ -44,6 +44,11 @@ def test_aspect_filter_rejects_unknown_ratio() -> None:
         video_renderer.aspect_filter("21:9")
 
 
+def test_video_preset_uses_nvenc_compatible_value() -> None:
+    assert video_renderer._video_preset("libx264") == "veryfast"
+    assert video_renderer._video_preset("h264_nvenc") == "p4"
+
+
 def test_aspect_filter_centre_crop_omits_xy() -> None:
     """v0.29.0 — when crop_region is None or centre we skip the explicit
     x/y expression so the chain stays close to the pre-0.29 form."""

@@ -88,6 +88,13 @@ def _best_video_codec() -> str:
     return _detected_hw_codec
 
 
+def _video_preset(codec: str) -> str:
+    """Return a preset value accepted by the selected H.264 encoder."""
+    if codec == "h264_nvenc":
+        return "p4"
+    return VIDEO_PRESET
+
+
 # Subtitle burn-in style — white text + 2 px black edge + bottom-centre.
 # Sizes/margins below are interpreted in canvas pixels because
 # ``burn_subtitles`` sets ``original_size=WxH`` on the ffmpeg
@@ -840,6 +847,8 @@ def _cut_segment(
                 "emotion-zoompan suppressed on cut %d: smart camera active",
                 cut.order,
             )
+    video_codec = _best_video_codec()
+    video_preset = _video_preset(video_codec)
     cmd = [
         "ffmpeg",
         "-hide_banner",
@@ -861,11 +870,11 @@ def _cut_segment(
         "-r",
         str(VIDEO_FPS),
         "-c:v",
-        _best_video_codec(),
+        video_codec,
         "-pix_fmt",
         VIDEO_PIX_FMT,
         "-preset",
-        VIDEO_PRESET,
+        video_preset,
         "-crf",
         str(VIDEO_CRF),
         "-c:a",
@@ -1029,6 +1038,8 @@ def _stabilize_segment(src: Path, dst: Path, scratch_dir: Path) -> None:
         f":smoothing={STABILIZE_SMOOTHING}"
         ",unsharp=5:5:0.8:3:3:0.4"
     )
+    video_codec = _best_video_codec()
+    video_preset = _video_preset(video_codec)
     transform_cmd = [
         "ffmpeg",
         "-hide_banner",
@@ -1040,11 +1051,11 @@ def _stabilize_segment(src: Path, dst: Path, scratch_dir: Path) -> None:
         "-vf",
         transform_filter,
         "-c:v",
-        _best_video_codec(),
+        video_codec,
         "-pix_fmt",
         VIDEO_PIX_FMT,
         "-preset",
-        VIDEO_PRESET,
+        video_preset,
         "-crf",
         str(VIDEO_CRF),
         "-c:a",
@@ -1223,6 +1234,8 @@ def concat_segments(
     if use_xfade:
         assert durations_ms is not None
         assert transitions is not None
+        video_codec = _best_video_codec()
+        video_preset = _video_preset(video_codec)
         v_chain, a_chain = _build_xfade_filter(durations_ms, transitions)
         cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y"]
         for p in intermediate_paths:
@@ -1235,11 +1248,11 @@ def concat_segments(
             "-map",
             "[aout]",
             "-c:v",
-            _best_video_codec(),
+            video_codec,
             "-pix_fmt",
             VIDEO_PIX_FMT,
             "-preset",
-            VIDEO_PRESET,
+            video_preset,
             "-crf",
             str(VIDEO_CRF),
             "-c:a",
@@ -1465,6 +1478,8 @@ def burn_subtitles(
                 exc,
             )
 
+    video_codec = _best_video_codec()
+    video_preset = _video_preset(video_codec)
     cmd = [
         "ffmpeg",
         "-hide_banner",
@@ -1481,11 +1496,11 @@ def burn_subtitles(
         ]
     cmd += [
         "-c:v",
-        _best_video_codec(),
+        video_codec,
         "-pix_fmt",
         VIDEO_PIX_FMT,
         "-preset",
-        VIDEO_PRESET,
+        video_preset,
         "-crf",
         str(VIDEO_CRF),
         "-c:a",
@@ -1769,6 +1784,8 @@ def apply_watermark(
         opacity=opacity,
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    video_codec = _best_video_codec()
+    video_preset = _video_preset(video_codec)
     cmd = [
         "ffmpeg",
         "-hide_banner",
@@ -1786,11 +1803,11 @@ def apply_watermark(
         "-map",
         "0:a?",
         "-c:v",
-        _best_video_codec(),
+        video_codec,
         "-pix_fmt",
         VIDEO_PIX_FMT,
         "-preset",
-        VIDEO_PRESET,
+        video_preset,
         "-crf",
         str(VIDEO_CRF),
         "-c:a",
