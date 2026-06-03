@@ -40,6 +40,8 @@ def render_draft(
     smart_camera: bool | None = None,
     style_preset: str = "custom",
     edit_mode: str = "standard",
+    story_narration: bool = False,
+    story_narration_fallback: bool = True,
 ) -> dict[str, Any]:
     """RQ job — produce the next-version draft mp4 for ``project_id``.
 
@@ -66,7 +68,7 @@ def render_draft(
     logger.info(
         "render_draft: project_id=%d draft_id=%s force=%s target_duration_ms=%s "
         "skip_plan=%s subtitles_from_db=%s stabilize=%s subtitles=%s transitions=%s "
-        "auto_reframe=%s initial_voice_volume=%s smart_camera=%s style_preset=%s edit_mode=%s",
+        "auto_reframe=%s initial_voice_volume=%s smart_camera=%s style_preset=%s edit_mode=%s story_narration=%s",
         project_id,
         draft_id,
         force,
@@ -81,6 +83,7 @@ def render_draft(
         smart_camera,
         style_preset,
         edit_mode,
+        story_narration,
     )
     # Local import keeps the api container free of ffmpeg / heavy deps.
     from media_processor.services.edit_orchestrator import run_render
@@ -103,6 +106,8 @@ def render_draft(
             smart_camera_enabled=smart_camera,
             style_preset=style_preset,
             edit_mode=edit_mode,
+            story_narration=story_narration,
+            story_narration_fallback=story_narration_fallback,
         )
     )
 

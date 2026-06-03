@@ -128,6 +128,7 @@ class EditMode(StrEnum):
     STANDARD = "standard"
     LUXURY_AUTO = "luxury_auto"
     VIRAL_SHORT = "viral_short"
+    STORY = "story"
 
 
 PROJECT_STATUS_VALUES: tuple[str, ...] = tuple(s.value for s in ProjectStatus)

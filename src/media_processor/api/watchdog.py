@@ -93,13 +93,20 @@ _LEGACY_FLAG_DEFAULTS: dict[str, bool] = {
     "smart_camera": False,
 }
 
-_VALID_EDIT_MODES = {"standard", "luxury_auto", "viral_short"}
+_VALID_EDIT_MODES = {"standard", "luxury_auto", "viral_short", "story"}
 
 
 def _resolve_edit_mode(draft: Draft) -> str:
     snapshot = draft.render_flags_json if isinstance(draft.render_flags_json, dict) else {}
     raw = snapshot.get("edit_mode")
     return str(raw) if raw in _VALID_EDIT_MODES else "standard"
+
+
+def _resolve_story_narration_flags(draft: Draft) -> tuple[bool, bool]:
+    snapshot = draft.render_flags_json if isinstance(draft.render_flags_json, dict) else {}
+    return bool(snapshot.get("story_narration", False)), bool(
+        snapshot.get("story_narration_fallback", True)
+    )
 
 
 def _resolve_render_flags(draft: Draft) -> dict[str, bool]:
@@ -216,6 +223,7 @@ async def _handle_orphan(session: Any, draft: Draft) -> None:
             initial_voice_volume = max(0.0, min(1.5, float(raw_initial_voice_volume)))
         except (TypeError, ValueError):
             initial_voice_volume = 1.0
+        story_narration, story_narration_fallback = _resolve_story_narration_flags(draft)
         await asyncio.to_thread(
             enqueue_project_edit,
             draft.project_id,
@@ -231,6 +239,8 @@ async def _handle_orphan(session: Any, draft: Draft) -> None:
             smart_camera=flags["smart_camera"],
             style_preset=str(draft.style_preset or "custom"),
             edit_mode=_resolve_edit_mode(draft),
+            story_narration=story_narration,
+            story_narration_fallback=story_narration_fallback,
         )
     except Exception:  # noqa: BLE001 — Redis enqueue failed; revert.
         logger.exception(

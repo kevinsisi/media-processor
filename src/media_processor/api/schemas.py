@@ -48,7 +48,7 @@ SUBTITLE_COLOR_PATTERN = r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$"
 
 # v0.18 — clip-style preset that biases planner span / transition / BGM hint.
 ClipStylePresetLiteral = Literal["fast", "slow", "commercial", "artistic", "custom"]
-EditModeLiteral = Literal["standard", "luxury_auto", "viral_short"]
+EditModeLiteral = Literal["standard", "luxury_auto", "viral_short", "story"]
 DraftExportStatusLiteral = Literal["queued", "running", "done", "failed"]
 AssetVariantLiteral = Literal["raw", "stabilized"]
 
@@ -536,6 +536,10 @@ class EditTriggerRequest(BaseModel):
     # ``style_preset`` (pace / transition bundle), this controls the
     # planner's content language: restrained premium cut vs punchy short.
     edit_mode: EditModeLiteral = "standard"
+    # Story/Narrato narration audio. Off by default so Story mode retains
+    # subtitle-only fallback unless the caller explicitly asks for spoken audio.
+    story_narration: bool = False
+    story_narration_fallback: bool = True
 
 
 class EditTriggerResponse(BaseModel):
@@ -545,6 +549,46 @@ class EditTriggerResponse(BaseModel):
     draft_id: int
     job_id: str
     status: str
+
+
+class StoryScriptItemOut(BaseModel):
+    order: int
+    asset_id: int
+    source_start_ms: int
+    source_end_ms: int
+    picture: str
+    narration: str
+    audio_intent: Literal["narration", "original", "narration_with_original"]
+    beat_type: str = "middle"
+    hook_type: str | None = None
+    reason: str = ""
+
+
+class StoryScriptOut(BaseModel):
+    id: int | None = None
+    project_id: int
+    draft_id: int | None = None
+    schema_version: str
+    status: str = "ready"
+    provider: str | None = None
+    model: str | None = None
+    title: str = ""
+    summary: str = ""
+    items: list[StoryScriptItemOut]
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    error: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class StoryScriptGenerateRequest(BaseModel):
+    target_items: int = Field(default=8, ge=1, le=20)
+
+
+class StoryScriptSaveRequest(BaseModel):
+    title: str = ""
+    summary: str = ""
+    items: list[StoryScriptItemOut] = Field(..., min_length=1, max_length=200)
 
 
 # ---------- M5.2 — per-version comment thread ----------

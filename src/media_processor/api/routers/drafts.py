@@ -75,13 +75,30 @@ ProfileLoaderDep = Annotated[Callable[[str], ProfileSpec], Depends(get_profile_l
 # "/api/" → api:8000, so the full URL the browser sees is
 # "/api/media/drafts/{project_id}/v{N}.mp4".
 DRAFT_URL_PREFIX = "/api/media/drafts"
-_VALID_EDIT_MODES = {"standard", "luxury_auto", "viral_short"}
+_VALID_EDIT_MODES = {"standard", "luxury_auto", "viral_short", "story"}
 
 
 def _draft_edit_mode(draft: Draft) -> EditModeLiteral:
     flags = draft.render_flags_json if isinstance(draft.render_flags_json, dict) else {}
     raw = flags.get("edit_mode")
     return cast(EditModeLiteral, raw) if raw in _VALID_EDIT_MODES else "standard"
+
+
+def _draft_story_narration_flags(
+    draft: Draft,
+    override: RenderFlagsOverride | None = None,
+) -> tuple[bool, bool]:
+    snapshot = draft.render_flags_json if isinstance(draft.render_flags_json, dict) else {}
+    over = override.model_dump(exclude_none=True) if override is not None else {}
+    enabled = bool(
+        over["story_narration"] if "story_narration" in over else snapshot.get("story_narration", False)
+    )
+    fallback = bool(
+        over["story_narration_fallback"]
+        if "story_narration_fallback" in over
+        else snapshot.get("story_narration_fallback", True)
+    )
+    return enabled, fallback
 
 
 def _draft_filename(version: int, suffix: str) -> str:
@@ -693,7 +710,15 @@ async def reorder_draft_segments(
     # FE having to keep re-sending the override. This is what makes
     # legacy NULL rows "settle" into a known state on first re-render.
     edit_mode = _draft_edit_mode(draft)
-    draft.render_flags_json = {**flags, "edit_mode": edit_mode}
+    story_narration, story_narration_fallback = _draft_story_narration_flags(
+        draft, payload.render_flags
+    )
+    draft.render_flags_json = {
+        **flags,
+        "edit_mode": edit_mode,
+        "story_narration": story_narration,
+        "story_narration_fallback": story_narration_fallback,
+    }
     await session.commit()
 
     try:
@@ -708,6 +733,8 @@ async def reorder_draft_segments(
             auto_reframe=flags["auto_reframe"],
             smart_camera=flags["smart_camera"],
             edit_mode=edit_mode,
+            story_narration=story_narration,
+            story_narration_fallback=story_narration_fallback,
         )
     except Exception as exc:  # noqa: BLE001 — do not leave pending without RQ job.
         await _mark_draft_enqueue_failed(session, draft, exc)
@@ -1081,7 +1108,13 @@ async def re_render_draft(
     override = payload.render_flags if payload is not None else None
     flags = _draft_render_flags(draft, override)
     edit_mode = _draft_edit_mode(draft)
-    draft.render_flags_json = {**flags, "edit_mode": edit_mode}
+    story_narration, story_narration_fallback = _draft_story_narration_flags(draft, override)
+    draft.render_flags_json = {
+        **flags,
+        "edit_mode": edit_mode,
+        "story_narration": story_narration,
+        "story_narration_fallback": story_narration_fallback,
+    }
     await session.commit()
 
     try:
@@ -1097,6 +1130,8 @@ async def re_render_draft(
             auto_reframe=flags["auto_reframe"],
             smart_camera=flags["smart_camera"],
             edit_mode=edit_mode,
+            story_narration=story_narration,
+            story_narration_fallback=story_narration_fallback,
         )
     except Exception as exc:  # noqa: BLE001 — do not leave pending without RQ job.
         await _mark_draft_enqueue_failed(session, draft, exc)
@@ -1141,7 +1176,13 @@ async def rebuild_subtitles(
     override = payload.render_flags if payload is not None else None
     flags = _draft_render_flags(draft, override)
     edit_mode = _draft_edit_mode(draft)
-    draft.render_flags_json = {**flags, "edit_mode": edit_mode}
+    story_narration, story_narration_fallback = _draft_story_narration_flags(draft, override)
+    draft.render_flags_json = {
+        **flags,
+        "edit_mode": edit_mode,
+        "story_narration": story_narration,
+        "story_narration_fallback": story_narration_fallback,
+    }
     await session.commit()
 
     try:
@@ -1157,6 +1198,8 @@ async def rebuild_subtitles(
             auto_reframe=flags["auto_reframe"],
             smart_camera=flags["smart_camera"],
             edit_mode=edit_mode,
+            story_narration=story_narration,
+            story_narration_fallback=story_narration_fallback,
         )
     except Exception as exc:  # noqa: BLE001 — do not leave pending without RQ job.
         await _mark_draft_enqueue_failed(session, draft, exc)

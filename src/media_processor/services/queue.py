@@ -133,6 +133,8 @@ def enqueue_project_edit(
     smart_camera: bool | None = None,
     style_preset: str = "custom",
     edit_mode: str = "standard",
+    story_narration: bool = False,
+    story_narration_fallback: bool = True,
 ) -> str:
     """Schedule ``render_draft(project_id, draft_id=…, force=…, target_duration_ms=…)``.
 
@@ -186,6 +188,10 @@ def enqueue_project_edit(
         job_kwargs["style_preset"] = style_preset
     if edit_mode and edit_mode != "standard":
         job_kwargs["edit_mode"] = edit_mode
+    if story_narration:
+        job_kwargs["story_narration"] = True
+    if not story_narration_fallback:
+        job_kwargs["story_narration_fallback"] = False
     job = queue.enqueue(
         RENDER_DRAFT_FN,
         args=(project_id,),
@@ -195,7 +201,7 @@ def enqueue_project_edit(
         "enqueued render_draft(project_id=%d, draft_id=%d, force=%s, skip_plan=%s, "
         "subtitles_from_db=%s, stabilize=%s, subtitles=%s, transitions=%s, "
         "auto_reframe=%s, initial_voice_volume=%s, smart_camera=%s, "
-        "style_preset=%s, edit_mode=%s, target_duration_ms=%s) "
+        "style_preset=%s, edit_mode=%s, story_narration=%s, target_duration_ms=%s) "
         "as job %s",
         project_id,
         draft_id,
@@ -210,6 +216,7 @@ def enqueue_project_edit(
         smart_camera,
         style_preset,
         edit_mode,
+        story_narration,
         target_duration_ms,
         job.id,
     )

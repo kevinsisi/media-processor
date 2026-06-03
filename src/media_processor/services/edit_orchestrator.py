@@ -41,6 +41,8 @@ from media_processor.services import (
     bgm_mixer,
     edit_planner,
     smart_camera_planner,
+    story_script,
+    story_tts,
     subtitles,
     video_renderer,
 )
@@ -390,11 +392,19 @@ async def _persist_plan(
         # Replace any leftover segments from a prior run (force).
         await session.execute(delete(DraftSegment).where(DraftSegment.draft_id == handle.draft_id))
         for cut in plan.segments:
-            duration = cut.asset_end_ms - cut.asset_start_ms
+            duration = int(
+                getattr(cut, "timeline_duration_ms", None) or (cut.asset_end_ms - cut.asset_start_ms)
+            )
             secondary_text = subtitles.secondary_text_for_cut(
                 cut,
                 secondary_by_asset.get(cut.asset_id),
             )
+            audio_intent = getattr(cut, "audio_intent", None)
+            segment_voice_volume = initial_voice_volume
+            if audio_intent == "narration":
+                segment_voice_volume = 0.0
+            elif audio_intent == "narration_with_original":
+                segment_voice_volume = min(segment_voice_volume, 0.25)
             session.add(
                 DraftSegment(
                     draft_id=handle.draft_id,
@@ -406,7 +416,7 @@ async def _persist_plan(
                     on_timeline_end_ms=cursor_ms + max(1, duration),
                     source_kind=cut.source_kind,
                     plan_reason=cut.reason,
-                    voice_volume=initial_voice_volume,
+                    voice_volume=segment_voice_volume,
                     subtitle_secondary_text=secondary_text,
                 )
             )
@@ -665,6 +675,45 @@ async def _plan_stage(
         )
 
 
+async def _story_plan_stage(
+    project_id: int,
+    *,
+    target_aspect: str,
+    profile_name: str,
+    draft_id: int | None = None,
+    narration_enabled: bool = False,
+    narration_fallback: bool = True,
+) -> CutPlan:
+    """Load or generate a StoryScript and convert it into the normal CutPlan."""
+    async with async_session_maker() as session:
+        try:
+            document = await story_script.document_from_latest(session, project_id)
+        except (story_script.StoryScriptInputError, story_script.StoryScriptValidationError):
+            document = await story_script.generate_story_script(session, project_id)
+            await story_script.save_story_script(session, document)
+        narration_rows = {}
+        if narration_enabled:
+            narration_rows = await story_tts.generate_narration_assets(
+                session,
+                document,
+                draft_id=draft_id,
+                allow_fallback=narration_fallback,
+            )
+        narration_durations = story_tts.narration_durations_by_order(narration_rows)
+        narration_paths = {
+            order: str(row.file_path)
+            for order, row in narration_rows.items()
+            if row.file_path and row.status == story_tts.NARRATION_STATUS_DONE
+        }
+    return story_script.story_document_to_cut_plan(
+        document,
+        target_aspect_ratio=target_aspect,
+        profile_name=profile_name,
+        narration_durations_ms=narration_durations,
+        narration_audio_paths=narration_paths,
+    )
+
+
 # ---------- Public entry point ----------
 
 
@@ -694,6 +743,8 @@ async def run_render(
     smart_camera_enabled: bool | None = None,
     style_preset: str = "custom",
     edit_mode: str = "standard",
+    story_narration: bool = False,
+    story_narration_fallback: bool = True,
 ) -> dict[str, Any]:
     """Run the full M5 pipeline for ``project_id`` and return a summary.
 
@@ -768,12 +819,22 @@ async def run_render(
                 len(plan.segments),
             )
         else:
-            plan = await _plan_stage(
-                project_id,
-                target_duration_ms,
-                style_preset=style_preset,
-                edit_mode=edit_mode,
-            )
+            if edit_mode == "story":
+                plan = await _story_plan_stage(
+                    project_id,
+                    target_aspect=handle.target_aspect,
+                    profile_name=handle.profile_name,
+                    draft_id=handle.draft_id,
+                    narration_enabled=story_narration,
+                    narration_fallback=story_narration_fallback,
+                )
+            else:
+                plan = await _plan_stage(
+                    project_id,
+                    target_duration_ms,
+                    style_preset=style_preset,
+                    edit_mode=edit_mode,
+                )
             await _persist_plan(handle, plan, initial_voice_volume=initial_voice_volume)
     except Exception as exc:  # noqa: BLE001 — record + abort.
         reason = _failure_reason(exc)
@@ -892,6 +953,24 @@ async def run_render(
             len(srt_text),
             len(secondary_srt_text),
         )
+    elif edit_mode == "story":
+        try:
+            async with async_session_maker() as session:
+                story_document = await story_script.document_from_latest(session, project_id)
+            narration_durations = {
+                seg.order: int(getattr(seg, "timeline_duration_ms", 0) or 0)
+                for seg in plan.segments
+                if getattr(seg, "timeline_duration_ms", None)
+            }
+            srt_text = story_script.story_document_to_srt(
+                story_document,
+                narration_durations_ms=narration_durations,
+            )
+        except Exception as exc:  # noqa: BLE001 — fallback to transcript subtitles.
+            logger.warning("draft %d: story subtitle generation failed: %s", handle.draft_id, exc)
+            srt_text = subtitles.build_srt(plan, transcripts)
+        secondary_cues = subtitles.build_secondary_cues(plan, secondary_segments_by_asset)
+        secondary_srt_text = subtitles.render_srt(secondary_cues)
     else:
         srt_text = subtitles.build_srt(plan, transcripts)
         secondary_cues = subtitles.build_secondary_cues(plan, secondary_segments_by_asset)
@@ -1105,6 +1184,46 @@ async def run_render(
     has_voice_overrides = any(
         sv.voice_volume != 1.0 or sv.bgm_volume is not None for sv in segment_volumes
     )
+    narration_clips: list[bgm_mixer.NarrationClip] = []
+    timeline_cursor_ms = 0
+    for seg in plan.segments:
+        audio_path = getattr(seg, "narration_audio_path", None)
+        if audio_path:
+            narration_clips.append(
+                bgm_mixer.NarrationClip(
+                    start_s=timeline_cursor_ms / 1000.0,
+                    audio_path=Path(str(audio_path)),
+                    audio_intent=str(getattr(seg, "audio_intent", "narration") or "narration"),
+                )
+            )
+        timeline_cursor_ms += max(
+            1,
+            int(getattr(seg, "timeline_duration_ms", None) or (seg.asset_end_ms - seg.asset_start_ms)),
+        )
+    if narration_clips:
+        try:
+            tmp_narration = scratch_dir / f"draft_{handle.draft_id}_narration.mp4"
+            await asyncio.to_thread(
+                bgm_mixer.mix_narration,
+                output_path,
+                narration_clips,
+                tmp_narration,
+                segments=segment_volumes,
+            )
+            os.replace(tmp_narration, output_path)
+            # Source-audio intent volumes are already baked into the narration mix.
+            has_voice_overrides = False
+        except bgm_mixer.BgmMixError as exc:
+            if not story_narration_fallback:
+                await _set_stage_state(handle.draft_id, EditStep.BGM.value, f"failed:{type(exc).__name__}")
+                await _mark_failed(handle.draft_id, f"narration: {exc}")
+                summary["stages"][EditStep.BGM.value] = f"failed:{type(exc).__name__}"
+                return summary
+            logger.warning(
+                "narration mix failed for draft %d, keeping subtitle-only mp4: %s",
+                handle.draft_id,
+                exc,
+            )
     if bgm_source_path:
         try:
             tmp_mixed = scratch_dir / f"draft_{handle.draft_id}_bgm.mp4"

@@ -421,6 +421,12 @@ const EDIT_MODE_CARDS: readonly EditModeCard[] = [
     eyebrow: "Punch Short",
     hint: "先抓鉤子與反差，字幕語氣更有節奏，方便後續疊關鍵字特效。",
   },
+  {
+    value: "story",
+    label: "Narrato 故事模式",
+    eyebrow: "Story Script",
+    hint: "先整理短影音腳本與旁白，再用現有剪輯流程做成影片。",
+  },
 ];
 
 interface EditModePickerProps {
@@ -707,6 +713,7 @@ const EDIT_MODE_LABELS: Record<EditMode, string> = {
   standard: "一般剪輯",
   luxury_auto: "高級車質感",
   viral_short: "短片特效型",
+  story: "Narrato 故事模式",
 };
 
 function formatBasicSummary(opts: {
@@ -717,11 +724,13 @@ function formatBasicSummary(opts: {
   subtitlesOn: boolean;
   transitionsOn: boolean;
   autoReframe: boolean;
+  storyNarration: boolean;
 }): string {
   const flags: string[] = [];
   if (opts.subtitlesOn) flags.push("字幕");
   if (opts.transitionsOn) flags.push("轉場");
   if (opts.autoReframe) flags.push("自動構圖");
+  if (opts.storyNarration) flags.push("TTS 旁白");
   if (opts.stabilize) flags.push("畫面更穩");
   const flagText = flags.length > 0 ? flags.join(" / ") : "直接銜接";
   return `${opts.durationSec} 秒 · ${EDIT_MODE_LABELS[opts.editMode]} · ${STYLE_PRESET_LABELS[opts.stylePreset]} · ${flagText}`;
@@ -844,6 +853,8 @@ interface EditSettingsBlockProps {
   setAutoReframe: (v: boolean) => void;
   smartCamera: boolean;
   setSmartCamera: (v: boolean) => void;
+  storyNarration: boolean;
+  setStoryNarration: (v: boolean) => void;
   sourceAudioVolume: number;
   setSourceAudioVolume: (v: number) => void;
   triggering: boolean;
@@ -873,6 +884,7 @@ function EditSettingsBlock(props: EditSettingsBlockProps) {
     subtitlesOn: props.subtitlesOn,
     transitionsOn: props.transitionsOn,
     autoReframe: props.autoReframe,
+    storyNarration: props.storyNarration,
   });
   const bgmSummary = formatBgmSummary({
     source: props.currentBgmSource,
@@ -919,6 +931,15 @@ function EditSettingsBlock(props: EditSettingsBlockProps) {
           setSmartCamera={props.setSmartCamera}
           disabled={props.triggering}
         />
+        {props.editMode === "story" && (
+          <EditOptionToggle
+            label="產生 TTS 旁白音訊"
+            hint="開啟後會嘗試替 Narrato 故事腳本產生旁白；若 TTS 不可用，預設保留字幕版成片。"
+            value={props.storyNarration}
+            onChange={props.setStoryNarration}
+            disabled={props.triggering}
+          />
+        )}
       </SettingsGroup>
 
       <SettingsGroup title="配樂" summary={bgmSummary}>
@@ -1074,6 +1095,7 @@ export default function ProjectEdit() {
   // detail loads (see effect below). Toggling the checkbox PATCHes
   // the project so the value persists across page reloads.
   const [smartCamera, setSmartCamera] = useState<boolean>(false);
+  const [storyNarration, setStoryNarration] = useState<boolean>(false);
   // v0.18 — clip-style preset (fast / slow / commercial / artistic /
   // custom). ``custom`` is the legacy free-form default.
   const [stylePreset, setStylePreset] = useState<ClipStylePreset>("custom");
@@ -1475,6 +1497,8 @@ export default function ProjectEdit() {
           smart_camera: smartCamera,
           style_preset: stylePreset,
           edit_mode: editMode,
+          story_narration: editMode === "story" && storyNarration,
+          story_narration_fallback: true,
         });
         // The API now creates the Draft row synchronously, so resp.draft_id
         // is always a real id. Switch the selected version to it immediately
@@ -1509,6 +1533,7 @@ export default function ProjectEdit() {
       autoReframe,
       sourceAudioVolume,
       smartCamera,
+      storyNarration,
       stylePreset,
       editMode,
       refreshDrafts,
@@ -1532,6 +1557,8 @@ export default function ProjectEdit() {
           subtitles: subtitlesOn,
           auto_reframe: autoReframe,
           smart_camera: smartCamera,
+          story_narration: editMode === "story" && storyNarration,
+          story_narration_fallback: true,
         },
       });
       // The endpoint resets status to pending + reset progress and
@@ -1565,6 +1592,8 @@ export default function ProjectEdit() {
     subtitlesOn,
     autoReframe,
     smartCamera,
+    storyNarration,
+    editMode,
     polling,
     refreshDrafts,
   ]);
@@ -1822,6 +1851,8 @@ export default function ProjectEdit() {
             setAutoReframe={handleAutoReframeChange}
             smartCamera={smartCamera}
             setSmartCamera={handleSmartCameraChange}
+            storyNarration={storyNarration}
+            setStoryNarration={setStoryNarration}
             sourceAudioVolume={sourceAudioVolume}
             setSourceAudioVolume={handleSourceAudioVolumeChange}
             triggering={triggering}
@@ -2041,6 +2072,8 @@ export default function ProjectEdit() {
                   setAutoReframe={handleAutoReframeChange}
                   smartCamera={smartCamera}
                   setSmartCamera={handleSmartCameraChange}
+                  storyNarration={storyNarration}
+                  setStoryNarration={setStoryNarration}
                   sourceAudioVolume={sourceAudioVolume}
                   setSourceAudioVolume={handleSourceAudioVolumeChange}
                   triggering={triggering}
@@ -2097,6 +2130,7 @@ export default function ProjectEdit() {
                   subtitles: subtitlesOn,
                   autoReframe,
                   smartCamera,
+                  storyNarration: editMode === "story" && storyNarration,
                 }}
               />
             }
@@ -2112,6 +2146,7 @@ export default function ProjectEdit() {
                   subtitles: subtitlesOn,
                   autoReframe,
                   smartCamera,
+                  storyNarration: editMode === "story" && storyNarration,
                 }}
               />
             }

@@ -133,6 +133,27 @@
   gap: var(--space-3);
 }
 
+.analysis-story-narration-toggle {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 2px var(--space-2);
+  min-height: 48px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.analysis-story-narration-toggle input {
+  grid-row: span 2;
+}
+
+.analysis-story-narration-toggle small {
+  color: var(--text-muted);
+}
+
 .analysis-decision-hub__auto {
   min-height: 56px;
   box-shadow: 0 18px 44px rgba(0, 0, 0, 0.22);

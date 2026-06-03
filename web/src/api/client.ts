@@ -52,6 +52,9 @@ import type {
   ScriptCoverageOut,
   ScriptOut,
   ScriptUpsert,
+  StoryScriptGenerateRequest,
+  StoryScriptOut,
+  StoryScriptSaveRequest,
   SegmentVolumeOut,
   SegmentVolumePatch,
   SettingsOut,
@@ -568,6 +571,37 @@ export class ApiClient {
       if (err instanceof ApiError && err.status === 404) return null;
       throw err;
     }
+  }
+
+  async fetchStoryScript(projectId: number): Promise<StoryScriptOut | null> {
+    try {
+      return await this.get<StoryScriptOut>(`/projects/${projectId}/story-script`);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) return null;
+      throw err;
+    }
+  }
+
+  generateStoryScript(
+    projectId: number,
+    payload: StoryScriptGenerateRequest = {},
+  ): Promise<StoryScriptOut> {
+    return this.request<StoryScriptOut>(`/projects/${projectId}/story-script/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  }
+
+  saveStoryScript(
+    projectId: number,
+    payload: StoryScriptSaveRequest,
+  ): Promise<StoryScriptOut> {
+    return this.request<StoryScriptOut>(`/projects/${projectId}/story-script`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
   }
 
   triggerAnalyze(

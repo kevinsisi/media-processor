@@ -334,6 +334,13 @@ class CutPlanSegment:
     # the smart-camera dataclass (keeps the module-import graph
     # one-way).
     smart_camera_json: dict[str, Any] | None = None
+    # Story/Narrato narration support. ``timeline_duration_ms`` can exceed
+    # the source range when generated narration is longer than the selected
+    # visual span; renderer extends visuals to this duration without moving
+    # asset_start/end semantics.
+    audio_intent: str | None = None
+    timeline_duration_ms: int | None = None
+    narration_audio_path: str | None = None
 
 
 @dataclass(frozen=True)
@@ -349,7 +356,7 @@ class CutPlan:
 
     @property
     def total_duration_ms(self) -> int:
-        return sum(s.asset_end_ms - s.asset_start_ms for s in self.segments)
+        return sum(s.timeline_duration_ms or (s.asset_end_ms - s.asset_start_ms) for s in self.segments)
 
 
 # ---------- Prompt assembly ----------
@@ -1900,6 +1907,9 @@ def serialise_plan(plan_obj: CutPlan) -> dict[str, Any]:
                 # legacy / unscanned segments; the renderer treats
                 # ``None`` as "no camera move".
                 "smart_camera_json": s.smart_camera_json,
+                "audio_intent": s.audio_intent,
+                "timeline_duration_ms": s.timeline_duration_ms,
+                "narration_audio_path": s.narration_audio_path,
             }
             for s in plan_obj.segments
         ],
@@ -1936,6 +1946,17 @@ def deserialise_plan(blob: dict[str, Any]) -> CutPlan:
                 smart_camera_json=(
                     dict(seg["smart_camera_json"])
                     if isinstance(seg.get("smart_camera_json"), dict)
+                    else None
+                ),
+                audio_intent=(str(seg["audio_intent"]) if seg.get("audio_intent") else None),
+                timeline_duration_ms=(
+                    int(seg["timeline_duration_ms"])
+                    if seg.get("timeline_duration_ms") is not None
+                    else None
+                ),
+                narration_audio_path=(
+                    str(seg["narration_audio_path"])
+                    if seg.get("narration_audio_path")
                     else None
                 ),
             )

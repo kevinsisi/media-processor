@@ -5,6 +5,7 @@ import type {
   AnalysisStep,
   AssetAnalysisItem,
   AssetVariant,
+  StoryScriptOut,
   TranscriptOut,
   TranscriptSegmentIn,
   TranscriptSegmentOut,
@@ -1104,6 +1105,10 @@ export default function ProjectAnalysis() {
   const [batchRunning, setBatchRunning] = useState(false);
   const [batchStabilizing, setBatchStabilizing] = useState(false);
   const [autoGenerating, setAutoGenerating] = useState(false);
+  const [storyGenerating, setStoryGenerating] = useState(false);
+  const [storyRendering, setStoryRendering] = useState(false);
+  const [storyScript, setStoryScript] = useState<StoryScriptOut | null>(null);
+  const [storyNarration, setStoryNarration] = useState(false);
   // v0.18 — track per-asset translate-button busy state. The job runs
   // on the worker (poll picks up the new ``secondary_subtitle_summary``
   // when done); the local set just keeps the button disabled long
@@ -1265,6 +1270,28 @@ export default function ProjectAnalysis() {
 
   const project = polling.data?.project;
   const assets = polling.data?.assets ?? [];
+  const hasProjectScript = Boolean(polling.data?.has_script);
+  const storyTextReady = useMemo(
+    () => hasProjectScript || assets.some((asset) => (asset.transcript_summary?.segment_count ?? 0) > 0),
+    [assets, hasProjectScript],
+  );
+
+  useEffect(() => {
+    if (validProjectId == null) return;
+    let cancelled = false;
+    apiClient.fetchStoryScript(validProjectId)
+      .then((result) => {
+        if (!cancelled) setStoryScript(result);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setTriggerError(err instanceof Error ? `讀取故事腳本失敗：${err.message}` : String(err));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [validProjectId]);
 
   const unanalyzedIds = useMemo(
     () => assets.filter(isAssetUnanalyzed).map((a) => a.id),
@@ -1596,6 +1623,50 @@ export default function ProjectAnalysis() {
     }
   }, [assets.length, autoGenerating, latestDraft, navigate, validProjectId]);
 
+  const handleGenerateStoryScript = useCallback(async () => {
+    if (validProjectId == null || storyGenerating) return;
+    setStoryGenerating(true);
+    setTriggerError(null);
+    setStatusMessage(null);
+    try {
+      const result = await apiClient.generateStoryScript(validProjectId, { target_items: 8 });
+      setStoryScript(result);
+      setStatusMessage("Narrato 故事腳本已產生，可以先預覽再製作短影音。");
+    } catch (err) {
+      setTriggerError(
+        err instanceof Error ? `Narrato 故事腳本產生失敗：${err.message}` : String(err),
+      );
+    } finally {
+      setStoryGenerating(false);
+    }
+  }, [storyGenerating, validProjectId]);
+
+  const handleRenderStory = useCallback(async () => {
+    if (validProjectId == null || storyRendering) return;
+    setStoryRendering(true);
+    setTriggerError(null);
+    setStatusMessage(null);
+    try {
+      await apiClient.triggerProjectEdit(validProjectId, {
+        stabilize: false,
+        subtitles: true,
+        transitions: true,
+        auto_reframe: false,
+        style_preset: "commercial",
+        edit_mode: "story",
+        story_narration: storyNarration,
+        story_narration_fallback: true,
+      });
+      navigate(`/projects/${validProjectId}/edit`);
+    } catch (err) {
+      setTriggerError(
+        err instanceof Error ? `Narrato 故事模式製作失敗：${err.message}` : String(err),
+      );
+    } finally {
+      setStoryRendering(false);
+    }
+  }, [navigate, storyNarration, storyRendering, validProjectId]);
+
   return (
     <main className="page project-analysis">
       <header className="analysis-hero">
@@ -1665,6 +1736,65 @@ export default function ProjectAnalysis() {
       </header>
 
       <AnalysisProgressSummary assets={assets} />
+
+      {assets.length > 0 && (
+        <section className="analysis-decision-hub" aria-label="Narrato 故事腳本模式">
+          <div className="analysis-decision-hub__head">
+            <div>
+              <p className="analysis-decision-hub__kicker">Narrato Story Mode</p>
+              <h2 className="analysis-decision-hub__title">先寫短影音腳本，再製作成片</h2>
+              <p className="analysis-next-step__body">
+                {storyTextReady
+                  ? "已有逐字稿/字幕資料，可以不等 GPU 分析，先產生故事腳本。進階視覺分析完成後，畫面匹配會更好。"
+                  : "尚未看到可用逐字稿或字幕；請先完成語音轉文字，或之後上傳字幕，再產生故事腳本。"}
+              </p>
+            </div>
+            <div className="analysis-decision-hub__actions">
+              <label className="analysis-story-narration-toggle">
+                <input
+                  type="checkbox"
+                  checked={storyNarration}
+                  disabled={storyRendering}
+                  onChange={(e) => setStoryNarration(e.currentTarget.checked)}
+                />
+                <span>產生 TTS 旁白</span>
+                <small className="mono">TTS 不可用時保留字幕版</small>
+              </label>
+              <button
+                type="button"
+                className="cta cta--quiet"
+                onClick={() => void handleGenerateStoryScript()}
+                disabled={!storyTextReady || storyGenerating}
+                aria-busy={storyGenerating}
+              >
+                {storyGenerating ? "故事腳本產生中…" : storyScript ? "重新產生故事腳本" : "產生 Narrato 故事腳本"}
+              </button>
+              <button
+                type="button"
+                className="cta cta--primary"
+                onClick={() => void handleRenderStory()}
+                disabled={!storyScript || storyRendering}
+                aria-busy={storyRendering}
+              >
+                {storyRendering ? "製作中…" : "用故事腳本製作短影音 →"}
+              </button>
+            </div>
+          </div>
+          {storyScript && (
+            <div className="analysis-decision-grid">
+              {storyScript.items.slice(0, 4).map((item) => (
+                <article key={`${item.order}-${item.asset_id}`} className="analysis-decision-card">
+                  <span className="analysis-decision-card__step">{String(item.order).padStart(2, "0")}</span>
+                  <h3>{item.beat_type || "故事段落"}</h3>
+                  <strong>{item.audio_intent === "original" ? "保留原聲" : "旁白字幕"}</strong>
+                  <p>{item.narration}</p>
+                  <p className="mono">素材 #{item.asset_id} · {formatDuration(item.source_start_ms)}–{formatDuration(item.source_end_ms)}</p>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
       {assets.length > 0 && (
         <section className="analysis-decision-hub" aria-label="素材決策與剪輯入口">

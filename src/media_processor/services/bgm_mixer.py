@@ -47,6 +47,13 @@ class SegmentVolume:
     bgm_volume: float | None = None
 
 
+@dataclass(frozen=True)
+class NarrationClip:
+    start_s: float
+    audio_path: Path
+    audio_intent: str = "narration"
+
+
 # Step-function ducking curve. 0.55 is loud-but-not-clashing for a
 # speaking voice mixed at original gain; 0.20 still keeps the BGM
 # audible-but-out-of-the-way under voice. Tunable constants — bump
@@ -366,12 +373,86 @@ def apply_voice_volume(
         raise BgmMixError(f"voice-mix ffmpeg failed: {stderr[:500]}") from exc
 
 
+def mix_narration(
+    video_path: Path,
+    clips: list[NarrationClip],
+    output_path: Path,
+    *,
+    segments: list[SegmentVolume] | None = None,
+) -> None:
+    """Overlay generated StoryScript narration clips onto a rendered video."""
+    if not clips:
+        if _is_fake():
+            output_path.write_bytes(b"")
+            return
+        import shutil as _shutil
+
+        _shutil.copyfile(video_path, output_path)
+        return
+    if shutil.which("ffmpeg") is None and not _is_fake():
+        raise BgmMixError("ffmpeg not on PATH")
+    if not video_path.is_file() and not _is_fake():
+        raise BgmMixError(f"narration: video missing at {video_path}")
+    for clip in clips:
+        if not clip.audio_path.is_file() and not _is_fake():
+            raise BgmMixError(f"narration audio missing at {clip.audio_path}")
+
+    if _is_fake():
+        output_path.write_bytes(b"")
+        return
+
+    seg_list = list(segments or [])
+    voice_expr = _build_voice_volume_expr(seg_list)
+    cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(video_path)]
+    for clip in clips:
+        cmd += ["-i", str(clip.audio_path)]
+    filter_parts = [f"[0:a]volume=eval=frame:volume='{voice_expr}'[base]"]
+    mix_inputs = ["[base]"]
+    for idx, clip in enumerate(clips, start=1):
+        delay_ms = max(0, int(round(clip.start_s * 1000)))
+        label = f"n{idx}"
+        filter_parts.append(f"[{idx}:a]adelay={delay_ms}|{delay_ms},volume=1.0[{label}]")
+        mix_inputs.append(f"[{label}]")
+    filter_parts.append(
+        "".join(mix_inputs)
+        + f"amix=inputs={len(mix_inputs)}:duration=first:dropout_transition=0[aout]"
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    cmd += [
+        "-filter_complex",
+        ";".join(filter_parts),
+        "-map",
+        "0:v",
+        "-map",
+        "[aout]",
+        "-c:v",
+        "copy",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "192k",
+        "-shortest",
+        "-movflags",
+        "+faststart",
+        str(output_path),
+    ]
+    try:
+        subprocess.run(cmd, check=True, timeout=BGM_MIX_TIMEOUT_S, capture_output=True)
+    except subprocess.TimeoutExpired as exc:
+        raise BgmMixError(f"narration mix timed out after {BGM_MIX_TIMEOUT_S}s") from exc
+    except subprocess.CalledProcessError as exc:
+        stderr = exc.stderr.decode("utf-8", errors="replace") if exc.stderr else ""
+        raise BgmMixError(f"narration mix ffmpeg failed: {stderr[:500]}") from exc
+
+
 __all__ = [
     "BGM_MIX_TIMEOUT_S",
     "BGM_VOLUME_BASE",
     "BGM_VOLUME_DUCKED",
     "BgmMixError",
+    "NarrationClip",
     "SegmentVolume",
     "apply_voice_volume",
+    "mix_narration",
     "mix_bgm",
 ]

@@ -268,7 +268,7 @@ export type ClipStylePreset =
   | "artistic"
   | "custom";
 
-export type EditMode = "standard" | "luxury_auto" | "viral_short";
+export type EditMode = "standard" | "luxury_auto" | "viral_short" | "story";
 
 export interface DraftSummary {
   id: number;
@@ -359,6 +359,8 @@ export interface EditTriggerRequest {
   // / BGM hint together so the user gets a coherent rhythm.
   style_preset?: ClipStylePreset;
   edit_mode?: EditMode;
+  story_narration?: boolean;
+  story_narration_fallback?: boolean;
 }
 
 export interface EditTriggerResponse {
@@ -401,6 +403,8 @@ export interface RenderFlagsOverride {
   // re-render endpoints. Same priority semantics as the others:
   // body > snapshot > false (legacy default).
   smart_camera?: boolean;
+  story_narration?: boolean;
+  story_narration_fallback?: boolean;
 }
 
 export interface DraftReorderRequest {
@@ -543,6 +547,48 @@ export interface TranscriptOut {
 
 export interface TranscriptUpsert {
   segments: TranscriptSegmentIn[];
+}
+
+export type StoryAudioIntent = "narration" | "original" | "narration_with_original";
+
+export interface StoryScriptItemOut {
+  order: number;
+  asset_id: number;
+  source_start_ms: number;
+  source_end_ms: number;
+  picture: string;
+  narration: string;
+  audio_intent: StoryAudioIntent;
+  beat_type: string;
+  hook_type?: string | null;
+  reason: string;
+}
+
+export interface StoryScriptOut {
+  id: number | null;
+  project_id: number;
+  draft_id: number | null;
+  schema_version: string;
+  status: string;
+  provider: string | null;
+  model: string | null;
+  title: string;
+  summary: string;
+  items: StoryScriptItemOut[];
+  metadata: Record<string, unknown>;
+  error: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface StoryScriptGenerateRequest {
+  target_items?: number;
+}
+
+export interface StoryScriptSaveRequest {
+  title?: string;
+  summary?: string;
+  items: StoryScriptItemOut[];
 }
 
 export type CoverageClassification = "scripted" | "improvised";

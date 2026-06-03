@@ -52,6 +52,15 @@ class Settings(BaseSettings):
     # so no docker-compose change is required.
     watermark_dir: str = Field(default="/app/media/watermarks")
 
+    # Story/Narrato TTS narration. Disabled by default; story mode keeps
+    # subtitle-only rendering unless the caller explicitly enables generated
+    # narration and a provider is configured.
+    story_tts_provider: str = Field(default="")
+    story_tts_voice: str = Field(default="zh-TW-HsiaoChenNeural")
+    story_tts_model: str = Field(default="edge-tts")
+    story_tts_timeout_s: float = Field(default=45.0)
+    story_narration_dir: str = Field(default="/app/media/story_narration")
+
     # M4 — Whisper local STT in the worker container.
     # WHISPER_FAKE=1 swaps the engine for a deterministic canned zh-Hant
     # transcript so CI / non-GPU dev boxes can drive the rest of the pipeline.

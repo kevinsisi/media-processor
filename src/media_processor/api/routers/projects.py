@@ -47,6 +47,9 @@ from media_processor.api.schemas import (
     ScriptUpsert,
     SecondarySubtitleSummaryOut,
     SmartCameraPatch,
+    StoryScriptGenerateRequest,
+    StoryScriptOut,
+    StoryScriptSaveRequest,
     SubjectClassPatch,
     SubtitleStylePatch,
     TrackingSummaryOut,
@@ -63,13 +66,35 @@ from media_processor.models import (
     Project,
     Script,
     ScriptCoverage,
+    StoryScript,
 )
 from media_processor.services import asset_management as asset_mgmt
 from media_processor.services import asset_variants, project_fork
 from media_processor.services.object_tracking import aggregate_detected_classes
 from media_processor.services.queue import enqueue_asset_stabilization, enqueue_project_edit
+from media_processor.services import story_script as story_scripts
 
 router = APIRouter(prefix="/projects", tags=["projects"])
+
+
+def _story_script_out(row: StoryScript) -> StoryScriptOut:
+    payload = dict(row.script_json or {})
+    return StoryScriptOut(
+        id=row.id,
+        project_id=row.project_id,
+        draft_id=row.draft_id,
+        schema_version=row.schema_version,
+        status=row.status,
+        provider=row.provider,
+        model=row.model,
+        title=str(payload.get("title") or ""),
+        summary=str(payload.get("summary") or ""),
+        items=list(payload.get("items") or []),
+        metadata=dict(row.metadata_json or {}),
+        error=row.error,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
 
 
 def _draft_edit_mode(draft: Draft) -> EditModeLiteral:
@@ -77,7 +102,7 @@ def _draft_edit_mode(draft: Draft) -> EditModeLiteral:
     raw = flags.get("edit_mode")
     return (
         cast(EditModeLiteral, raw)
-        if raw in {"standard", "luxury_auto", "viral_short"}
+        if raw in {"standard", "luxury_auto", "viral_short", "story"}
         else "standard"
     )
 
@@ -429,6 +454,8 @@ async def trigger_project_edit(
             # later skip-plan re-render replays the same choice.
             "smart_camera": effective_smart_camera,
             "edit_mode": payload.edit_mode,
+            "story_narration": payload.story_narration,
+            "story_narration_fallback": payload.story_narration_fallback,
         },
     )
     session.add(new_draft)
@@ -454,6 +481,8 @@ async def trigger_project_edit(
             smart_camera=effective_smart_camera,
             style_preset=payload.style_preset,
             edit_mode=payload.edit_mode,
+            story_narration=payload.story_narration,
+            story_narration_fallback=payload.story_narration_fallback,
         )
     except Exception as exc:  # noqa: BLE001 — keep durable state truthful.
         new_draft.status = DraftStatus.FAILED.value
@@ -1008,6 +1037,82 @@ async def upsert_project_script(
         await session.execute(delete(ScriptCoverage).where(ScriptCoverage.asset_id.in_(asset_ids)))
         await session.commit()
     return ScriptOut.model_validate(row)
+
+
+@router.get("/{project_id}/story-script", response_model=StoryScriptOut)
+async def get_project_story_script(
+    project_id: int,
+    session: SessionDep,
+) -> StoryScriptOut:
+    project = await session.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
+    row = await story_scripts.latest_story_script(session, project_id)
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="story script not generated")
+    return _story_script_out(row)
+
+
+@router.post("/{project_id}/story-script/generate", response_model=StoryScriptOut)
+async def generate_project_story_script(
+    project_id: int,
+    payload: StoryScriptGenerateRequest,
+    session: SessionDep,
+) -> StoryScriptOut:
+    project = await session.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
+    try:
+        document = await story_scripts.generate_story_script(
+            session,
+            project_id,
+            target_items=payload.target_items,
+        )
+        row = await story_scripts.save_story_script(session, document)
+    except story_scripts.StoryScriptInputError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except story_scripts.StoryScriptValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    except story_scripts.StoryScriptError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    return _story_script_out(row)
+
+
+@router.put("/{project_id}/story-script", response_model=StoryScriptOut)
+async def save_project_story_script(
+    project_id: int,
+    payload: StoryScriptSaveRequest,
+    session: SessionDep,
+) -> StoryScriptOut:
+    project = await session.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
+    assets = (await session.execute(select(Asset).where(Asset.project_id == project_id))).scalars().all()
+    asset_durations = {asset.id: int(asset.duration_ms) for asset in assets}
+    raw = {
+        "schema_version": story_scripts.STORY_SCRIPT_SCHEMA_VERSION,
+        "project_id": project_id,
+        "title": payload.title,
+        "summary": payload.summary,
+        "items": [item.model_dump() for item in payload.items],
+    }
+    try:
+        document = story_scripts.validate_story_script(
+            raw,
+            project_id=project_id,
+            asset_durations=asset_durations,
+        )
+        document = story_scripts.StoryScriptDocument(
+            project_id=document.project_id,
+            title=document.title,
+            summary=document.summary,
+            items=document.items,
+            metadata={"source": "manual_edit", "used_visual_context": False},
+        )
+        row = await story_scripts.save_story_script(session, document)
+    except story_scripts.StoryScriptValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    return _story_script_out(row)
 
 
 # ----- M4 — project analysis page polling endpoint -----

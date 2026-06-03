@@ -197,6 +197,19 @@ def test_edit_trigger_persists_and_enqueues_edit_mode(
     assert draft["edit_mode"] == "luxury_auto"
 
 
+def test_edit_trigger_accepts_story_mode(app: FastAPI, fake_enqueue: list[EnqueueCall]) -> None:
+    client = TestClient(app)
+    resp = client.post("/projects/1/edit", json={"edit_mode": "story"})
+    assert resp.status_code == 202, resp.text
+    body = resp.json()
+    assert fake_enqueue == [(1, body["draft_id"], False, None, 1.0, "custom", "story")]
+
+    drafts_resp = client.get("/projects/1/drafts")
+    assert drafts_resp.status_code == 200
+    draft = drafts_resp.json()[0]
+    assert draft["edit_mode"] == "story"
+
+
 def test_edit_trigger_rejects_out_of_range_duration(
     app: FastAPI, fake_enqueue: list[EnqueueCall]
 ) -> None:

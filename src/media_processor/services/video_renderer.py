@@ -656,7 +656,12 @@ def _cut_segment(
     """
     out_path.parent.mkdir(parents=True, exist_ok=True)
     start_s = cut.asset_start_ms / 1000.0
-    duration_s = max(0.001, (cut.asset_end_ms - cut.asset_start_ms) / 1000.0)
+    source_duration_s = max(0.001, (cut.asset_end_ms - cut.asset_start_ms) / 1000.0)
+    output_duration_s = max(
+        source_duration_s,
+        (getattr(cut, "timeline_duration_ms", None) or 0) / 1000.0,
+    )
+    duration_s = output_duration_s
 
     vf_chain = aspect_filter(target_aspect, crop_region=crop_region)
     # v0.17 — auto-reframe input picks between three sources:
@@ -811,9 +816,13 @@ def _cut_segment(
         "-i",
         str(src),
         "-t",
-        f"{duration_s:.3f}",
+        f"{source_duration_s:.3f}",
         "-vf",
-        vf_chain,
+        (
+            f"{vf_chain},tpad=stop_mode=clone:stop_duration={output_duration_s - source_duration_s:.3f}"
+            if output_duration_s > source_duration_s + 0.001
+            else vf_chain
+        ),
         "-r",
         str(VIDEO_FPS),
         "-c:v",
@@ -925,7 +934,11 @@ def cut_segments(
         out_paths.append(out)
         source_stabilized = cut.asset_id in (stabilized_asset_ids or set())
         reframed_flags.append(bool(reframed) or source_stabilized)
-        timeline_start_s += max(0.001, (cut.asset_end_ms - cut.asset_start_ms) / 1000.0)
+        timeline_start_s += max(
+            0.001,
+            (getattr(cut, "timeline_duration_ms", None) or (cut.asset_end_ms - cut.asset_start_ms))
+            / 1000.0,
+        )
         if on_progress is not None:
             on_progress(cut.order + 1, total)
     return out_paths, reframed_flags
