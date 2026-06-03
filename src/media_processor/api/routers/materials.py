@@ -10,10 +10,10 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from media_processor.api.config import settings
@@ -79,7 +79,9 @@ def _video_to_out(v: pexels.PexelsVideo) -> PexelsVideoOut:
         user_name=v.user_name,
         best_file=PexelsVideoFileOut(
             url=best.url, width=best.width, height=best.height, fps=best.fps, quality=best.quality
-        ) if best else None,
+        )
+        if best
+        else None,
     )
 
 
@@ -160,6 +162,7 @@ async def import_pexels_video(
     # If search-by-id doesn't work, fetch directly via /videos/{id}
     if not results:
         import httpx as _httpx
+
         async with _httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(
                 f"https://api.pexels.com/videos/videos/{payload.pexels_video_id}",
@@ -205,6 +208,7 @@ async def import_pexels_video(
     # Enqueue analysis
     try:
         from media_processor.services.queue import enqueue_asset_analysis
+
         enqueue_asset_analysis(asset.id)
     except Exception as exc:  # noqa: BLE001
         logger.warning("Pexels import: analysis enqueue failed for asset %d: %s", asset.id, exc)

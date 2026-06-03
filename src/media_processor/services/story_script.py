@@ -13,7 +13,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from media_processor.api.config import settings
-from media_processor.services.opencc_converter import to_traditional
 from media_processor.models import (
     Asset,
     AssetTranscript,
@@ -26,6 +25,7 @@ from media_processor.services.edit_planner import (
     CutPlan,
     CutPlanSegment,
 )
+from media_processor.services.opencc_converter import to_traditional
 from media_processor.services.opencode_client import call_opencode_text
 from media_processor.services.settings_store import build_opencode_config, get_llm_api_keys
 from media_processor.services.subtitles import SubtitleCue, render_srt

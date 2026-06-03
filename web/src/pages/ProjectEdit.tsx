@@ -427,7 +427,23 @@ const EDIT_MODE_CARDS: readonly EditModeCard[] = [
     eyebrow: "Story Script",
     hint: "先整理短影音腳本與旁白，再用現有剪輯流程做成影片。",
   },
+  {
+    value: "documentary",
+    label: "紀錄片解說",
+    eyebrow: "Documentary",
+    hint: "先分析畫面內容，再自動寫解說稿並製作旁白型短影音。",
+  },
+  {
+    value: "drama_explain",
+    label: "短劇解說",
+    eyebrow: "Drama Recap",
+    hint: "從逐字稿找劇情爆點，生成短劇解說節奏的旁白版本。",
+  },
 ];
+
+function supportsNarrationMode(mode: EditMode): boolean {
+  return mode === "story" || mode === "documentary" || mode === "drama_explain";
+}
 
 interface EditModePickerProps {
   value: EditMode;
@@ -933,10 +949,10 @@ function EditSettingsBlock(props: EditSettingsBlockProps) {
           setSmartCamera={props.setSmartCamera}
           disabled={props.triggering}
         />
-        {props.editMode === "story" && (
+        {supportsNarrationMode(props.editMode) && (
           <EditOptionToggle
             label="產生 TTS 旁白音訊"
-            hint="開啟後會嘗試替 Narrato 故事腳本產生旁白；若 TTS 不可用，預設保留字幕版成片。"
+            hint="開啟後會嘗試替 Narrato/解說腳本產生旁白；若 TTS 不可用，預設保留字幕版成片。"
             value={props.storyNarration}
             onChange={props.setStoryNarration}
             disabled={props.triggering}
@@ -1499,7 +1515,7 @@ export default function ProjectEdit() {
           smart_camera: smartCamera,
           style_preset: stylePreset,
           edit_mode: editMode,
-          story_narration: editMode === "story" && storyNarration,
+          story_narration: supportsNarrationMode(editMode) && storyNarration,
           story_narration_fallback: true,
         });
         // The API now creates the Draft row synchronously, so resp.draft_id
@@ -1559,7 +1575,7 @@ export default function ProjectEdit() {
           subtitles: subtitlesOn,
           auto_reframe: autoReframe,
           smart_camera: smartCamera,
-          story_narration: editMode === "story" && storyNarration,
+          story_narration: supportsNarrationMode(editMode) && storyNarration,
           story_narration_fallback: true,
         },
       });
@@ -2132,7 +2148,7 @@ export default function ProjectEdit() {
                   subtitles: subtitlesOn,
                   autoReframe,
                   smartCamera,
-                  storyNarration: editMode === "story" && storyNarration,
+                  storyNarration: supportsNarrationMode(editMode) && storyNarration,
                 }}
               />
             }
@@ -2148,7 +2164,7 @@ export default function ProjectEdit() {
                   subtitles: subtitlesOn,
                   autoReframe,
                   smartCamera,
-                  storyNarration: editMode === "story" && storyNarration,
+                  storyNarration: supportsNarrationMode(editMode) && storyNarration,
                 }}
               />
             }

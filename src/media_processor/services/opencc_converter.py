@@ -11,10 +11,11 @@ container (which skips analysis deps) is unaffected.
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
-_converter: object | None = None
+_converter: Any | None = None
 _unavailable: bool = False
 
 
@@ -31,7 +32,7 @@ def to_traditional(text: str) -> str:
 
     try:
         if _converter is None:
-            from opencc import OpenCC  # type: ignore[import-untyped]
+            from opencc import OpenCC
 
             for config in ("s2twp", "s2tw", "s2t"):
                 try:
@@ -46,7 +47,7 @@ def to_traditional(text: str) -> str:
                 logger.warning("OpenCC: no working config found; zh-TW conversion disabled")
                 return text
 
-        return _converter.convert(text)  # type: ignore[union-attr]
+        return str(_converter.convert(text))
     except ImportError:
         _unavailable = True
         logger.debug("OpenCC not installed; zh-TW conversion disabled")
@@ -56,7 +57,7 @@ def to_traditional(text: str) -> str:
         return text
 
 
-def convert_script_items(items: list[dict]) -> list[dict]:
+def convert_script_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """In-place Traditional Chinese conversion for StoryScript items list.
 
     Converts 'narration' and 'picture' fields. Returns the same list

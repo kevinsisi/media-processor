@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from media_processor.services import frame_analysis_service as fas
+from media_processor.services.opencode_client import OpenCodeConfig
 
 
 class TestAnalysisToMarkdown:
@@ -39,8 +39,18 @@ class TestAnalysisToMarkdown:
     def test_multiple_batches_sorted_by_index(self):
         fa = {
             "batches": [
-                {"batch_index": 1, "time_range": "B", "frame_observations": [], "overall_activity_summary": "batch1"},
-                {"batch_index": 0, "time_range": "A", "frame_observations": [], "overall_activity_summary": "batch0"},
+                {
+                    "batch_index": 1,
+                    "time_range": "B",
+                    "frame_observations": [],
+                    "overall_activity_summary": "batch1",
+                },
+                {
+                    "batch_index": 0,
+                    "time_range": "A",
+                    "frame_observations": [],
+                    "overall_activity_summary": "batch0",
+                },
             ]
         }
         md = fas.analysis_to_markdown(fa)
@@ -104,8 +114,40 @@ class TestMsToSrtTime:
 class TestAnalyseAssetNoKeys:
     @pytest.mark.asyncio
     async def test_raises_when_no_api_keys(self):
-        with pytest.raises(RuntimeError, match="no Gemini API keys"):
+        with pytest.raises(RuntimeError, match="no Vision AI provider"):
             await fas.analyse_asset("/tmp/fake.mp4", api_keys=())
+
+    @pytest.mark.asyncio
+    async def test_accepts_opencode_without_gemini_keys(self):
+        with (
+            patch(
+                "media_processor.services.frame_analysis_service.extract_keyframes",
+                return_value=[MagicMock(spec=Path)],
+            ),
+            patch(
+                "media_processor.services.frame_analysis_service._analyse_batch",
+                new=AsyncMock(
+                    return_value={
+                        "batch_index": 0,
+                        "time_range": "00:00:00,000-00:00:03,000",
+                        "frame_observations": [],
+                        "overall_activity_summary": "ok",
+                    }
+                ),
+            ),
+        ):
+            result = await fas.analyse_asset(
+                "/tmp/fake.mp4",
+                api_keys=(),
+                opencode_config=OpenCodeConfig(
+                    servers=("http://opencode.local",),
+                    model="openai/gpt-5.5",
+                    variant="medium",
+                    password="",
+                ),
+            )
+
+        assert result["batch_count"] == 1
 
 
 class TestExtractKeyframesCacheHit:
@@ -119,7 +161,10 @@ class TestExtractKeyframesCacheHit:
         with (
             patch("media_processor.services.frame_analysis_service.settings") as mock_settings,
             patch("os.path.getmtime", return_value=1234.0),
-            patch("media_processor.services.frame_analysis_service._cache_key", return_value="abcde12345678901234"),
+            patch(
+                "media_processor.services.frame_analysis_service._cache_key",
+                return_value="abcde12345678901234",
+            ),
         ):
             mock_settings.frame_cache_dir = str(tmp_path / "frame_cache")
             frames = fas.extract_keyframes("/fake/video.mp4", interval_s=3.0)
@@ -128,6 +173,46 @@ class TestExtractKeyframesCacheHit:
 
 
 class TestAnalyseBatchFallback:
+    @pytest.mark.asyncio
+    async def test_opencode_used_before_gemini(self):
+        fake_frames = [MagicMock(spec=Path)]
+        for f in fake_frames:
+            f.read_bytes.return_value = b"fake_jpeg"
+
+        with (
+            patch(
+                "media_processor.services.frame_analysis_service._call_opencode_vision",
+                new=AsyncMock(
+                    return_value={
+                        "frame_observations": [{"observation": "opencode"}],
+                        "overall_activity_summary": "opencode summary",
+                    }
+                ),
+            ) as oc_mock,
+            patch(
+                "media_processor.services.frame_analysis_service._call_gemini_vision",
+                new=AsyncMock(return_value=None),
+            ) as gemini_mock,
+        ):
+            result = await fas._analyse_batch(
+                fake_frames,
+                batch_index=0,
+                start_ms=0,
+                end_ms=3000,
+                interval_s=3.0,
+                api_keys=("key1",),
+                opencode_config=OpenCodeConfig(
+                    servers=("http://opencode.local",),
+                    model="openai/gpt-5.5",
+                    variant="medium",
+                    password="",
+                ),
+            )
+
+        assert result["overall_activity_summary"] == "opencode summary"
+        oc_mock.assert_awaited_once()
+        gemini_mock.assert_not_awaited()
+
     @pytest.mark.asyncio
     async def test_all_keys_fail_returns_synthetic(self):
         fake_frames = [MagicMock(spec=Path) for _ in range(2)]

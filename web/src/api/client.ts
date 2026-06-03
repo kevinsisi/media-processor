@@ -55,6 +55,8 @@ import type {
   StoryScriptGenerateRequest,
   StoryScriptOut,
   StoryScriptSaveRequest,
+  StoryTtsSettingsIn,
+  StoryTtsStatusOut,
   SegmentVolumeOut,
   SegmentVolumePatch,
   SettingsOut,
@@ -914,6 +916,24 @@ export class ApiClient {
 
   getOpenCodeModels(): Promise<OpenCodeModelsOut> {
     return this.get<OpenCodeModelsOut>("/settings/opencode/models");
+  }
+
+  getStoryTtsStatus(): Promise<StoryTtsStatusOut> {
+    return this.get<StoryTtsStatusOut>("/settings/story-tts");
+  }
+
+  saveStoryTtsSettings(payload: StoryTtsSettingsIn): Promise<StoryTtsStatusOut> {
+    return this.request<StoryTtsStatusOut>("/settings/story-tts", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  }
+
+  clearStoryTtsSettings(): Promise<StoryTtsStatusOut> {
+    return this.request<StoryTtsStatusOut>("/settings/story-tts", {
+      method: "DELETE",
+    });
   }
 
   // ----- Pexels stock footage -----

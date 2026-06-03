@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -34,6 +33,7 @@ class PexelsError(RuntimeError):
 @dataclass
 class PexelsVideoFile:
     """A single video file variant from Pexels."""
+
     url: str
     width: int
     height: int
@@ -45,6 +45,7 @@ class PexelsVideoFile:
 @dataclass
 class PexelsVideo:
     """A Pexels video search result."""
+
     id: int
     url: str
     duration_s: int
@@ -104,9 +105,7 @@ def _parse_video(raw: dict[str, Any]) -> PexelsVideo:
 def _api_key() -> str:
     key = settings.pexels_api_key.strip()
     if not key:
-        raise PexelsError(
-            "PEXELS_API_KEY not configured — set it in settings or .env"
-        )
+        raise PexelsError("PEXELS_API_KEY not configured — set it in settings or .env")
     return key
 
 
@@ -146,10 +145,7 @@ async def search_videos(
 
     data = resp.json()
     videos = [_parse_video(v) for v in data.get("videos", [])]
-    return [
-        v for v in videos
-        if min_duration_s <= v.duration_s <= max_duration_s
-    ]
+    return [v for v in videos if min_duration_s <= v.duration_s <= max_duration_s]
 
 
 async def download_video(
@@ -177,18 +173,25 @@ async def download_video(
         return dest_path
 
     logger.info("Downloading Pexels video %d from %s", video.id, file_obj.url)
-    async with httpx.AsyncClient(timeout=_DOWNLOAD_TIMEOUT_S, follow_redirects=True) as client:
-        async with client.stream("GET", file_obj.url) as resp:
-            if resp.status_code != 200:
-                raise PexelsError(
-                    f"Pexels download error {resp.status_code} for video {video.id}"
-                )
-            with open(dest_path, "wb") as f:
-                async for chunk in resp.aiter_bytes(65536):
-                    f.write(chunk)
+    async with (
+        httpx.AsyncClient(
+            timeout=_DOWNLOAD_TIMEOUT_S,
+            follow_redirects=True,
+        ) as client,
+        client.stream("GET", file_obj.url) as resp,
+    ):
+        if resp.status_code != 200:
+            raise PexelsError(f"Pexels download error {resp.status_code} for video {video.id}")
+        with open(dest_path, "wb") as f:
+            async for chunk in resp.aiter_bytes(65536):
+                f.write(chunk)
 
-    logger.info("Downloaded Pexels video %d → %s (%.1f MB)",
-                video.id, dest_path, dest_path.stat().st_size / 1_048_576)
+    logger.info(
+        "Downloaded Pexels video %d → %s (%.1f MB)",
+        video.id,
+        dest_path,
+        dest_path.stat().st_size / 1_048_576,
+    )
     return dest_path
 
 

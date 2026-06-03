@@ -210,6 +210,24 @@ def test_edit_trigger_accepts_story_mode(app: FastAPI, fake_enqueue: list[Enqueu
     assert draft["edit_mode"] == "story"
 
 
+@pytest.mark.parametrize("edit_mode", ["documentary", "drama_explain"])
+def test_edit_trigger_accepts_narratoai_modes(
+    app: FastAPI,
+    fake_enqueue: list[EnqueueCall],
+    edit_mode: str,
+) -> None:
+    client = TestClient(app)
+    resp = client.post("/projects/1/edit", json={"edit_mode": edit_mode})
+    assert resp.status_code == 202, resp.text
+    body = resp.json()
+    assert fake_enqueue == [(1, body["draft_id"], False, None, 1.0, "custom", edit_mode)]
+
+    drafts_resp = client.get("/projects/1/drafts")
+    assert drafts_resp.status_code == 200
+    draft = drafts_resp.json()[0]
+    assert draft["edit_mode"] == edit_mode
+
+
 def test_edit_trigger_rejects_out_of_range_duration(
     app: FastAPI, fake_enqueue: list[EnqueueCall]
 ) -> None:

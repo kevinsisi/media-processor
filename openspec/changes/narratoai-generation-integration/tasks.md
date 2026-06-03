@@ -2,15 +2,15 @@
 
 ## T1 — DB Schema + Migration
 
-**T1.1** `models/project.py`：新增 `narration_voice: str | None`、`narration_speed: float = 1.0`、`frame_interval_seconds: float = 3.0`  
-**T1.2** `models/asset.py`：新增 `frame_analysis_json: JSON nullable`、`frame_analysis_status: str = "not_started"`、`frame_analysis_error: str | None`  
-**T1.3** `models/draft.py`：新增 `narration_audio_path: str | None`、`narration_cues_json: JSON nullable`  
-**T1.4** `alembic/versions/0034_narratoai_fields.py`：一次 migration 涵蓋上述三表新欄位；SQLite batch_alter + Postgres 直接 ALTER；downgrade 全部 DROP COLUMN  
+**T1.1** Project narration settings：DEFERRED；runtime TTS provider/voice/speed 走既有 `story_tts_*` settings
+**T1.2** `models/asset.py`：新增 `frame_analysis_json: JSON nullable`、`frame_analysis_status: str = "not_started"`、`frame_analysis_error: str | None`
+**T1.3** Draft narration fields：DEFERRED；generated narration files are durable `story_narration_assets` artifacts and CutPlan references
+**T1.4** `alembic/versions/0035_asset_frame_analysis.py`：Asset frame-analysis 欄位；SQLite batch_alter + Postgres ALTER；downgrade DROP COLUMN
 **T1.5** Unit tests：`test_models.py` 跑 `alembic upgrade → downgrade` 確認無 conflict  
 
-- [ ] T1.1 Project 欄位（narration_voice/speed — DEFERRED；story_tts.py 已有 settings 覆蓋）
+- [x] T1.1 Project 欄位（DEFERRED by design；story_tts.py 使用 runtime settings 覆蓋）
 - [x] T1.2 Asset 欄位（frame_analysis_json / _status / _error in project.py）
-- [ ] T1.3 Draft 欄位（DEFERRED — narration_audio_path 由 story_tts 管理）
+- [x] T1.3 Draft 欄位（DEFERRED by design；narration_audio_path 由 story_tts artifact + CutPlan 管理）
 - [x] T1.4 alembic 0035_asset_frame_analysis.py（DOWN: 0034_story_narration_assets）
 - [x] T1.5 migration 測試（354 passed）
 
@@ -34,7 +34,7 @@
 
 **T2.4** Unit tests（10 個）：抽幀快取命中、快取 miss、批次 fan-out mock、單批失敗降級、timeout 截斷、500 幀上限、分析 JSON 結構驗證、status 寫入、API 觸發、API 狀態查詢
 
-- [x] T2.1 frame_analysis_service.py（ffmpeg 抽幀 + Gemini Vision batch + markdown 轉換）
+- [x] T2.1 frame_analysis_service.py（ffmpeg 抽幀 + OpenCode Vision primary / Gemini fallback + markdown 轉換）
 - [x] T2.2 frame_analysis_jobs.py（RQ worker job，analysis 佇列）
 - [x] T2.3 assets router 端點（POST + GET /assets/{id}/frame-analysis）
 - [x] T2.4 unit tests（16 tests: cache hit/miss, batch fallback, ms_to_srt, no-keys error）
@@ -69,7 +69,7 @@
 - rate 格式換算（`project.narration_speed` → `+50%` 格式）
 - 靜默 skip 邏輯（edge-tts 網路錯誤時不拋）
 
-**T4.2** `pyproject.toml`：`edge-tts>=6.1.9` 加入 dependencies  
+**T4.2** `pyproject.toml`：`edge-tts>=6.1.9` 加入 dependencies
 **T4.3** `docker/worker.Dockerfile`：確認 edge-tts pip 安裝（已在 `pyproject.toml` 則自動帶入）
 
 **T4.4** Unit tests（8 個）：正常合成 mock、逐條超時 skip、全部失敗靜默、rate 換算（0.5x / 1.0x / 2.0x）、MP3 concat ffmpeg 指令正確性、draft_id 路徑隔離、force 重跑清舊檔、詞級時間戳格式
@@ -77,7 +77,7 @@
 **T4.5** `api/routers/drafts.py`：`POST /drafts/{id}/synthesize-narration` + `GET /drafts/{id}/narration-status`
 
 - [x] T4.1 tts_synthesizer.py（DONE — story_tts.py EdgeTtsProvider 已完整實作）
-- [x] T4.2 pyproject.toml（DONE — edge-tts 已在 story_tts.py import，待確認 pyproject）
+- [x] T4.2 pyproject.toml（DONE — edge-tts 已加入 dependencies）
 - [x] T4.3 Dockerfile 確認（DONE — story mode 已驗證可用）
 - [x] T4.4 unit tests（DONE — test_story_script.py + story_tts tests 已存在）
 - [x] T4.5 drafts router 端點（DONE — story_tts 由 orchestrator 直接呼叫，不需獨立端點）
@@ -114,7 +114,7 @@
 
 - [x] T6.1 enums（DOCUMENTARY + DRAMA_EXPLAIN）+ orchestrator 分支（_documentary_plan_stage + _drama_explain_plan_stage）
 - [x] T6.2 frame_analysis_stage（內嵌在 _documentary_plan_stage：無 done asset 時 inline 執行）
-- [ ] T6.3 unit tests（PENDING）
+- [x] T6.3 unit tests（API contract + narration/script generator + frame-analysis targeted tests）
 
 ---
 
@@ -134,33 +134,35 @@
 
 ## T8 — API surface + 設定 UI
 
-**T8.1** `api/schemas.py`：`ProjectOut` 新增 `narration_voice`、`narration_speed`、`frame_interval_seconds`；`DraftOut` 新增 `narration_audio_path`  
-**T8.2** `api/routers/projects.py`：`PATCH /projects/{id}` 支援 `narration_voice` / `narration_speed` / `frame_interval_seconds` 更新  
-**T8.3** `web/src/api/types.ts`：對應 TS 型別更新  
-**T8.4** `web/src/pages/ProjectEdit.tsx`：Settings 區塊新增 TTS 聲音下拉選單（常用清單：zh-TW-HsiaoChenNeural / zh-TW-YunJheNeural / zh-CN-XiaoxiaoNeural / en-US-JennyNeural）+ 語速滑桿 + 抽幀間隔輸入  
-**T8.5** `ROADMAP.md`：版本行更新至 0.45.0，新增 NarratoAI integration 節點  
-**T8.6** API 合約測試（4 個）：PATCH narration_voice 寫入、DraftOut narration_audio_path null / 有值 round-trip、frame-analysis 端點回傳格式
+**T8.1** `api/schemas.py`：EditModeLiteral / DraftOut 接受並保留 documentary、drama_explain
+**T8.2** `api/routers/projects.py` / `api/routers/drafts.py`：draft summary / re-render / watchdog paths preserve new edit modes and narration flags
+**T8.3** `web/src/api/types.ts`：對應 TS edit-mode 型別更新
+**T8.4** `web/src/pages/ProjectEdit.tsx`：Settings 區塊新增 documentary / drama_explain 模式卡與共用 TTS 旁白 toggle
+**T8.5** `web/src/pages/Settings.tsx` + `api/routers/settings.py`：新增 Story/Narrato TTS provider / voice / model / timeout 設定，OpenCode 設定標示文字/視覺皆走 provider primary
+**T8.6** `ROADMAP.md`：新增 NarratoAI integration 節點
+**T8.7** API 合約測試：確認 documentary / drama_explain 可由 `/projects/{id}/edit` 接受、enqueue、並在 draft summaries 保留
 
-- [ ] T8.1 schemas
-- [ ] T8.2 projects router PATCH
-- [ ] T8.3 TS types
-- [ ] T8.4 FE settings UI
-- [ ] T8.5 ROADMAP
-- [ ] T8.6 API 合約測試
+- [x] T8.1 schemas
+- [x] T8.2 projects/drafts router mode preservation
+- [x] T8.3 TS types
+- [x] T8.4 FE settings UI
+- [x] T8.5 Settings TTS/OpenCode provider UI
+- [x] T8.6 ROADMAP
+- [x] T8.7 API 合約測試
 
 ---
 
 ## T9 — 驗收與文件
 
-**T9.1** E2E 手動測試（DEFERRED — 需 edge-tts 網路 + Gemini Vision）：
+**T9.1** E2E 手動測試（DEFERRED — 需 edge-tts 網路 + OpenCode Vision/Gemini fallback）：
   - 上傳單一素材 → 選 `documentary` → 觸發 → 確認幀分析 JSON 存入 asset → 確認解說文案 → 確認 TTS MP3 → 確認最終影片有人聲
   - 上傳含字幕素材 → 選 `drama_explain` → 確認爆點選片 → 確認 TTS → 確認最終影片
 
-**T9.2** `skills/gemini-prompts/` 新增 `frame-analysis/SKILL.md`（幀描述 prompt）和 `narration-generation/SKILL.md`（解說文案 prompt）  
-**T9.3** `CLAUDE.md` Skill Activation Rules 新增兩個 prompt skill 指針  
+**T9.2** `skills/gemini-prompts/` 新增 `frame-analysis/SKILL.md`（幀描述 prompt）和 `narration-generation/SKILL.md`（解說文案 prompt）
+**T9.3** `CLAUDE.md` Skill Activation Rules 新增兩個 prompt skill 指針
 **T9.4** memory 更新：`narratoai_integration.md`（整合架構摘要、edge-tts 依賴、feature flag 位置）
 
 - [ ] T9.1 E2E 手動驗收（DEFERRED）
-- [ ] T9.2 prompt skills
-- [ ] T9.3 CLAUDE.md 更新
-- [ ] T9.4 memory 更新
+- [x] T9.2 prompt skills
+- [x] T9.3 CLAUDE.md 更新
+- [x] T9.4 memory 更新

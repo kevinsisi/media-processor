@@ -55,11 +55,11 @@ AUDIO_BITRATE: str = "128k"
 
 # Hardware-accelerated codec priority list (NarratoAI 7-level fallback pattern).
 _HW_CODEC_CANDIDATES: tuple[str, ...] = (
-    "h264_nvenc",    # NVIDIA NVENC
-    "h264_amf",      # AMD AMF
-    "h264_qsv",      # Intel QuickSync
+    "h264_nvenc",  # NVIDIA NVENC
+    "h264_amf",  # AMD AMF
+    "h264_qsv",  # Intel QuickSync
     "h264_videotoolbox",  # macOS VideoToolbox
-    "libx264",       # software fallback (always available)
+    "libx264",  # software fallback (always available)
 )
 _detected_hw_codec: str | None = None  # cached after first probe
 
@@ -72,7 +72,9 @@ def _best_video_codec() -> str:
     try:
         result = subprocess.run(
             ["ffmpeg", "-hide_banner", "-encoders"],
-            capture_output=True, text=True, timeout=8,
+            capture_output=True,
+            text=True,
+            timeout=8,
         )
         available = result.stdout + result.stderr
         for codec in _HW_CODEC_CANDIDATES:

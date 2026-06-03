@@ -10,7 +10,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, cast
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -87,7 +87,7 @@ class EdgeTtsProvider:
         except Exception as exc:  # pragma: no cover
             raise StoryTtsError("Edge TTS provider is not installed") from exc
 
-        word_events: list[dict] = []
+        word_events: list[dict[str, object]] = []
         audio_chunks: list[bytes] = []
 
         async def _stream() -> None:
@@ -96,11 +96,13 @@ class EdgeTtsProvider:
                 if chunk["type"] == "audio":
                     audio_chunks.append(chunk["data"])
                 elif chunk["type"] == "WordBoundary":
-                    word_events.append({
-                        "offset": chunk.get("offset", 0),   # 100-ns units
-                        "duration": chunk.get("duration", 0),
-                        "text": chunk.get("text", ""),
-                    })
+                    word_events.append(
+                        {
+                            "offset": chunk.get("offset", 0),  # 100-ns units
+                            "duration": chunk.get("duration", 0),
+                            "text": chunk.get("text", ""),
+                        }
+                    )
 
         await asyncio.wait_for(_stream(), timeout=timeout_s)
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -112,16 +114,18 @@ class EdgeTtsProvider:
         return _word_events_to_srt(word_events)
 
 
-def _word_events_to_srt(events: list[dict]) -> str:
+def _word_events_to_srt(events: list[dict[str, object]]) -> str:
     """Convert edge-tts WordBoundary events (100-ns offsets) to SRT."""
     lines: list[str] = []
     for idx, ev in enumerate(events, 1):
-        start_ms = ev["offset"] // 10_000        # 100-ns → ms
-        dur_ms = max(200, ev["duration"] // 10_000)
+        offset = cast(int | str, ev["offset"])
+        duration = cast(int | str, ev["duration"])
+        start_ms = int(offset) // 10_000  # 100-ns → ms
+        dur_ms = max(200, int(duration) // 10_000)
         end_ms = start_ms + dur_ms
         lines.append(str(idx))
         lines.append(f"{_ms_to_srt(start_ms)} --> {_ms_to_srt(end_ms)}")
-        lines.append(ev["text"])
+        lines.append(str(ev["text"]))
         lines.append("")
     return "\n".join(lines)
 
@@ -167,9 +171,7 @@ class AzureTtsProvider:
         async with httpx.AsyncClient(timeout=timeout_s) as client:
             resp = await client.post(url, content=ssml.encode("utf-8"), headers=headers)
         if resp.status_code != 200:
-            raise StoryTtsError(
-                f"Azure TTS error {resp.status_code}: {resp.text[:300]}"
-            )
+            raise StoryTtsError(f"Azure TTS error {resp.status_code}: {resp.text[:300]}")
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_bytes(resp.content)
 
@@ -190,7 +192,6 @@ class TencentTtsProvider:
         import base64
         import hashlib
         import hmac
-        import json
         import time
 
         import httpx

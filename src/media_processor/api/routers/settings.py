@@ -22,13 +22,19 @@ from media_processor.services.settings_store import (
     OpenCodeServer,
     clear_llm_api_keys,
     clear_opencode_settings,
+    clear_story_tts_settings,
     get_opencode_servers,
     get_opencode_text_model,
     get_opencode_text_variant,
     get_pool_summary,
+    get_story_tts_model,
+    get_story_tts_provider,
+    get_story_tts_timeout,
+    get_story_tts_voice,
     parse_keys_input,
     set_llm_api_keys,
     set_opencode_settings,
+    set_story_tts_settings,
 )
 
 logger = logging.getLogger(__name__)
@@ -50,6 +56,24 @@ class SettingsOut(BaseModel):
     llm_model: str
     llm_timeout_s: float
     llm_api_keys: KeyPoolOut
+
+
+class StoryTtsStatusOut(BaseModel):
+    provider: str
+    provider_source: str
+    voice: str
+    voice_source: str
+    model: str
+    model_source: str
+    timeout_s: float
+    timeout_source: str
+
+
+class StoryTtsSettingsIn(BaseModel):
+    provider: str | None = Field(default=None, max_length=32)
+    voice: str | None = Field(default=None, max_length=128)
+    model: str | None = Field(default=None, max_length=128)
+    timeout_s: float | None = Field(default=None, ge=1.0, le=300.0)
 
 
 class LLMKeysUpdateIn(BaseModel):
@@ -130,6 +154,49 @@ async def _build_opencode_status(session: SessionDep) -> OpenCodeStatusOut:
         text_variant=variant,
         text_variant_source=variant_source,
     )
+
+
+async def _build_story_tts_status(session: SessionDep) -> StoryTtsStatusOut:
+    provider, provider_source = await get_story_tts_provider(session)
+    voice, voice_source = await get_story_tts_voice(session)
+    model, model_source = await get_story_tts_model(session)
+    timeout_s, timeout_source = await get_story_tts_timeout(session)
+    return StoryTtsStatusOut(
+        provider=provider,
+        provider_source=provider_source,
+        voice=voice,
+        voice_source=voice_source,
+        model=model,
+        model_source=model_source,
+        timeout_s=timeout_s,
+        timeout_source=timeout_source,
+    )
+
+
+@router.get("/story-tts", response_model=StoryTtsStatusOut)
+async def get_story_tts_settings(session: SessionDep) -> StoryTtsStatusOut:
+    return await _build_story_tts_status(session)
+
+
+@router.put("/story-tts", response_model=StoryTtsStatusOut)
+async def update_story_tts_settings(
+    payload: StoryTtsSettingsIn,
+    session: SessionDep,
+) -> StoryTtsStatusOut:
+    await set_story_tts_settings(
+        session,
+        provider=payload.provider,
+        voice=payload.voice,
+        model=payload.model,
+        timeout_s=payload.timeout_s,
+    )
+    return await _build_story_tts_status(session)
+
+
+@router.delete("/story-tts", response_model=StoryTtsStatusOut)
+async def delete_story_tts_settings(session: SessionDep) -> StoryTtsStatusOut:
+    await clear_story_tts_settings(session)
+    return await _build_story_tts_status(session)
 
 
 @router.get("/opencode", response_model=OpenCodeStatusOut)

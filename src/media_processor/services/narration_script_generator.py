@@ -14,26 +14,25 @@ drama-focused prompt override.
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from media_processor.models import Asset
 from media_processor.services import story_script
 from media_processor.services.frame_analysis_service import analysis_to_markdown
+from media_processor.services.opencode_client import call_opencode_text
+from media_processor.services.settings_store import build_opencode_config, get_llm_api_keys
 from media_processor.services.story_script import (
     STORY_SCRIPT_SCHEMA_VERSION,
     StoryInputBundle,
     StoryInputSegment,
     StoryScriptDocument,
     StoryScriptInputError,
+    _call_gemini,
     _heuristic_document,
     _repair_json_payload,
-    _call_gemini,
     validate_story_script,
 )
-from media_processor.services.settings_store import build_opencode_config, get_llm_api_keys
-from media_processor.services.opencode_client import call_opencode_text
 
 logger = logging.getLogger(__name__)
 
@@ -211,13 +210,15 @@ async def generate_documentary_script(
         start_ms = _parse_ts_ms(first_obs.get("timestamp", "00:00:00,000"))
         end_ms = min(asset_duration_ms, start_ms + int(interval_s * len(obs_list) * 1000))
         if end_ms > start_ms:
-            segments.append(StoryInputSegment(
-                asset_id=asset.id,
-                asset_duration_ms=asset_duration_ms,
-                start_ms=start_ms,
-                end_ms=end_ms,
-                text=summary or "（自動選段）",
-            ))
+            segments.append(
+                StoryInputSegment(
+                    asset_id=asset.id,
+                    asset_duration_ms=asset_duration_ms,
+                    start_ms=start_ms,
+                    end_ms=end_ms,
+                    text=summary or "（自動選段）",
+                )
+            )
 
     bundle = StoryInputBundle(
         project_id=asset.project_id,

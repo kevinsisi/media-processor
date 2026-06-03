@@ -129,6 +129,100 @@ async def call_opencode_text(
         return text
 
 
+async def call_opencode_vision(
+    *,
+    prompt: str,
+    images: list[tuple[str, str]],
+    system_prompt: str | None = None,
+    server_url: str,
+    password: str,
+    model: str,
+    variant: str,
+    timeout_s: float,
+) -> str | None:
+    """One OpenCode multimodal call with base64 image parts.
+
+    ``images`` is ``[(mime_type, base64_data), ...]``. Servers or models that
+    do not accept image/file parts return ``None`` so callers can fall back.
+    """
+    base = server_url.rstrip("/")
+    headers = _auth_headers(password)
+    provider_id, model_id = _parse_model_ref(model)
+
+    async with httpx.AsyncClient(timeout=timeout_s) as client:
+        try:
+            resp = await client.post(
+                f"{base}/session",
+                json={
+                    "title": "media-processor-vision",
+                    "agent": "user",
+                    "model": {"providerID": provider_id, "id": model_id, "variant": variant},
+                },
+                headers=headers,
+            )
+        except httpx.HTTPError as exc:
+            logger.warning("opencode vision /session transport error (%s): %s", base, exc)
+            return None
+        if resp.status_code >= 400:
+            logger.warning("opencode vision /session returned HTTP %d (%s)", resp.status_code, base)
+            return None
+
+        try:
+            session_id: str = resp.json()["id"]
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("opencode vision /session response parse failed (%s): %s", base, exc)
+            return None
+
+        parts: list[dict[str, object]] = [{"type": "text", "text": prompt}]
+        parts.extend(
+            {
+                "type": "file",
+                "mime": mime_type,
+                "mimeType": mime_type,
+                "data": data,
+            }
+            for mime_type, data in images
+        )
+        body: dict[str, object] = {
+            "agent": "user",
+            "model": {"providerID": provider_id, "modelID": model_id},
+            "parts": parts,
+        }
+        if system_prompt:
+            body["system"] = system_prompt
+
+        try:
+            resp = await client.post(
+                f"{base}/session/{session_id}/message",
+                json=body,
+                headers=headers,
+            )
+        except httpx.HTTPError as exc:
+            logger.warning("opencode vision /message transport error (%s): %s", base, exc)
+            asyncio.create_task(_delete_session(base, session_id, headers))
+            return None
+
+        asyncio.create_task(_delete_session(base, session_id, headers))
+        if resp.status_code >= 400:
+            logger.warning("opencode vision /message returned HTTP %d (%s)", resp.status_code, base)
+            return None
+
+        try:
+            parts_out = resp.json().get("parts") or []
+            text = next(
+                (p["text"] for p in parts_out if isinstance(p, dict) and p.get("type") == "text"),
+                None,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("opencode vision /message response parse failed (%s): %s", base, exc)
+            return None
+
+        if not isinstance(text, str) or not text.strip():
+            logger.warning("opencode vision returned empty text (%s)", base)
+            return None
+        return text
+
+
 async def _delete_session(base: str, session_id: str, headers: dict[str, str]) -> None:
     """Fire-and-forget session cleanup. Errors are silently ignored."""
     try:

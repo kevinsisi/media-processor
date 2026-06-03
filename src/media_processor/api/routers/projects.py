@@ -109,7 +109,8 @@ def _draft_edit_mode(draft: Draft) -> EditModeLiteral:
     raw = flags.get("edit_mode")
     return (
         cast(EditModeLiteral, raw)
-        if raw in {"standard", "luxury_auto", "viral_short", "story"}
+        if raw
+        in {"standard", "luxury_auto", "viral_short", "story", "documentary", "drama_explain"}
         else "standard"
     )
 

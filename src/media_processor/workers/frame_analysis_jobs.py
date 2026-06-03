@@ -28,12 +28,10 @@ def analyse_asset_frames(
 
 
 async def _run(asset_id: int, *, interval_s: float, force: bool) -> dict[str, Any]:
-    from sqlalchemy import select
-
     from media_processor.core.db import async_session_maker
     from media_processor.models import Asset
     from media_processor.services import frame_analysis_service
-    from media_processor.services.settings_store import get_llm_api_keys
+    from media_processor.services.settings_store import build_opencode_config, get_llm_api_keys
 
     async with async_session_maker() as session:
         asset = await session.get(Asset, asset_id)
@@ -57,8 +55,9 @@ async def _run(asset_id: int, *, interval_s: float, force: bool) -> dict[str, An
                 raise RuntimeError(f"asset {asset_id} not found after status update")
 
             api_keys = await get_llm_api_keys(session)
-            if not api_keys:
-                raise RuntimeError("no Gemini API keys available for frame analysis")
+            opencode_config = await build_opencode_config(session)
+            if not api_keys and opencode_config is None:
+                raise RuntimeError("no Vision AI provider configured for frame analysis")
 
             asset.frame_analysis_status = "running"
             await session.commit()
@@ -66,6 +65,7 @@ async def _run(asset_id: int, *, interval_s: float, force: bool) -> dict[str, An
         result = await frame_analysis_service.analyse_asset(
             str(asset.file_path),
             api_keys=tuple(api_keys),
+            opencode_config=opencode_config,
             interval_s=interval_s,
         )
 

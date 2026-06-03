@@ -75,7 +75,14 @@ ProfileLoaderDep = Annotated[Callable[[str], ProfileSpec], Depends(get_profile_l
 # "/api/" → api:8000, so the full URL the browser sees is
 # "/api/media/drafts/{project_id}/v{N}.mp4".
 DRAFT_URL_PREFIX = "/api/media/drafts"
-_VALID_EDIT_MODES = {"standard", "luxury_auto", "viral_short", "story"}
+_VALID_EDIT_MODES = {
+    "standard",
+    "luxury_auto",
+    "viral_short",
+    "story",
+    "documentary",
+    "drama_explain",
+}
 
 
 def _draft_edit_mode(draft: Draft) -> EditModeLiteral:

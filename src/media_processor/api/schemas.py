@@ -48,7 +48,14 @@ SUBTITLE_COLOR_PATTERN = r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$"
 
 # v0.18 — clip-style preset that biases planner span / transition / BGM hint.
 ClipStylePresetLiteral = Literal["fast", "slow", "commercial", "artistic", "custom"]
-EditModeLiteral = Literal["standard", "luxury_auto", "viral_short", "story"]
+EditModeLiteral = Literal[
+    "standard",
+    "luxury_auto",
+    "viral_short",
+    "story",
+    "documentary",
+    "drama_explain",
+]
 DraftExportStatusLiteral = Literal["queued", "running", "done", "failed"]
 AssetVariantLiteral = Literal["raw", "stabilized"]
 

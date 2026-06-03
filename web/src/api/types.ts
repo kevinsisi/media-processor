@@ -1067,6 +1067,24 @@ export interface OpenCodeModelsOut {
   warning: string | null;
 }
 
+export interface StoryTtsStatusOut {
+  provider: string;
+  provider_source: OpenCodeSource;
+  voice: string;
+  voice_source: OpenCodeSource;
+  model: string;
+  model_source: OpenCodeSource;
+  timeout_s: number;
+  timeout_source: OpenCodeSource;
+}
+
+export interface StoryTtsSettingsIn {
+  provider?: string;
+  voice?: string;
+  model?: string;
+  timeout_s?: number;
+}
+
 // v0.27.1 — one active-draft reference returned alongside a delete
 // outcome. Lets the FE render "v3, v5 still using this — really
 // delete?" without making a separate fetch for draft state.

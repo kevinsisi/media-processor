@@ -32,6 +32,8 @@ from media_processor.models import (
     DraftStatus,
     EditStep,
     Project,
+    Script,
+    StoryNarrationAsset,
     SubtitleCueRow,
 )
 from media_processor.profile.loader import ProfileSpec, load_profile
@@ -49,7 +51,11 @@ from media_processor.services import (
     video_renderer,
 )
 from media_processor.services.edit_planner import CutPlan
-from media_processor.services.settings_store import build_opencode_config, get_llm_api_keys
+from media_processor.services.settings_store import (
+    build_opencode_config,
+    build_story_tts_config,
+    get_llm_api_keys,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -696,11 +702,13 @@ async def _story_plan_stage(
             await story_script.save_story_script(session, document)
         narration_rows = {}
         if narration_enabled:
+            tts_config = await build_story_tts_config(session)
             narration_rows = await story_tts.generate_narration_assets(
                 session,
                 document,
                 draft_id=draft_id,
                 allow_fallback=narration_fallback,
+                config=tts_config,
             )
         narration_durations = story_tts.narration_durations_by_order(narration_rows)
         narration_paths = {
@@ -733,12 +741,14 @@ async def _documentary_plan_stage(
     without frame analysis fall back to the standard story pipeline.
     """
     async with async_session_maker() as session:
-        from sqlalchemy import select as _select
-        from media_processor.models import Asset, Script
-
         assets = (
-            (await session.execute(_select(Asset).where(Asset.project_id == project_id).order_by(Asset.id)))
-            .scalars().all()
+            (
+                await session.execute(
+                    select(Asset).where(Asset.project_id == project_id).order_by(Asset.id)
+                )
+            )
+            .scalars()
+            .all()
         )
         if not assets:
             raise story_script.StoryScriptInputError("no assets for documentary mode")
@@ -749,10 +759,10 @@ async def _documentary_plan_stage(
             None,
         )
 
-        project_obj = await session.get(__import__("media_processor.models", fromlist=["Project"]).Project, project_id)
+        project_obj = await session.get(Project, project_id)
         project_name = project_obj.name if project_obj else f"project-{project_id}"
         script_obj = (
-            await session.execute(_select(Script).where(Script.project_id == project_id).limit(1))
+            await session.execute(select(Script).where(Script.project_id == project_id).limit(1))
         ).scalar_one_or_none()
         project_brief = script_obj.body[:500] if script_obj else ""
 
@@ -766,7 +776,9 @@ async def _documentary_plan_stage(
                 )
                 await story_script.save_story_script(session, document, draft_id=draft_id)
             except Exception as exc:
-                logger.warning("documentary script generation failed, falling back to story: %s", exc)
+                logger.warning(
+                    "documentary script generation failed, falling back to story: %s", exc
+                )
                 document = await story_script.generate_story_script(session, project_id)
                 await story_script.save_story_script(session, document, draft_id=draft_id)
         else:
@@ -776,12 +788,14 @@ async def _documentary_plan_stage(
             )
             # Enqueue frame analysis for all assets and fall back to story for this render
             api_keys = await get_llm_api_keys(session)
-            if api_keys and assets:
+            opencode_config = await build_opencode_config(session)
+            if (api_keys or opencode_config is not None) and assets:
                 first_asset = assets[0]
                 try:
                     fa_result = await frame_analysis_service.analyse_asset(
                         str(first_asset.file_path),
                         api_keys=tuple(api_keys),
+                        opencode_config=opencode_config,
                     )
                     first_asset.frame_analysis_json = fa_result
                     first_asset.frame_analysis_status = "done"
@@ -802,15 +816,17 @@ async def _documentary_plan_stage(
                 document = await story_script.generate_story_script(session, project_id)
                 await story_script.save_story_script(session, document, draft_id=draft_id)
 
-        narration_rows: dict[int, object] = {}
+        narration_rows: dict[int, StoryNarrationAsset] = {}
         if narration_enabled:
+            tts_config = await build_story_tts_config(session)
             narration_rows = await story_tts.generate_narration_assets(
                 session,
                 document,
                 draft_id=draft_id,
                 allow_fallback=narration_fallback,
+                config=tts_config,
             )
-        narration_durations = story_tts.narration_durations_by_order(narration_rows)  # type: ignore[arg-type]
+        narration_durations = story_tts.narration_durations_by_order(narration_rows)
         narration_paths = {
             order: str(row.file_path)
             for order, row in narration_rows.items()
@@ -836,13 +852,10 @@ async def _drama_explain_plan_stage(
 ) -> CutPlan:
     """NarratoAI drama explain mode: Whisper transcript → drama explanation → TTS."""
     async with async_session_maker() as session:
-        from sqlalchemy import select as _select
-        from media_processor.models import Script
-
-        project_obj = await session.get(__import__("media_processor.models", fromlist=["Project"]).Project, project_id)
+        project_obj = await session.get(Project, project_id)
         project_name = project_obj.name if project_obj else f"project-{project_id}"
         script_obj = (
-            await session.execute(_select(Script).where(Script.project_id == project_id).limit(1))
+            await session.execute(select(Script).where(Script.project_id == project_id).limit(1))
         ).scalar_one_or_none()
         project_brief = script_obj.body[:500] if script_obj else ""
 
@@ -861,15 +874,17 @@ async def _drama_explain_plan_stage(
             document = await story_script.generate_story_script(session, project_id)
             await story_script.save_story_script(session, document, draft_id=draft_id)
 
-        narration_rows: dict[int, object] = {}
+        narration_rows: dict[int, StoryNarrationAsset] = {}
         if narration_enabled:
+            tts_config = await build_story_tts_config(session)
             narration_rows = await story_tts.generate_narration_assets(
                 session,
                 document,
                 draft_id=draft_id,
                 allow_fallback=narration_fallback,
+                config=tts_config,
             )
-        narration_durations = story_tts.narration_durations_by_order(narration_rows)  # type: ignore[arg-type]
+        narration_durations = story_tts.narration_durations_by_order(narration_rows)
         narration_paths = {
             order: str(row.file_path)
             for order, row in narration_rows.items()
@@ -1155,7 +1170,9 @@ async def run_render(
                 narration_durations_ms=narration_durations,
             )
         except Exception as exc:  # noqa: BLE001 — fallback to transcript subtitles.
-            logger.warning("draft %d: %s subtitle generation failed: %s", handle.draft_id, edit_mode, exc)
+            logger.warning(
+                "draft %d: %s subtitle generation failed: %s", handle.draft_id, edit_mode, exc
+            )
             srt_text = subtitles.build_srt(plan, transcripts)
         secondary_cues = subtitles.build_secondary_cues(plan, secondary_segments_by_asset)
         secondary_srt_text = subtitles.render_srt(secondary_cues)

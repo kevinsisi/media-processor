@@ -27,6 +27,7 @@ from media_processor.models.app_setting import AppSetting
 
 if TYPE_CHECKING:
     from media_processor.services.opencode_client import OpenCodeConfig
+    from media_processor.services.story_tts import NarrationSettings
 
 LLM_API_KEYS_KEY = "llm_api_keys"
 
@@ -166,6 +167,10 @@ async def clear_llm_api_keys(session: AsyncSession) -> None:
 OPENCODE_SERVERS_KEY = "opencode_servers"
 OPENCODE_TEXT_MODEL_KEY = "opencode_text_model"
 OPENCODE_TEXT_VARIANT_KEY = "opencode_text_variant"
+STORY_TTS_PROVIDER_KEY = "story_tts_provider"
+STORY_TTS_VOICE_KEY = "story_tts_voice"
+STORY_TTS_MODEL_KEY = "story_tts_model"
+STORY_TTS_TIMEOUT_KEY = "story_tts_timeout_s"
 
 
 @dataclass(frozen=True)
@@ -284,4 +289,94 @@ async def build_opencode_config(
         variant=variant,
         password=settings.opencode_server_password,
         timeout_s=settings.llm_timeout_s,
+    )
+
+
+# ---------- Story TTS settings ----------
+
+
+async def get_story_tts_provider(session: AsyncSession) -> tuple[str, str]:
+    row = await _get_setting(session, STORY_TTS_PROVIDER_KEY)
+    if row and row.strip():
+        return row.strip().lower(), "setting"
+    env_val = settings.story_tts_provider.strip().lower()
+    if env_val:
+        return env_val, "env"
+    return "", "none"
+
+
+async def get_story_tts_voice(session: AsyncSession) -> tuple[str, str]:
+    row = await _get_setting(session, STORY_TTS_VOICE_KEY)
+    if row and row.strip():
+        return row.strip(), "setting"
+    env_val = settings.story_tts_voice.strip()
+    if env_val:
+        return env_val, "env"
+    return "zh-TW-HsiaoChenNeural", "default"
+
+
+async def get_story_tts_model(session: AsyncSession) -> tuple[str, str]:
+    row = await _get_setting(session, STORY_TTS_MODEL_KEY)
+    if row and row.strip():
+        return row.strip(), "setting"
+    env_val = settings.story_tts_model.strip()
+    if env_val:
+        return env_val, "env"
+    return "edge-tts", "default"
+
+
+async def get_story_tts_timeout(session: AsyncSession) -> tuple[float, str]:
+    row = await _get_setting(session, STORY_TTS_TIMEOUT_KEY)
+    if row and row.strip():
+        try:
+            return max(1.0, float(row.strip())), "setting"
+        except ValueError:
+            pass
+    return max(1.0, float(settings.story_tts_timeout_s)), "env"
+
+
+async def set_story_tts_settings(
+    session: AsyncSession,
+    *,
+    provider: str | None = None,
+    voice: str | None = None,
+    model: str | None = None,
+    timeout_s: float | None = None,
+) -> None:
+    if provider is not None:
+        await _upsert_setting(session, STORY_TTS_PROVIDER_KEY, provider.strip().lower())
+    if voice is not None:
+        await _upsert_setting(session, STORY_TTS_VOICE_KEY, voice.strip())
+    if model is not None:
+        await _upsert_setting(session, STORY_TTS_MODEL_KEY, model.strip())
+    if timeout_s is not None:
+        await _upsert_setting(session, STORY_TTS_TIMEOUT_KEY, str(max(1.0, float(timeout_s))))
+    await session.commit()
+
+
+async def clear_story_tts_settings(session: AsyncSession) -> None:
+    for key in (
+        STORY_TTS_PROVIDER_KEY,
+        STORY_TTS_VOICE_KEY,
+        STORY_TTS_MODEL_KEY,
+        STORY_TTS_TIMEOUT_KEY,
+    ):
+        await _upsert_setting(session, key, "")
+    await session.commit()
+
+
+async def build_story_tts_config(session: AsyncSession) -> NarrationSettings | None:
+    from media_processor.services.story_tts import NarrationSettings
+
+    provider, _ = await get_story_tts_provider(session)
+    if not provider:
+        return None
+    voice, _ = await get_story_tts_voice(session)
+    model, _ = await get_story_tts_model(session)
+    timeout_s, _ = await get_story_tts_timeout(session)
+    return NarrationSettings(
+        provider=provider,
+        voice=voice or "zh-TW-HsiaoChenNeural",
+        model=model or provider,
+        timeout_s=timeout_s,
     )

@@ -4,6 +4,7 @@ import type {
   OpenCodeModelOut,
   OpenCodeStatusOut,
   SettingsOut,
+  StoryTtsStatusOut,
 } from "../api/types";
 import "./Settings.css";
 
@@ -52,6 +53,13 @@ export default function Settings() {
   const [ocTextVariant, setOcTextVariant] = useState("");
   const [ocSaving, setOcSaving] = useState(false);
   const [ocFlash, setOcFlash] = useState<FlashMessage | null>(null);
+  const [ttsStatus, setTtsStatus] = useState<StoryTtsStatusOut | null>(null);
+  const [ttsProvider, setTtsProvider] = useState("");
+  const [ttsVoice, setTtsVoice] = useState("");
+  const [ttsModel, setTtsModel] = useState("");
+  const [ttsTimeout, setTtsTimeout] = useState("45");
+  const [ttsSaving, setTtsSaving] = useState(false);
+  const [ttsFlash, setTtsFlash] = useState<FlashMessage | null>(null);
 
   const refresh = async () => {
     try {
@@ -70,6 +78,22 @@ export default function Settings() {
       setOcServersInput(status.servers.map((s) => s.base_url).join("\n"));
       setOcTextModel(status.text_model_source === "setting" ? status.text_model : "");
       setOcTextVariant(status.text_variant_source === "setting" ? status.text_variant : "");
+    } catch {
+      // non-fatal
+    }
+  };
+
+  const applyStoryTtsStatus = (status: StoryTtsStatusOut) => {
+    setTtsStatus(status);
+    setTtsProvider(status.provider_source === "setting" ? status.provider : "");
+    setTtsVoice(status.voice_source === "setting" ? status.voice : "");
+    setTtsModel(status.model_source === "setting" ? status.model : "");
+    setTtsTimeout(status.timeout_source === "setting" ? String(status.timeout_s) : "");
+  };
+
+  const loadStoryTts = async () => {
+    try {
+      applyStoryTtsStatus(await apiClient.getStoryTtsStatus());
     } catch {
       // non-fatal
     }
@@ -96,6 +120,7 @@ export default function Settings() {
   useEffect(() => {
     void refresh();
     void loadOpenCode();
+    void loadStoryTts();
   }, []);
 
   const handleSave = async () => {
@@ -221,6 +246,45 @@ export default function Settings() {
       });
     } finally {
       setOcSaving(false);
+    }
+  };
+
+  const handleSaveStoryTts = async () => {
+    setTtsSaving(true);
+    setTtsFlash(null);
+    try {
+      const updated = await apiClient.saveStoryTtsSettings({
+        provider: ttsProvider,
+        voice: ttsVoice,
+        model: ttsModel,
+        timeout_s: ttsTimeout.trim() ? Number(ttsTimeout) : undefined,
+      });
+      applyStoryTtsStatus(updated);
+      setTtsFlash({ kind: "ok", text: "Story/Narrato TTS 設定已儲存。" });
+    } catch (err) {
+      setTtsFlash({
+        kind: "error",
+        text: err instanceof ApiError ? `儲存失敗：${err.message}` : String(err),
+      });
+    } finally {
+      setTtsSaving(false);
+    }
+  };
+
+  const handleClearStoryTts = async () => {
+    if (!confirm("確定要清除 DB 中的 Story/Narrato TTS 設定？清除後將改讀環境變數。")) return;
+    setTtsSaving(true);
+    setTtsFlash(null);
+    try {
+      applyStoryTtsStatus(await apiClient.clearStoryTtsSettings());
+      setTtsFlash({ kind: "ok", text: "Story/Narrato TTS DB 設定已清除。" });
+    } catch (err) {
+      setTtsFlash({
+        kind: "error",
+        text: err instanceof ApiError ? `清除失敗：${err.message}` : String(err),
+      });
+    } finally {
+      setTtsSaving(false);
     }
   };
 
@@ -377,7 +441,7 @@ export default function Settings() {
         <div className="settings__panel-head">
           <h2>OpenCode AI 服務設定</h2>
           <p className="settings__hint">
-            文字生成走 OpenCode → Gemini 降級；視覺辨識維持 Gemini。未填寫時會讀取主機環境設定。
+            文字生成與 NarratoAI 視覺幀分析都優先走 OpenCode provider；Gemini 金鑰只作 legacy fallback。未填寫時會讀取主機環境設定。
           </p>
         </div>
 
@@ -522,6 +586,130 @@ export default function Settings() {
             role={ocFlash.kind === "error" ? "alert" : "status"}
           >
             {ocFlash.text}
+          </div>
+        )}
+      </section>
+
+      <section className="settings__panel">
+        <div className="settings__panel-head">
+          <h2>Story/Narrato TTS 設定</h2>
+          <p className="settings__hint">
+            Story、紀錄片解說與短劇解說共用這組旁白設定。provider 留空時不產生 TTS，仍會保留字幕版 fallback。
+          </p>
+        </div>
+
+        {ttsStatus && (
+          <dl className="settings__kv">
+            <dt>Provider</dt>
+            <dd className="mono">
+              {ttsStatus.provider || "未啟用"}{" "}
+              <span style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)", fontSize: "var(--t-xs)" }}>
+                [{OC_SOURCE_LABEL[ttsStatus.provider_source] ?? ttsStatus.provider_source}]
+              </span>
+            </dd>
+            <dt>Voice</dt>
+            <dd className="mono">
+              {ttsStatus.voice}{" "}
+              <span style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)", fontSize: "var(--t-xs)" }}>
+                [{OC_SOURCE_LABEL[ttsStatus.voice_source] ?? ttsStatus.voice_source}]
+              </span>
+            </dd>
+            <dt>Model</dt>
+            <dd className="mono">
+              {ttsStatus.model}{" "}
+              <span style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)", fontSize: "var(--t-xs)" }}>
+                [{OC_SOURCE_LABEL[ttsStatus.model_source] ?? ttsStatus.model_source}]
+              </span>
+            </dd>
+            <dt>Timeout</dt>
+            <dd className="mono">
+              {ttsStatus.timeout_s}s{" "}
+              <span style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)", fontSize: "var(--t-xs)" }}>
+                [{OC_SOURCE_LABEL[ttsStatus.timeout_source] ?? ttsStatus.timeout_source}]
+              </span>
+            </dd>
+          </dl>
+        )}
+
+        <div className="settings__row settings__row--top" style={{ marginTop: "var(--space-5)" }}>
+          <label className="settings__field">
+            <span>TTS Provider</span>
+            <select
+              className="settings__input"
+              value={ttsProvider}
+              onChange={(e) => setTtsProvider(e.target.value)}
+            >
+              <option value="">— 使用預設 / 未啟用 —</option>
+              <option value="edge">edge</option>
+              <option value="azure">azure</option>
+              <option value="tencent">tencent</option>
+              <option value="silent">silent（測試）</option>
+            </select>
+          </label>
+          <label className="settings__field">
+            <span>Voice</span>
+            <input
+              className="settings__input mono"
+              placeholder={ttsStatus?.voice || "zh-TW-HsiaoChenNeural"}
+              value={ttsVoice}
+              onChange={(e) => setTtsVoice(e.target.value)}
+              spellCheck={false}
+            />
+          </label>
+        </div>
+
+        <div className="settings__row settings__row--top">
+          <label className="settings__field">
+            <span>Model / Provider 標籤</span>
+            <input
+              className="settings__input mono"
+              placeholder={ttsStatus?.model || "edge-tts"}
+              value={ttsModel}
+              onChange={(e) => setTtsModel(e.target.value)}
+              spellCheck={false}
+            />
+          </label>
+          <label className="settings__field">
+            <span>Timeout 秒數</span>
+            <input
+              type="number"
+              min={1}
+              max={300}
+              className="settings__input mono"
+              placeholder={ttsStatus ? String(ttsStatus.timeout_s) : "45"}
+              value={ttsTimeout}
+              onChange={(e) => setTtsTimeout(e.target.value)}
+            />
+          </label>
+        </div>
+
+        <div className="settings__row">
+          <div className="settings__actions">
+            <button
+              type="button"
+              className="cta cta--primary"
+              onClick={() => void handleSaveStoryTts()}
+              disabled={ttsSaving}
+            >
+              {ttsSaving ? "儲存中…" : "儲存 TTS 設定"}
+            </button>
+            <button
+              type="button"
+              className="cta cta--quiet"
+              onClick={() => void handleClearStoryTts()}
+              disabled={ttsSaving}
+            >
+              清除 DB 設定
+            </button>
+          </div>
+        </div>
+
+        {ttsFlash && (
+          <div
+            className={`settings__notice settings__notice--${ttsFlash.kind}`}
+            role={ttsFlash.kind === "error" ? "alert" : "status"}
+          >
+            {ttsFlash.text}
           </div>
         )}
       </section>

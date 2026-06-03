@@ -10,7 +10,13 @@ from media_processor.services import narration_script_generator as nsg
 from media_processor.services.story_script import StoryScriptInputError
 
 
-def _make_asset(project_id: int = 1, asset_id: int = 10, duration_ms: int = 60_000, fa_json=None, fa_status="done"):
+def _make_asset(
+    project_id: int = 1,
+    asset_id: int = 10,
+    duration_ms: int = 60_000,
+    fa_json=None,
+    fa_status="done",
+):
     asset = MagicMock()
     asset.id = asset_id
     asset.project_id = project_id
@@ -42,24 +48,26 @@ def _minimal_fa_json(interval_s: float = 3.0) -> dict:
 def _valid_story_script_json(asset_id: int = 10) -> str:
     import json
 
-    return json.dumps({
-        "schema_version": "story-script.v1",
-        "title": "測試短影音",
-        "summary": "測試摘要",
-        "items": [
-            {
-                "order": 1,
-                "asset_id": asset_id,
-                "source_start_ms": 0,
-                "source_end_ms": 10000,
-                "picture": "開場畫面",
-                "narration": "這是解說旁白",
-                "audio_intent": "narration",
-                "beat_type": "hook",
-                "reason": "鉤子段落",
-            }
-        ],
-    })
+    return json.dumps(
+        {
+            "schema_version": "story-script.v1",
+            "title": "測試短影音",
+            "summary": "測試摘要",
+            "items": [
+                {
+                    "order": 1,
+                    "asset_id": asset_id,
+                    "source_start_ms": 0,
+                    "source_end_ms": 10000,
+                    "picture": "開場畫面",
+                    "narration": "這是解說旁白",
+                    "audio_intent": "narration",
+                    "beat_type": "hook",
+                    "reason": "鉤子段落",
+                }
+            ],
+        }
+    )
 
 
 class TestGenerateDocumentaryScript:
@@ -86,9 +94,7 @@ class TestGenerateDocumentaryScript:
             "media_processor.services.narration_script_generator._call_llm",
             new=AsyncMock(return_value=_valid_story_script_json(asset_id=10)),
         ):
-            doc = await nsg.generate_documentary_script(
-                session, asset, project_name="TestProject"
-            )
+            doc = await nsg.generate_documentary_script(session, asset, project_name="TestProject")
 
         assert doc.project_id == 1
         assert doc.title == "測試短影音"
@@ -105,9 +111,7 @@ class TestGenerateDocumentaryScript:
             "media_processor.services.narration_script_generator._call_llm",
             new=AsyncMock(return_value=None),
         ):
-            doc = await nsg.generate_documentary_script(
-                session, asset, project_name="TestProject"
-            )
+            doc = await nsg.generate_documentary_script(session, asset, project_name="TestProject")
 
         # Falls back to heuristic document
         assert doc.project_id == 1
@@ -122,9 +126,7 @@ class TestGenerateDocumentaryScript:
             "media_processor.services.narration_script_generator._call_llm",
             new=AsyncMock(return_value="this is not json at all!!!"),
         ):
-            doc = await nsg.generate_documentary_script(
-                session, asset, project_name="TestProject"
-            )
+            doc = await nsg.generate_documentary_script(session, asset, project_name="TestProject")
 
         assert doc.metadata.get("used_fallback") is True
 
@@ -137,7 +139,6 @@ class TestGenerateDocumentaryScript:
 
         async def mock_llm(prompt, _session):
             captured_prompt.append(prompt)
-            return None  # trigger fallback
 
         with patch(
             "media_processor.services.narration_script_generator._call_llm",

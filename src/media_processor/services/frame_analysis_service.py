@@ -24,6 +24,7 @@ from typing import Any
 import httpx
 
 from media_processor.api.config import settings
+from media_processor.services.opencode_client import OpenCodeConfig, call_opencode_vision
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,7 @@ JSON 必須包含以下鍵：
 
 # ---------- Keyframe extraction ----------
 
+
 def _cache_key(file_path: str, mtime: float, interval_s: float) -> str:
     raw = f"{file_path}|{mtime:.3f}|{interval_s:.2f}"
     return hashlib.sha256(raw.encode()).hexdigest()[:20]
@@ -73,26 +75,33 @@ def extract_keyframes(
     existing = sorted(cache_dir.glob("frame_*.jpg"))
     if existing:
         logger.debug("frame cache hit: %s (%d frames)", cache_dir, len(existing))
-        return existing[: _MAX_FRAMES]
+        return existing[:_MAX_FRAMES]
 
     # Extract frames with ffmpeg: 1 frame per interval_s, max long-edge 960px
     fps_expr = f"1/{interval_s:.3f}"
     cmd = [
         "ffmpeg",
-        "-hide_banner", "-loglevel", "error",
-        "-i", file_path,
-        "-vf", f"fps={fps_expr},scale='if(gt(iw,ih),960,-2)':'if(gt(iw,ih),-2,960)'",
-        "-q:v", "4",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        file_path,
+        "-vf",
+        f"fps={fps_expr},scale='if(gt(iw,ih),960,-2)':'if(gt(iw,ih),-2,960)'",
+        "-q:v",
+        "4",
         str(cache_dir / "frame_%05d.jpg"),
     ]
     try:
         subprocess.run(cmd, check=True, capture_output=True, timeout=300)
     except subprocess.CalledProcessError as exc:
-        raise RuntimeError(f"ffmpeg keyframe extraction failed: {exc.stderr.decode()[:400]}") from exc
+        raise RuntimeError(
+            f"ffmpeg keyframe extraction failed: {exc.stderr.decode()[:400]}"
+        ) from exc
 
     frames = sorted(cache_dir.glob("frame_*.jpg"))
     logger.info("extracted %d keyframes → %s", len(frames), cache_dir)
-    return frames[: _MAX_FRAMES]
+    return frames[:_MAX_FRAMES]
 
 
 def _ms_from_frame_index(index: int, interval_s: float) -> int:
@@ -108,6 +117,7 @@ def _ms_to_srt_time(ms: int) -> str:
 
 
 # ---------- Vision LLM call ----------
+
 
 def _encode_image(path: Path) -> str:
     return base64.b64encode(path.read_bytes()).decode()
@@ -126,9 +136,7 @@ async def _call_gemini_vision(
 
     parts: list[dict[str, Any]] = []
     for frame in frames:
-        parts.append({
-            "inlineData": {"mimeType": "image/jpeg", "data": _encode_image(frame)}
-        })
+        parts.append({"inlineData": {"mimeType": "image/jpeg", "data": _encode_image(frame)}})
     parts.append({"text": prompt})
 
     body = {
@@ -160,7 +168,44 @@ async def _call_gemini_vision(
         if not isinstance(text, str) or not text.strip():
             return None
 
-    # Parse JSON — tolerant extraction
+    return _parse_vision_json(text, batch_start_ms=batch_start_ms, interval_s=interval_s)
+
+
+async def _call_opencode_vision(
+    frames: list[Path],
+    *,
+    opencode_config: OpenCodeConfig,
+    batch_start_ms: int,
+    interval_s: float,
+) -> dict[str, Any] | None:
+    frame_count = len(frames)
+    prompt = _VISION_PROMPT.format(frame_count=frame_count)
+    images = [("image/jpeg", _encode_image(frame)) for frame in frames]
+    for server_url in opencode_config.servers:
+        text = await call_opencode_vision(
+            prompt=prompt,
+            images=images,
+            system_prompt="你是專業影片幀分析器。只輸出 JSON。",
+            server_url=server_url,
+            password=opencode_config.password,
+            model=opencode_config.model,
+            variant=opencode_config.variant,
+            timeout_s=max(_VISION_TIMEOUT_S, opencode_config.timeout_s),
+        )
+        if text:
+            parsed = _parse_vision_json(text, batch_start_ms=batch_start_ms, interval_s=interval_s)
+            if parsed is not None:
+                return parsed
+    return None
+
+
+def _parse_vision_json(
+    text: str,
+    *,
+    batch_start_ms: int,
+    interval_s: float,
+) -> dict[str, Any] | None:
+    """Parse a Vision model response and attach missing frame timestamps."""
     try:
         data = json.loads(text)
         if not isinstance(data, dict):
@@ -171,7 +216,7 @@ async def _call_gemini_vision(
         end = text.rfind("}")
         if start >= 0 and end > start:
             try:
-                data = json.loads(text[start: end + 1])
+                data = json.loads(text[start : end + 1])
                 if not isinstance(data, dict):
                     return None
             except Exception:
@@ -198,12 +243,30 @@ async def _analyse_batch(
     end_ms: int,
     interval_s: float,
     api_keys: tuple[str, ...],
+    opencode_config: OpenCodeConfig | None = None,
 ) -> dict[str, Any]:
     """Analyse one batch with retry across key pool. Returns a batch result dict."""
     time_range = f"{_ms_to_srt_time(start_ms)}-{_ms_to_srt_time(end_ms)}"
 
+    if opencode_config is not None:
+        result = await _call_opencode_vision(
+            frames,
+            opencode_config=opencode_config,
+            batch_start_ms=start_ms,
+            interval_s=interval_s,
+        )
+        if result is not None:
+            return {
+                "batch_index": batch_index,
+                "time_range": time_range,
+                "frame_observations": result.get("frame_observations", []),
+                "overall_activity_summary": result.get("overall_activity_summary", ""),
+            }
+
     for key in api_keys:
-        result = await _call_gemini_vision(frames, api_key=key, batch_start_ms=start_ms, interval_s=interval_s)
+        result = await _call_gemini_vision(
+            frames, api_key=key, batch_start_ms=start_ms, interval_s=interval_s
+        )
         if result is not None:
             return {
                 "batch_index": batch_index,
@@ -218,7 +281,10 @@ async def _analyse_batch(
         "batch_index": batch_index,
         "time_range": time_range,
         "frame_observations": [
-            {"timestamp": _ms_to_srt_time(start_ms + int(i * interval_s * 1000)), "observation": "（分析失敗）"}
+            {
+                "timestamp": _ms_to_srt_time(start_ms + int(i * interval_s * 1000)),
+                "observation": "（分析失敗）",
+            }
             for i in range(len(frames))
         ],
         "overall_activity_summary": "（Vision API 呼叫失敗）",
@@ -227,10 +293,12 @@ async def _analyse_batch(
 
 # ---------- Main pipeline ----------
 
+
 async def analyse_asset(
     file_path: str,
     *,
     api_keys: tuple[str, ...],
+    opencode_config: OpenCodeConfig | None = None,
     interval_s: float = _DEFAULT_INTERVAL_S,
     batch_size: int = _DEFAULT_BATCH_SIZE,
     concurrency: int = _DEFAULT_CONCURRENCY,
@@ -238,10 +306,10 @@ async def analyse_asset(
     """Full NarratoAI documentary frame analysis pipeline.
 
     Returns a dict ready to be stored in Asset.frame_analysis_json.
-    Raises RuntimeError if ffmpeg fails or no api_keys are provided.
+    Raises RuntimeError if ffmpeg fails or no AI provider is configured.
     """
-    if not api_keys:
-        raise RuntimeError("frame_analysis_service: no Gemini API keys available")
+    if not api_keys and opencode_config is None:
+        raise RuntimeError("frame_analysis_service: no Vision AI provider configured")
 
     frames = await asyncio.to_thread(extract_keyframes, file_path, interval_s)
     if not frames:
@@ -250,7 +318,7 @@ async def analyse_asset(
     # Chunk frames into batches
     batches: list[list[Path]] = []
     for i in range(0, len(frames), batch_size):
-        batches.append(frames[i: i + batch_size])
+        batches.append(frames[i : i + batch_size])
 
     sem = asyncio.Semaphore(concurrency)
 
@@ -266,6 +334,7 @@ async def analyse_asset(
                 end_ms=end_ms,
                 interval_s=interval_s,
                 api_keys=api_keys,
+                opencode_config=opencode_config,
             )
 
     tasks = [_bounded(i, b) for i, b in enumerate(batches)]
@@ -280,6 +349,7 @@ async def analyse_asset(
 
 
 # ---------- Markdown conversion (NarratoAI parse_frame_analysis_to_markdown) ----------
+
 
 def analysis_to_markdown(analysis_json: dict[str, Any]) -> str:
     """Convert frame_analysis_json to markdown summary for LLM narration prompt."""

@@ -60,6 +60,8 @@ Treat the following skill files as active workflow rules for this workspace, eve
 - Treat `skills/gemini-prompts/script-coverage/SKILL.md` as the canonical reference for the script-vs-transcript coverage prompt (`script_coverage._PROMPT_TEMPLATE`)
 - Treat `skills/gemini-prompts/llm-patcher/SKILL.md` as the canonical reference for the M5 profile-patch prompt (`llm_patcher._SYSTEM_PROMPT`)
 - Treat `skills/gemini-prompts/smart-camera-focus/SKILL.md` as the canonical reference for the v0.30.0 smart-camera focus_regions prompt (`smart_camera_planner._VISION_PROMPT`)
+- Treat `skills/gemini-prompts/frame-analysis/SKILL.md` as the canonical reference for the NarratoAI documentary frame-analysis Vision prompt (`frame_analysis_service._VISION_PROMPT`)
+- Treat `skills/gemini-prompts/narration-generation/SKILL.md` as the canonical reference for NarratoAI documentary/drama StoryScript prompts (`narration_script_generator._DOCUMENTARY_PROMPT_TEMPLATE` / `_DRAMA_EXPLAIN_PROMPT_TEMPLATE`)
 - Treat `skills/video-camera-movement/SKILL.md` as mandatory before changing Smart Camera, tracking, auto-reframe, crop smoothing, or digital stabilization behavior
 - Treat `.github/skills/openspec-explore/SKILL.md` as the active workflow when the user wants exploration without implementation
 - Treat `.github/skills/openspec-propose/SKILL.md` as the active workflow when creating a new OpenSpec change
@@ -90,7 +92,7 @@ CLAUDE.md is meta-rules; concrete project state lives elsewhere. When you need t
 - `ROADMAP.md` — Phase 6–10 全程路線圖（已完成/規劃中），含每個 sub-task 驗收標準。新對話開頭先讀這個就能對齊大方向。**目前版本：0.43.5。**
 - `openspec/changes/` — current in-flight proposals + tasks. Completed milestones live under `openspec/changes/archive/YYYY-MM-DD-<name>/`. Archived through 0.28.x: M6 0.12.0 / M7 0.13.0 / M8 0.14.0 / M8.1 0.14.x / **v0.18 watermark / v0.19 subtitle-style + i18n + presets / v0.20 timeline + UX / v0.21 transitions + BGM + subject_class / v0.22 UI/UX 收斂 / v0.23 pixel-precise point tracking / v0.24 BGM fade + transitions default + voice_volume bug / v0.25 RQ queue inspector / v0.26 asset delete + meta / v0.27 multi-worker fan-out / v0.27.1 asset force-delete / v0.27.2 queue-modal CSS overflow fix / v0.27.3 point-tracking 30 s budget / v0.28.0 async point-tracking on worker-analysis / v0.29.0 aspect-ratio redux (9:16 + 16:9) + crop-region anchor / v0.30.0 AI Smart Camera (opt-in)**.
 - The auto-memory index at `~/.claude/projects/D--GitClone--HomeProject-media-processor/memory/MEMORY.md` — non-obvious deploy / runtime quirks (Tailscale routing, GPU runtime, drafts/BGM storage, key pools, MusicGen, vidstab, YOLO tracking, alembic parallel-branch hazard, render flag persistence).
-- `skills/gemini-prompts/` — 5 個 reusable Gemini prompt skill（asset-score / scene-tag / script-coverage / llm-patcher / smart-camera-focus），改 prompt 前先看這裡。
+- `skills/gemini-prompts/` — reusable Gemini prompt skills（asset-score / scene-tag / script-coverage / llm-patcher / smart-camera-focus / frame-analysis / narration-generation），改 prompt 前先看這裡。
 - `skills/video-camera-movement/SKILL.md` — 運鏡 / 焦點追蹤 / 數位防手震的優先順序與禁止事項；改 renderer crop / Smart Camera / tracking / vidstab 前先讀。
 - The code itself — render pipeline:
   - `services/edit_planner.py` per-asset Gemini fanout (M6) + emotion / motion / face fields on `_AssetScore` + `_assemble_plan` 3-pass dedup/top-up (M8.1) + `StylePresetParams` + 5-preset bundles (v0.19) + `_subject_presence_range_ms` / `_apply_subject_filter` for `Project.subject_class` (v0.21.0; A=drop / B=snap)

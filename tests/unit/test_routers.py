@@ -187,6 +187,29 @@ def test_get_project_detail_404(app: FastAPI) -> None:
     assert resp.status_code == 404
 
 
+def test_story_tts_settings_round_trip(app: FastAPI) -> None:
+    client = TestClient(app)
+    resp = client.put(
+        "/settings/story-tts",
+        json={
+            "provider": "edge",
+            "voice": "zh-TW-HsiaoChenNeural",
+            "model": "edge-tts",
+            "timeout_s": 60,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["provider"] == "edge"
+    assert body["provider_source"] == "setting"
+    assert body["voice"] == "zh-TW-HsiaoChenNeural"
+    assert body["timeout_s"] == 60
+
+    resp = client.delete("/settings/story-tts")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["provider_source"] in {"env", "none"}
+
+
 def test_create_upload_session_accepts_large_video_size(app: FastAPI) -> None:
     client = TestClient(app)
     five_gib_video_size = 5_352_736_653

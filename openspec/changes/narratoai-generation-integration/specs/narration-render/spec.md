@@ -1,34 +1,34 @@
 # Capability: narration-render
 
-在現有 ffmpeg cut → concat → subtitle burn 之後，加入 TTS 人聲解說音訊軌混音，產出帶解說的最終影片。
+## ADDED Requirements
 
-## Behaviour
+### Requirement: Narration audio is mixed into StoryScript-backed renders
 
-1. **觸發條件**：`draft.narration_audio_path` 存在且 `edit_mode ∈ {documentary, drama_explain}`。
-2. **混音策略**：
-   ```
-   ffmpeg filter_complex:
-     [0:a]  原聲（可選，OST=1 則保留，音量 × 0.15）
-     [1:a]  解說人聲（narration_full.mp3，音量 × 1.0）
-     [2:a]  BGM（現有 bgm_mixer 輸出，音量 × 0.3，duck to 0.08 when narration active）
-     amix=inputs=N:duration=first:normalize=0
-   ```
-3. **Duck 邏輯**：narration 有聲時 BGM 音量自動降為 0.08（移植 NarratoAI `audio_normalizer` 的 duck 思路，但用 ffmpeg `sidechaincompress` 實作）。
-4. **字幕**：解說模式的字幕來源從 Whisper cue 切換為 `narration_words.json`（TTS 詞級時間戳）；若 `narration_words.json` 不存在則不燒字幕（輸出仍有解說聲）。
-5. **無解說退化**：若 `narration_audio_path` 為 None（TTS 失敗），渲染繼續走現有無聲路徑，draft 狀態仍為 done（非 failed）。
-6. **輸出檔名**：`vN.mp4`（與現有 draft 版本命名一致，不新增欄位）。
+The renderer workflow SHALL mix generated narration artifacts into the rendered MP4 after visual rendering and before optional BGM mixing for StoryScript-backed modes.
 
-## Constraints
+#### Scenario: Narration clips exist
 
-- ffmpeg amix timeout：現有 `BURN_TIMEOUT_S`（不另設新常數，narration render 音訊複雜度與 viral overlay 相近）
-- narration_audio_path 必須是絕對路徑；render 前 preflight 確認檔案存在
-- worker-editing 佇列（現有）
-- 不改變 `video_renderer.py` 的 `burn_subtitles` 介面；新 narration 混音邏輯包在 `_mix_narration_audio(draft, video_path)` helper，由 `run_render` 在 concat 完成後條件呼叫
+- **WHEN** a rendered plan contains `narration_audio_path` values
+- **THEN** the BGM stage first overlays those narration clips at their timeline positions
+- **AND** source audio gain follows each segment's `audio_intent` policy before optional BGM is mixed
 
-## Modified Capability: edit-mode
+#### Scenario: Narration mix fails with fallback enabled
 
-`EditMode` enum 新增：
-- `documentary` — 觸發：幀分析 → 解說稿生成 → TTS → narration render
-- `drama_explain` — 觸發：drama_script_parsing → TTS → narration render
+- **WHEN** narration audio mixing fails and narration fallback is enabled
+- **THEN** the draft keeps the subtitle-only MP4 instead of failing the full render
 
-現有 `standard` / `luxury_auto` / `viral_short` 路徑完全不受影響。
+### Requirement: New Narrato edit modes are valid API and UI values
+
+The system SHALL accept and preserve `documentary` and `drama_explain` as draft-scoped `edit_mode` values in API requests, queued render jobs, draft summaries, and the ProjectEdit mode picker.
+
+#### Scenario: Documentary mode is selected from ProjectEdit
+
+- **WHEN** an operator selects `紀錄片解說` and starts a render
+- **THEN** the frontend sends `edit_mode=documentary`
+- **AND** the backend accepts the request, snapshots the mode, and returns it in draft summaries
+
+#### Scenario: Drama explain mode is selected from ProjectEdit
+
+- **WHEN** an operator selects `短劇解說` and starts a render
+- **THEN** the frontend sends `edit_mode=drama_explain`
+- **AND** the backend accepts the request, snapshots the mode, and returns it in draft summaries
