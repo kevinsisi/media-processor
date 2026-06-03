@@ -142,6 +142,40 @@ def _oc_server_out(s: OpenCodeServer) -> OpenCodeServerOut:
     return OpenCodeServerOut(id=s.id, label=s.label, base_url=s.base_url)
 
 
+def _opencode_models_from_payload(data: object) -> list[OpenCodeModelOut]:
+    """Normalize OpenCode /provider payloads across server versions."""
+    providers: object
+    if isinstance(data, list):
+        providers = data
+    elif isinstance(data, dict):
+        providers = data.get("providers") or data.get("data") or []
+    else:
+        providers = []
+
+    models: list[OpenCodeModelOut] = []
+    for provider_entry in providers if isinstance(providers, list) else []:
+        if not isinstance(provider_entry, dict):
+            continue
+        provider_id = str(provider_entry.get("id") or "")
+        raw_models = provider_entry.get("models") or []
+        model_entries = raw_models.values() if isinstance(raw_models, dict) else raw_models
+        for model_entry in model_entries:
+            if not isinstance(model_entry, dict):
+                continue
+            model_id = str(model_entry.get("id") or "")
+            model_name = str(model_entry.get("name") or model_id)
+            model_provider = str(model_entry.get("providerID") or provider_id)
+            if model_id:
+                models.append(
+                    OpenCodeModelOut(
+                        id=f"{model_provider}/{model_id}" if model_provider else model_id,
+                        name=model_name,
+                        provider=model_provider,
+                    )
+                )
+    return models
+
+
 async def _build_opencode_status(session: SessionDep) -> OpenCodeStatusOut:
     servers, srv_source = await get_opencode_servers(session)
     model, model_source = await get_opencode_text_model(session)
@@ -258,25 +292,7 @@ async def get_opencode_models(session: SessionDep) -> OpenCodeModelsOut:
             except Exception as exc:  # noqa: BLE001
                 last_warning = f"server {server.id} response parse failed: {exc}"
                 continue
-            models: list[OpenCodeModelOut] = []
-            providers = data if isinstance(data, list) else []
-            for provider_entry in providers:
-                if not isinstance(provider_entry, dict):
-                    continue
-                provider_id = str(provider_entry.get("id") or "")
-                for m in provider_entry.get("models") or []:
-                    if not isinstance(m, dict):
-                        continue
-                    m_id = str(m.get("id") or "")
-                    m_name = str(m.get("name") or m_id)
-                    if m_id:
-                        models.append(
-                            OpenCodeModelOut(
-                                id=f"{provider_id}/{m_id}" if provider_id else m_id,
-                                name=m_name,
-                                provider=provider_id,
-                            )
-                        )
+            models = _opencode_models_from_payload(data)
             if models:
                 return OpenCodeModelsOut(
                     models=models,

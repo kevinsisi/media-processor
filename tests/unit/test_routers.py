@@ -26,6 +26,7 @@ from media_processor.api.routers import assets as assets_router
 from media_processor.api.routers import drafts as drafts_router
 from media_processor.api.routers import music as music_router
 from media_processor.api.routers import projects as projects_router
+from media_processor.api.routers.settings import _opencode_models_from_payload
 from media_processor.models import (
     Asset,
     AssetSegment,
@@ -208,6 +209,27 @@ def test_story_tts_settings_round_trip(app: FastAPI) -> None:
     resp = client.delete("/settings/story-tts")
     assert resp.status_code == 200, resp.text
     assert resp.json()["provider_source"] in {"env", "none"}
+
+
+def test_opencode_model_payload_parser_accepts_provider_dict() -> None:
+    models = _opencode_models_from_payload(
+        {
+            "providers": [
+                {
+                    "id": "openai",
+                    "models": {
+                        "gpt-5.5": {
+                            "id": "gpt-5.5",
+                            "providerID": "openai",
+                            "name": "GPT 5.5",
+                        }
+                    },
+                }
+            ]
+        }
+    )
+
+    assert [(m.id, m.name, m.provider) for m in models] == [("openai/gpt-5.5", "GPT 5.5", "openai")]
 
 
 def test_create_upload_session_accepts_large_video_size(app: FastAPI) -> None:
