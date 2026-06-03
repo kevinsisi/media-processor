@@ -745,6 +745,7 @@ def _cut_segment(
         source_duration_s,
         (getattr(cut, "timeline_duration_ms", None) or 0) / 1000.0,
     )
+    extraction_duration_s = output_duration_s
     duration_s = output_duration_s
 
     vf_chain = aspect_filter(target_aspect, crop_region=crop_region)
@@ -902,7 +903,7 @@ def _cut_segment(
         "-i",
         str(src),
         "-t",
-        f"{source_duration_s:.3f}",
+        f"{extraction_duration_s:.3f}",
         "-vf",
         (
             f"{vf_chain},tpad=stop_mode=clone:stop_duration={output_duration_s - source_duration_s:.3f}"

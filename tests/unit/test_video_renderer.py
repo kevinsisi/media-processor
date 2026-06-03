@@ -248,6 +248,37 @@ def test_render_pipeline_uses_timeline_durations_for_xfade(
     assert captured["durations_ms"] == [7_000, 8_000]
 
 
+def test_cut_segment_extracts_timeline_duration_for_narration_hold(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    src = tmp_path / "asset.mp4"
+    src.write_bytes(b"fake")
+    out = tmp_path / "out.mp4"
+    cut = CutPlanSegment(
+        order=0,
+        asset_id=1,
+        asset_start_ms=0,
+        asset_end_ms=3_000,
+        source_kind="scripted",
+        reason="",
+        timeline_duration_ms=7_000,
+    )
+    captured: dict[str, list[str]] = {}
+
+    def fake_run(cmd: list[str], **_: object) -> None:
+        captured["cmd"] = cmd
+        out.write_bytes(b"")
+
+    monkeypatch.setattr(video_renderer, "_run", fake_run)
+
+    video_renderer._cut_segment(src, cut, out, "9:16")
+
+    cmd = captured["cmd"]
+    assert cmd[cmd.index("-t") + 1] == "7.000"
+    assert "tpad=stop_mode=clone:stop_duration=4.000" in cmd[cmd.index("-vf") + 1]
+
+
 def test_zoompan_filter_emits_canvas_size_and_increment() -> None:
     """Phase 8.1 — zoompan chain ends at ZOOMPAN_END_ZOOM and matches canvas size."""
     chain = video_renderer._zoompan_filter("9:16", duration_s=2.0)
