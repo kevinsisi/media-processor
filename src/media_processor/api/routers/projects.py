@@ -1,4 +1,5 @@
 """Project endpoints — list, detail, create, drafts, script, analysis page."""
+# ruff: noqa: I001
 
 from __future__ import annotations
 
