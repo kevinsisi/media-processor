@@ -200,7 +200,9 @@ def _parse_srt_time_ms(value: str) -> int:
     return ((int(hh) * 60 + int(mm)) * 60 + int(ss)) * 1000 + int(mmm)
 
 
-def _script_segments(script_body: str, *, asset_id: int, asset_duration_ms: int) -> list[StoryInputSegment]:
+def _script_segments(
+    script_body: str, *, asset_id: int, asset_duration_ms: int
+) -> list[StoryInputSegment]:
     """Parse uploaded subtitle-like project text into story input segments."""
     body = script_body.strip()
     if not body:
@@ -317,7 +319,11 @@ async def gather_story_inputs(session: AsyncSession, project_id: int) -> StoryIn
     if project is None:
         raise StoryScriptInputError("project not found")
     assets = (
-        (await session.execute(select(Asset).where(Asset.project_id == project_id).order_by(Asset.id)))
+        (
+            await session.execute(
+                select(Asset).where(Asset.project_id == project_id).order_by(Asset.id)
+            )
+        )
         .scalars()
         .all()
     )
@@ -385,9 +391,7 @@ async def gather_story_inputs(session: AsyncSession, project_id: int) -> StoryIn
 def build_story_prompt(bundle: StoryInputBundle, *, target_items: int = 8) -> str:
     lines = []
     for idx, seg in enumerate(bundle.segments[:120], 1):
-        lines.append(
-            f"{idx}. asset_id={seg.asset_id} [{seg.start_ms}-{seg.end_ms}ms] {seg.text}"
-        )
+        lines.append(f"{idx}. asset_id={seg.asset_id} [{seg.start_ms}-{seg.end_ms}ms] {seg.text}")
     transcript_block = "\n".join(lines)
     return f"""
 你是一位頂級短影音解說編劇與剪輯企劃。請根據逐字稿產生 NarratoAI 風格的短影音 StoryScript。
@@ -474,7 +478,9 @@ async def _call_gemini(prompt: str, *, api_keys: tuple[str, ...]) -> tuple[str |
             if resp.status_code == 429 or 500 <= resp.status_code < 600:
                 continue
             if resp.status_code >= 400:
-                raise StoryScriptError(f"Story Gemini call failed: {resp.status_code} {resp.text[:200]}")
+                raise StoryScriptError(
+                    f"Story Gemini call failed: {resp.status_code} {resp.text[:200]}"
+                )
             payload = resp.json()
             parts = payload.get("candidates", [{}])[0].get("content", {}).get("parts", [])
             text = next((p.get("text") for p in parts if isinstance(p, dict)), None)
@@ -521,13 +527,20 @@ async def generate_story_script(
 
     if raw_text:
         payload = _repair_json_payload(raw_text)
-        document = validate_story_script(payload, project_id=project_id, asset_durations=bundle.asset_durations)
+        document = validate_story_script(
+            payload, project_id=project_id, asset_durations=bundle.asset_durations
+        )
         return StoryScriptDocument(
             project_id=document.project_id,
             title=document.title,
             summary=document.summary,
             items=document.items,
-            metadata={**bundle.metadata(), "provider": provider, "model": model, "used_fallback": False},
+            metadata={
+                **bundle.metadata(),
+                "provider": provider,
+                "model": model,
+                "used_fallback": False,
+            },
         )
 
     document = _heuristic_document(bundle, target_items=target_items)
@@ -574,7 +587,9 @@ async def latest_story_script(session: AsyncSession, project_id: int) -> StorySc
 
 
 def document_from_row(row: StoryScript, *, asset_durations: dict[int, int]) -> StoryScriptDocument:
-    return validate_story_script(dict(row.script_json), project_id=row.project_id, asset_durations=asset_durations)
+    return validate_story_script(
+        dict(row.script_json), project_id=row.project_id, asset_durations=asset_durations
+    )
 
 
 async def document_from_latest(session: AsyncSession, project_id: int) -> StoryScriptDocument:

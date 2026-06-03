@@ -48,12 +48,16 @@ class NarrationClip:
 
 
 class TtsProvider(Protocol):
-    async def synthesize(self, *, text: str, voice: str, output_path: Path, timeout_s: float) -> None:
+    async def synthesize(
+        self, *, text: str, voice: str, output_path: Path, timeout_s: float
+    ) -> None:
         """Write generated speech audio to output_path."""
 
 
 class EdgeTtsProvider:
-    async def synthesize(self, *, text: str, voice: str, output_path: Path, timeout_s: float) -> None:
+    async def synthesize(
+        self, *, text: str, voice: str, output_path: Path, timeout_s: float
+    ) -> None:
         try:
             import edge_tts  # type: ignore[import-not-found]
         except Exception as exc:  # pragma: no cover - depends on optional runtime package.
@@ -69,7 +73,9 @@ class EdgeTtsProvider:
 class SilentTestProvider:
     """Deterministic provider for tests and disabled-runtime smoke checks."""
 
-    async def synthesize(self, *, text: str, voice: str, output_path: Path, timeout_s: float) -> None:
+    async def synthesize(
+        self, *, text: str, voice: str, output_path: Path, timeout_s: float
+    ) -> None:
         duration_s = max(0.7, min(15.0, len(text) / 8.0))
         output_path.parent.mkdir(parents=True, exist_ok=True)
         if os.environ.get("FFMPEG_FAKE", "0") == "1":
@@ -93,7 +99,9 @@ class SilentTestProvider:
             "aac",
             str(output_path),
         ]
-        await asyncio.to_thread(subprocess.run, cmd, check=True, timeout=timeout_s, capture_output=True)
+        await asyncio.to_thread(
+            subprocess.run, cmd, check=True, timeout=timeout_s, capture_output=True
+        )
 
 
 def narration_settings() -> NarrationSettings | None:
@@ -120,7 +128,9 @@ def text_hash(text: str) -> str:
     return hashlib.sha256(text.strip().encode("utf-8")).hexdigest()
 
 
-def artifact_path(project_id: int, story_script_id: int | None, item: StoryScriptItem, text_digest: str) -> Path:
+def artifact_path(
+    project_id: int, story_script_id: int | None, item: StoryScriptItem, text_digest: str
+) -> Path:
     script_part = story_script_id if story_script_id is not None else "latest"
     filename = f"item_{item.order:03d}_{text_digest[:12]}.m4a"
     return Path(settings.story_narration_dir) / str(project_id) / str(script_part) / filename
@@ -157,7 +167,9 @@ def probe_audio_duration_ms(path: Path) -> int | None:
 
 
 def item_needs_narration(item: StoryScriptItem) -> bool:
-    return item.audio_intent in {"narration", "narration_with_original"} and bool(item.narration.strip())
+    return item.audio_intent in {"narration", "narration_with_original"} and bool(
+        item.narration.strip()
+    )
 
 
 async def _latest_story_row(session: AsyncSession, project_id: int) -> StoryScript | None:
@@ -277,7 +289,9 @@ async def generate_narration_assets(
             await session.commit()
             if not allow_fallback:
                 raise StoryTtsError(f"narration item {item.order} failed: {exc}") from exc
-            logger.warning("story narration item %d failed; using subtitle-only fallback: %s", item.order, exc)
+            logger.warning(
+                "story narration item %d failed; using subtitle-only fallback: %s", item.order, exc
+            )
     return out
 
 
@@ -289,7 +303,9 @@ def narration_durations_by_order(rows: dict[int, StoryNarrationAsset]) -> dict[i
     }
 
 
-def narration_clips_for_plan(rows: dict[int, StoryNarrationAsset], *, timeline_starts_ms: dict[int, int]) -> list[NarrationClip]:
+def narration_clips_for_plan(
+    rows: dict[int, StoryNarrationAsset], *, timeline_starts_ms: dict[int, int]
+) -> list[NarrationClip]:
     clips: list[NarrationClip] = []
     for order, row in sorted(rows.items()):
         if row.status != NARRATION_STATUS_DONE or not row.file_path or not row.duration_ms:

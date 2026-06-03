@@ -533,6 +533,8 @@ def test_reorder_body_override_beats_legacy_null_snapshot(
         # v0.43.5 — legacy drafts settle onto the backward-compatible
         # default edit mode the first time we backfill render flags.
         "edit_mode": "standard",
+        "story_narration": False,
+        "story_narration_fallback": True,
     }
 
 

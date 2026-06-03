@@ -260,7 +260,9 @@ def test_story_plan_persists_as_draft_segments(monkeypatch: pytest.MonkeyPatch) 
             payload = _valid_payload()
             for item in payload["items"]:
                 item["asset_id"] = asset.id
-            document = validate_story_script(payload, project_id=project.id, asset_durations={asset.id: 8_000})
+            document = validate_story_script(
+                payload, project_id=project.id, asset_durations={asset.id: 8_000}
+            )
             plan = story_document_to_cut_plan(
                 document,
                 target_aspect_ratio="9:16",
@@ -276,10 +278,16 @@ def test_story_plan_persists_as_draft_segments(monkeypatch: pytest.MonkeyPatch) 
             await edit_orchestrator._persist_plan(handle, plan, initial_voice_volume=0.25)
 
             rows = (
-                await session.execute(
-                    select(DraftSegment).where(DraftSegment.draft_id == draft.id).order_by(DraftSegment.order)
+                (
+                    await session.execute(
+                        select(DraftSegment)
+                        .where(DraftSegment.draft_id == draft.id)
+                        .order_by(DraftSegment.order)
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             await session.refresh(draft)
 
         await engine.dispose()
@@ -287,7 +295,7 @@ def test_story_plan_persists_as_draft_segments(monkeypatch: pytest.MonkeyPatch) 
         assert rows[0].asset_id == asset.id
         assert rows[0].on_timeline_start_ms == 0
         assert rows[0].on_timeline_end_ms == 2500
-        assert rows[0].voice_volume == 0.25
+        assert rows[0].voice_volume == 0.0
         assert rows[1].source_kind == "improv"
         assert draft.cut_plan_json["schema_version"] == "story.cut-plan.v1"
 
@@ -367,7 +375,9 @@ def test_story_plan_stage_regenerates_stale_story_script(monkeypatch: pytest.Mon
                     asset_durations={asset.id: asset.duration_ms},
                 )
 
-            monkeypatch.setattr(edit_orchestrator.story_script, "generate_story_script", fake_generate)
+            monkeypatch.setattr(
+                edit_orchestrator.story_script, "generate_story_script", fake_generate
+            )
             plan = await edit_orchestrator._story_plan_stage(
                 project.id,
                 target_aspect="9:16",

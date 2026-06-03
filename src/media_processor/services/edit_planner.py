@@ -356,7 +356,9 @@ class CutPlan:
 
     @property
     def total_duration_ms(self) -> int:
-        return sum(s.timeline_duration_ms or (s.asset_end_ms - s.asset_start_ms) for s in self.segments)
+        return sum(
+            s.timeline_duration_ms or (s.asset_end_ms - s.asset_start_ms) for s in self.segments
+        )
 
 
 # ---------- Prompt assembly ----------
@@ -1955,9 +1957,7 @@ def deserialise_plan(blob: dict[str, Any]) -> CutPlan:
                     else None
                 ),
                 narration_audio_path=(
-                    str(seg["narration_audio_path"])
-                    if seg.get("narration_audio_path")
-                    else None
+                    str(seg["narration_audio_path"]) if seg.get("narration_audio_path") else None
                 ),
             )
         )

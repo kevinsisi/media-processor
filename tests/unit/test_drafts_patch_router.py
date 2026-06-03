@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import StaticPool
 
+from media_processor.api.config import settings
 from media_processor.api.deps import get_llm_patcher, get_profile_loader, get_session
 from media_processor.api.main import app as production_app
 from media_processor.models import (
@@ -306,9 +307,15 @@ def test_patch_draft_llm_failure_returns_502() -> None:
         asyncio.run(engine.dispose())
 
 
-def test_patch_draft_no_keys_returns_503() -> None:
+def test_patch_draft_no_keys_returns_503(monkeypatch: pytest.MonkeyPatch) -> None:
     """With no override and no LLM_API_KEYS env, the dep should raise 503."""
     import asyncio
+
+    monkeypatch.delenv("OPENCODE_SERVERS", raising=False)
+    monkeypatch.delenv("OPENCODE_TEXT_MODEL", raising=False)
+    monkeypatch.delenv("LLM_API_KEYS", raising=False)
+    monkeypatch.setattr(settings, "opencode_servers", "")
+    monkeypatch.setattr(settings, "llm_api_keys", "")
 
     engine, session_maker = _make_engine_and_session()
 

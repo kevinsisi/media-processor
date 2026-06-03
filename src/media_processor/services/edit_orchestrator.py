@@ -393,7 +393,8 @@ async def _persist_plan(
         await session.execute(delete(DraftSegment).where(DraftSegment.draft_id == handle.draft_id))
         for cut in plan.segments:
             duration = int(
-                getattr(cut, "timeline_duration_ms", None) or (cut.asset_end_ms - cut.asset_start_ms)
+                getattr(cut, "timeline_duration_ms", None)
+                or (cut.asset_end_ms - cut.asset_start_ms)
             )
             secondary_text = subtitles.secondary_text_for_cut(
                 cut,
@@ -1198,7 +1199,10 @@ async def run_render(
             )
         timeline_cursor_ms += max(
             1,
-            int(getattr(seg, "timeline_duration_ms", None) or (seg.asset_end_ms - seg.asset_start_ms)),
+            int(
+                getattr(seg, "timeline_duration_ms", None)
+                or (seg.asset_end_ms - seg.asset_start_ms)
+            ),
         )
     if narration_clips:
         try:
@@ -1215,7 +1219,9 @@ async def run_render(
             has_voice_overrides = False
         except bgm_mixer.BgmMixError as exc:
             if not story_narration_fallback:
-                await _set_stage_state(handle.draft_id, EditStep.BGM.value, f"failed:{type(exc).__name__}")
+                await _set_stage_state(
+                    handle.draft_id, EditStep.BGM.value, f"failed:{type(exc).__name__}"
+                )
                 await _mark_failed(handle.draft_id, f"narration: {exc}")
                 summary["stages"][EditStep.BGM.value] = f"failed:{type(exc).__name__}"
                 return summary

@@ -91,7 +91,9 @@ def _draft_story_narration_flags(
     snapshot = draft.render_flags_json if isinstance(draft.render_flags_json, dict) else {}
     over = override.model_dump(exclude_none=True) if override is not None else {}
     enabled = bool(
-        over["story_narration"] if "story_narration" in over else snapshot.get("story_narration", False)
+        over["story_narration"]
+        if "story_narration" in over
+        else snapshot.get("story_narration", False)
     )
     fallback = bool(
         over["story_narration_fallback"]

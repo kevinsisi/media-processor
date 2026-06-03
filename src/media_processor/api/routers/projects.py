@@ -1056,7 +1056,9 @@ async def get_project_story_script(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
     row = await story_scripts.latest_story_script(session, project_id)
     if row is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="story script not generated")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="story script not generated"
+        )
     return _story_script_out(row)
 
 
@@ -1079,7 +1081,9 @@ async def generate_project_story_script(
     except story_scripts.StoryScriptInputError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except story_scripts.StoryScriptValidationError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
     except story_scripts.StoryScriptError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
     return _story_script_out(row)
@@ -1094,7 +1098,9 @@ async def save_project_story_script(
     project = await session.get(Project, project_id)
     if project is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
-    assets = (await session.execute(select(Asset).where(Asset.project_id == project_id))).scalars().all()
+    assets = (
+        (await session.execute(select(Asset).where(Asset.project_id == project_id))).scalars().all()
+    )
     asset_durations = {asset.id: int(asset.duration_ms) for asset in assets}
     raw = {
         "schema_version": story_scripts.STORY_SCRIPT_SCHEMA_VERSION,
@@ -1118,7 +1124,9 @@ async def save_project_story_script(
         )
         row = await story_scripts.save_story_script(session, document)
     except story_scripts.StoryScriptValidationError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
     return _story_script_out(row)
 
 
