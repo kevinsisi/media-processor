@@ -148,7 +148,7 @@ def _opencode_models_from_payload(data: object) -> list[OpenCodeModelOut]:
     if isinstance(data, list):
         providers = data
     elif isinstance(data, dict):
-        providers = data.get("providers") or data.get("data") or []
+        providers = data.get("providers") or data.get("all") or data.get("data") or []
     else:
         providers = []
 

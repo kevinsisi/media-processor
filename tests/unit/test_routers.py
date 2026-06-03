@@ -214,7 +214,7 @@ def test_story_tts_settings_round_trip(app: FastAPI) -> None:
 def test_opencode_model_payload_parser_accepts_provider_dict() -> None:
     models = _opencode_models_from_payload(
         {
-            "providers": [
+            "all": [
                 {
                     "id": "openai",
                     "models": {
