@@ -17,13 +17,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from media_processor.api.config import settings
 from media_processor.models import StoryNarrationAsset, StoryScript
+from media_processor.services.edit_planner import CutPlan
 from media_processor.services.story_script import StoryScriptDocument, StoryScriptItem
+from media_processor.services.subtitles import MAX_LINE_CHARS, MAX_LINES
 
 logger = logging.getLogger(__name__)
 
 NARRATION_STATUS_PENDING = "pending"
 NARRATION_STATUS_DONE = "done"
 NARRATION_STATUS_FAILED = "failed"
+_TTS_SUBTITLE_MAX_CHARS = MAX_LINE_CHARS * MAX_LINES
 
 
 class StoryTtsError(RuntimeError):
@@ -115,19 +118,66 @@ class EdgeTtsProvider:
 
 
 def _word_events_to_srt(events: list[dict[str, object]]) -> str:
-    """Convert edge-tts WordBoundary events (100-ns offsets) to SRT."""
+    """Convert edge-tts WordBoundary events (100-ns offsets) to paced SRT."""
     lines: list[str] = []
-    for idx, ev in enumerate(events, 1):
+    cue_index = 1
+    current_text = ""
+    current_start_ms: int | None = None
+    current_end_ms: int | None = None
+
+    def flush() -> None:
+        nonlocal cue_index, current_text, current_start_ms, current_end_ms
+        text = current_text.strip()
+        if text and current_start_ms is not None and current_end_ms is not None:
+            lines.append(str(cue_index))
+            lines.append(f"{_ms_to_srt(current_start_ms)} --> {_ms_to_srt(current_end_ms)}")
+            lines.append(text)
+            lines.append("")
+            cue_index += 1
+        current_text = ""
+        current_start_ms = None
+        current_end_ms = None
+
+    for ev in events:
+        raw_text = str(ev.get("text") or "").strip()
+        if not raw_text:
+            continue
         offset = cast(int | str, ev["offset"])
         duration = cast(int | str, ev["duration"])
-        start_ms = int(offset) // 10_000  # 100-ns → ms
-        dur_ms = max(200, int(duration) // 10_000)
+        start_ms = int(offset) // 10_000  # 100-ns -> ms
+        dur_ms = max(120, int(duration) // 10_000)
         end_ms = start_ms + dur_ms
-        lines.append(str(idx))
-        lines.append(f"{_ms_to_srt(start_ms)} --> {_ms_to_srt(end_ms)}")
-        lines.append(str(ev["text"]))
-        lines.append("")
+        if current_text and len(current_text + raw_text) > _TTS_SUBTITLE_MAX_CHARS:
+            flush()
+        if current_start_ms is None:
+            current_start_ms = start_ms
+        current_text = _append_word_boundary_text(current_text, raw_text)
+        current_end_ms = max(end_ms, current_end_ms or end_ms)
+
+    flush()
     return "\n".join(lines)
+
+
+def _append_word_boundary_text(current: str, token: str) -> str:
+    if not current:
+        return token
+    prev = current[-1]
+    first = token[0]
+    if prev.isascii() and first.isascii() and prev.isalnum() and first.isalnum():
+        return f"{current} {token}"
+    return f"{current}{token}"
+
+
+def _srt_artifact_path(audio_path: Path) -> Path:
+    return audio_path.with_suffix(".srt")
+
+
+def _write_srt_sidecar(audio_path: Path, srt_text: str) -> None:
+    srt_path = _srt_artifact_path(audio_path)
+    if srt_text.strip():
+        srt_path.write_text(srt_text, encoding="utf-8")
+    elif srt_path.is_file():
+        srt_path.unlink()
 
 
 def _ms_to_srt(ms: int) -> str:
@@ -397,6 +447,8 @@ async def _find_artifact(
 def _artifact_is_reusable(row: StoryNarrationAsset) -> bool:
     if row.status != NARRATION_STATUS_DONE or not row.file_path or not row.duration_ms:
         return False
+    if row.provider == "edge" and not _srt_artifact_path(Path(row.file_path)).is_file():
+        return False
     return os.environ.get("FFMPEG_FAKE", "0") == "1" or Path(row.file_path).is_file()
 
 
@@ -456,12 +508,23 @@ async def generate_narration_assets(
         await session.refresh(row)
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            await provider.synthesize(
-                text=item.narration,
-                voice=config.voice,
-                output_path=path,
-                timeout_s=config.timeout_s,
-            )
+            srt_text = ""
+            synthesize_with_srt = getattr(provider, "synthesize_with_srt", None)
+            if callable(synthesize_with_srt):
+                srt_text = await synthesize_with_srt(
+                    text=item.narration,
+                    voice=config.voice,
+                    output_path=path,
+                    timeout_s=config.timeout_s,
+                )
+            else:
+                await provider.synthesize(
+                    text=item.narration,
+                    voice=config.voice,
+                    output_path=path,
+                    timeout_s=config.timeout_s,
+                )
+            _write_srt_sidecar(path, srt_text)
             duration_ms = probe_audio_duration_ms(path) or max(700, item.duration_ms)
             row.status = NARRATION_STATUS_DONE
             row.error = None
@@ -488,6 +551,34 @@ def narration_durations_by_order(rows: dict[int, StoryNarrationAsset]) -> dict[i
         for order, row in rows.items()
         if row.status == NARRATION_STATUS_DONE and row.duration_ms is not None
     }
+
+
+def narration_subtitles_by_order(rows: dict[int, StoryNarrationAsset]) -> dict[int, str]:
+    subtitles: dict[int, str] = {}
+    for order, row in rows.items():
+        if row.status != NARRATION_STATUS_DONE or not row.file_path:
+            continue
+        srt_path = _srt_artifact_path(Path(row.file_path))
+        if not srt_path.is_file():
+            continue
+        text = srt_path.read_text(encoding="utf-8").strip()
+        if text:
+            subtitles[order] = text
+    return subtitles
+
+
+def narration_subtitles_from_plan(plan: CutPlan) -> dict[int, str]:
+    subtitles: dict[int, str] = {}
+    for segment in plan.segments:
+        if not segment.narration_audio_path:
+            continue
+        srt_path = _srt_artifact_path(Path(segment.narration_audio_path))
+        if not srt_path.is_file():
+            continue
+        text = srt_path.read_text(encoding="utf-8").strip()
+        if text:
+            subtitles[segment.order] = text
+    return subtitles
 
 
 def narration_clips_for_plan(

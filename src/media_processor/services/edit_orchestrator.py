@@ -1161,6 +1161,7 @@ async def run_render(
             srt_text = story_script.story_document_to_srt(
                 story_document,
                 narration_durations_ms=narration_durations,
+                narration_srt_by_order=story_tts.narration_subtitles_from_plan(plan),
             )
         except Exception as exc:  # noqa: BLE001 — fallback to transcript subtitles.
             logger.warning(

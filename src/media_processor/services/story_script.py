@@ -40,6 +40,10 @@ _VALID_AUDIO_INTENTS = {"narration", "original", "narration_with_original"}
 _SRT_TIME_RE = re.compile(
     r"(?P<start>\d{1,2}:\d{2}:\d{2}[,.]\d{3})\s*-->\s*(?P<end>\d{1,2}:\d{2}:\d{2}[,.]\d{3})"
 )
+_SUBTITLE_DISPLAY_PUNCTUATION_RE = re.compile(
+    r"[。！？!?，,、；;：:「」『』（）()\[\]【】《》〈〉…\.]+"
+)
+_SUBTITLE_DISPLAY_WHITESPACE_RE = re.compile(r"\s+")
 _AUDIO_INTENT_ALIASES = {
     0: "narration",
     1: "original",
@@ -666,6 +670,7 @@ def story_document_to_srt(
     document: StoryScriptDocument,
     *,
     narration_durations_ms: dict[int, int] | None = None,
+    narration_srt_by_order: dict[int, str] | None = None,
 ) -> str:
     """Build timeline subtitles from StoryScript narration text."""
     cues: list[SubtitleCue] = []
@@ -673,12 +678,21 @@ def story_document_to_srt(
     max_chars = MAX_LINE_CHARS * MAX_LINES
     for item in document.items:
         duration = max(700, item.duration_ms, (narration_durations_ms or {}).get(item.order, 0))
-        text = item.narration.strip()
-        if text:
+        item_srt = (narration_srt_by_order or {}).get(item.order, "")
+        item_cues = _offset_narration_srt(item_srt, cursor, len(cues)) if item_srt else []
+        if item_cues:
+            cues.extend(item_cues)
+        else:
+            text = item.narration.strip()
+            if not _subtitle_display_text(text):
+                cursor += duration
+                continue
             pages = _split_narration_subtitle_pages(text, max_chars=max_chars)
-            for index, page in enumerate(pages):
-                start_ms = cursor + int(duration * index / len(pages))
-                end_ms = cursor + int(duration * (index + 1) / len(pages))
+            display_pages = [_subtitle_display_text(page) for page in pages]
+            display_pages = [page for page in display_pages if page]
+            for index, page in enumerate(display_pages):
+                start_ms = cursor + int(duration * index / len(display_pages))
+                end_ms = cursor + int(duration * (index + 1) / len(display_pages))
                 lines = [page[i : i + MAX_LINE_CHARS] for i in range(0, len(page), MAX_LINE_CHARS)]
                 cues.append(
                     SubtitleCue(
@@ -690,6 +704,57 @@ def story_document_to_srt(
                 )
         cursor += duration
     return render_srt(cues)
+
+
+def _offset_narration_srt(
+    srt_text: str, timeline_offset_ms: int, sequence_offset: int
+) -> list[SubtitleCue]:
+    cues: list[SubtitleCue] = []
+    for start_ms, end_ms, text in _parse_srt_text(srt_text):
+        display_text = _subtitle_display_text(text)
+        if not display_text:
+            continue
+        lines = [
+            display_text[i : i + MAX_LINE_CHARS]
+            for i in range(0, len(display_text), MAX_LINE_CHARS)
+        ]
+        cues.append(
+            SubtitleCue(
+                sequence=sequence_offset + len(cues) + 1,
+                timeline_start_ms=timeline_offset_ms + start_ms,
+                timeline_end_ms=timeline_offset_ms + end_ms,
+                text="\n".join(lines[:MAX_LINES]),
+            )
+        )
+    return cues
+
+
+def _parse_srt_text(srt_text: str) -> list[tuple[int, int, str]]:
+    out: list[tuple[int, int, str]] = []
+    for raw_block in srt_text.replace("\r\n", "\n").strip().split("\n\n"):
+        lines = raw_block.split("\n")
+        if len(lines) < 3:
+            continue
+        match = _SRT_TIME_RE.search(lines[1])
+        if match is None:
+            continue
+        start_ms = _srt_timestamp_to_ms(match.group("start"))
+        end_ms = _srt_timestamp_to_ms(match.group("end"))
+        text = "".join(line.strip() for line in lines[2:])
+        if end_ms > start_ms and text:
+            out.append((start_ms, end_ms, text))
+    return out
+
+
+def _srt_timestamp_to_ms(value: str) -> int:
+    h, m, rest = value.replace(".", ",").split(":")
+    s, ms = rest.split(",")
+    return int(h) * 3_600_000 + int(m) * 60_000 + int(s) * 1000 + int(ms)
+
+
+def _subtitle_display_text(text: str) -> str:
+    display = _SUBTITLE_DISPLAY_PUNCTUATION_RE.sub("", text.replace("\n", " "))
+    return _SUBTITLE_DISPLAY_WHITESPACE_RE.sub(" ", display).strip()
 
 
 def _split_narration_subtitle_pages(text: str, *, max_chars: int) -> list[str]:

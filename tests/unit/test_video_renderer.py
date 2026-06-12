@@ -50,6 +50,13 @@ def test_video_preset_uses_nvenc_compatible_value() -> None:
     assert video_renderer._video_preset("h264_nvenc") == "p4"
 
 
+def test_drawtext_escape_preserves_real_newline() -> None:
+    escaped = video_renderer._drawtext_escape("上\n班")
+
+    assert escaped == "上\n班"
+    assert "\\n" not in escaped
+
+
 def test_best_video_codec_skips_nvenc_when_cuda_unavailable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -248,7 +255,7 @@ def test_render_pipeline_uses_timeline_durations_for_xfade(
     assert captured["durations_ms"] == [7_000, 8_000]
 
 
-def test_cut_segment_extracts_timeline_duration_for_narration_hold(
+def test_cut_segment_pads_narration_hold_to_timeline_duration(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -275,7 +282,7 @@ def test_cut_segment_extracts_timeline_duration_for_narration_hold(
     video_renderer._cut_segment(src, cut, out, "9:16")
 
     cmd = captured["cmd"]
-    assert cmd[cmd.index("-t") + 1] == "7.000"
+    assert cmd[cmd.index("-t") + 1] == "3.000"
     assert "tpad=stop_mode=clone:stop_duration=4.000" in cmd[cmd.index("-vf") + 1]
 
 

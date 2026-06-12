@@ -111,7 +111,8 @@ def test_story_document_to_srt_uses_narration_timeline() -> None:
     srt = story_document_to_srt(document)
 
     assert "00:00:00,000 --> 00:00:02,500" in srt
-    assert "這不是一般的展示車。" in srt
+    assert "這不是一般的展示車" in srt
+    assert "這不是一般的展示車。" not in srt
     assert "00:00:02,500 --> 00:00:04,500" in srt
 
 
@@ -150,9 +151,50 @@ def test_story_document_to_srt_prefers_punctuation_pages() -> None:
 
     srt = story_document_to_srt(document)
 
-    assert "先看第一個反差。" in srt
-    assert "接著第二個畫面更誇張！" in srt
-    assert "最後收在疑問？" in srt
+    assert "先看第一個反差" in srt
+    assert "接著第二個畫面更誇張" in srt
+    assert "最後收在疑問" in srt
+    assert "。" not in srt
+    assert "！" not in srt
+    assert "？" not in srt
+
+
+def test_story_document_to_srt_uses_tts_sidecar_timing() -> None:
+    document = validate_story_script(_valid_payload(), project_id=1, asset_durations={10: 8_000})
+    tts_srt = """1
+00:00:00,120 --> 00:00:00,820
+這不是，一般的。
+
+2
+00:00:00,900 --> 00:00:01,400
+展示車！
+"""
+
+    srt = story_document_to_srt(document, narration_srt_by_order={1: tts_srt})
+
+    assert "00:00:00,120 --> 00:00:00,820" in srt
+    assert "00:00:00,900 --> 00:00:01,400" in srt
+    assert "這不是一般的" in srt
+    assert "展示車" in srt
+    assert "，" not in srt
+    assert "！" not in srt
+
+
+def test_story_document_to_srt_strips_punctuation_but_keeps_word_spaces() -> None:
+    payload = _valid_payload()
+    payload["items"] = [
+        {
+            **payload["items"][0],
+            "narration": "The BMW M4，正在上班！",
+        }
+    ]
+    document = validate_story_script(payload, project_id=1, asset_durations={10: 8_000})
+
+    srt = story_document_to_srt(document)
+
+    assert "The BMW M4" in srt
+    assert "正在上班" in srt
+    assert "BMWM4" not in srt
 
 
 def test_gather_story_inputs_uses_transcripts_without_gpu_analysis() -> None:

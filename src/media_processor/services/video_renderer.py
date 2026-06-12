@@ -745,7 +745,7 @@ def _cut_segment(
         source_duration_s,
         (getattr(cut, "timeline_duration_ms", None) or 0) / 1000.0,
     )
-    extraction_duration_s = output_duration_s
+    extraction_duration_s = source_duration_s
     duration_s = output_duration_s
 
     vf_chain = aspect_filter(target_aspect, crop_region=crop_region)
@@ -1384,8 +1384,7 @@ def _drawtext_escape(text: str) -> str:
     text = text.replace("\\", "\\\\")
     text = text.replace("'", "\\'")
     text = text.replace(":", "\\:")
-    text = text.replace("%", "\\%")
-    return text.replace("\n", "\\n")
+    return text.replace("%", "\\%")
 
 
 def _resolve_subtitle_style(
