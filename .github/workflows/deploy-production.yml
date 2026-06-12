@@ -14,6 +14,7 @@ env:
   IMAGE_TAG: latest
   EXPECTED_MEDIA_STORAGE_DIR: G:/MediaStorage
   EXPECTED_PGDATA_DIR: G:/MediaStorage/pgdata
+  PUBLIC_HEALTH_URL: https://media.sisihome.org/api/health
 
 jobs:
   deploy-production:
@@ -79,12 +80,14 @@ jobs:
       - name: Health check through web proxy
         run: |
           $expected = (Select-String -Path "pyproject.toml" -Pattern '^version = "([^"]+)"').Matches[0].Groups[1].Value
-          for ($i = 1; $i -le 12; $i++) {
-            $body = curl.exe -fsS "http://${env:DEPLOY_SERVER_IP}:8523/api/health"
+          for ($i = 1; $i -le 18; $i++) {
+            $body = curl.exe -fsS "${env:PUBLIC_HEALTH_URL}"
             if ($LASTEXITCODE -eq 0) {
               $health = $body | ConvertFrom-Json
               if ($health.version -eq $expected) { exit 0 }
               Write-Host "Health version $($health.version), expected $expected"
+            } else {
+              Write-Host "Health attempt $i failed with curl exit $LASTEXITCODE"
             }
             Start-Sleep -Seconds 10
           }
@@ -99,4 +102,4 @@ jobs:
           "- Deploy path: ${env:DEPLOY_PATH}" >> $env:GITHUB_STEP_SUMMARY
           "- Media volume: ${env:EXPECTED_MEDIA_STORAGE_DIR}" >> $env:GITHUB_STEP_SUMMARY
           "- Postgres volume: ${env:EXPECTED_PGDATA_DIR}" >> $env:GITHUB_STEP_SUMMARY
-          "- Web health: http://${env:DEPLOY_SERVER_IP}:8523/api/health" >> $env:GITHUB_STEP_SUMMARY
+          "- Web health: ${env:PUBLIC_HEALTH_URL}" >> $env:GITHUB_STEP_SUMMARY
