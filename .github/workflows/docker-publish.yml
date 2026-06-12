@@ -25,20 +25,35 @@ jobs:
             image: media-processor-api
             context: .
             file: docker/api.Dockerfile
+            cache_mode: max
           - service: worker
             image: media-processor-worker
             context: .
             file: docker/worker.Dockerfile
+            cache_mode: min
           - service: web
             image: media-processor-web
             context: .
             file: docker/web.Dockerfile
+            cache_mode: max
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Free disk space for worker image
+        if: matrix.service == 'worker'
+        run: |
+          set -euxo pipefail
+          df -h
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo docker system prune -af || true
+          df -h
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -60,7 +75,7 @@ jobs:
           build-args: |
             WHISPER_FAKE=1
           cache-from: type=gha,scope=${{ matrix.service }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=${{ matrix.cache_mode }},scope=${{ matrix.service }}
           provenance: false
 
       - name: Summary
