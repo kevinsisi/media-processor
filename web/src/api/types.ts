@@ -276,6 +276,50 @@ export type EditMode =
   | "documentary"
   | "drama_explain";
 
+export type TrustStatus = "planned" | "degraded" | "failed" | "unknown";
+export type TrustSeverity = "info" | "warning" | "error";
+export type TrustStageStatus = "pending" | "success" | "degraded" | "failed" | "skipped" | "unavailable";
+
+export interface TrustEvidenceMetric {
+  name: string;
+  available: boolean;
+  value?: unknown;
+  unit?: string | null;
+  message?: string | null;
+}
+
+export interface TrustStageOutcome {
+  stage: string;
+  status: TrustStageStatus;
+  message?: string | null;
+  evidence: TrustEvidenceMetric[];
+}
+
+export interface TrustDegradationEvent {
+  stage: string;
+  code: string;
+  message: string;
+  severity: TrustSeverity;
+  fallback_used?: string | null;
+  evidence: TrustEvidenceMetric[];
+}
+
+export interface TrustSummary {
+  status: TrustStatus;
+  degradation_count: number;
+  highest_severity: TrustSeverity | null;
+}
+
+export interface DraftTrustReport {
+  schema_version: number;
+  generated_at: string;
+  status: TrustStatus;
+  stage_outcomes: TrustStageOutcome[];
+  degradation_events: TrustDegradationEvent[];
+  failing_stage?: string | null;
+  error_message?: string | null;
+}
+
 export interface DraftSummary {
   id: number;
   project_id: number;
@@ -294,6 +338,7 @@ export interface DraftSummary {
   // Old rows that pre-date the column come back as "custom".
   style_preset?: ClipStylePreset;
   edit_mode?: EditMode;
+  trust_summary?: TrustSummary;
 }
 
 export interface DraftSegmentOut {
@@ -331,6 +376,7 @@ export interface DraftDetail extends DraftSummary {
   segments: DraftSegmentOut[];
   cut_plan?: CutPlanOut | null;
   prompt_feedback?: string | null;
+  trust_report?: DraftTrustReport | null;
 }
 
 export interface EditTriggerRequest {

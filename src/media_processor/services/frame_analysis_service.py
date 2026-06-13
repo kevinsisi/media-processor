@@ -275,20 +275,7 @@ async def _analyse_batch(
                 "overall_activity_summary": result.get("overall_activity_summary", ""),
             }
 
-    # Fallback: synthetic observations when all keys failed
-    logger.warning("frame analysis batch %d: all keys failed, using fallback", batch_index)
-    return {
-        "batch_index": batch_index,
-        "time_range": time_range,
-        "frame_observations": [
-            {
-                "timestamp": _ms_to_srt_time(start_ms + int(i * interval_s * 1000)),
-                "observation": "（分析失敗）",
-            }
-            for i in range(len(frames))
-        ],
-        "overall_activity_summary": "（Vision API 呼叫失敗）",
-    }
+    raise RuntimeError(f"frame analysis batch {batch_index}: all Vision providers failed")
 
 
 # ---------- Main pipeline ----------

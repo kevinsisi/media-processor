@@ -214,16 +214,19 @@ class TestAnalyseBatchFallback:
         gemini_mock.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_all_keys_fail_returns_synthetic(self):
+    async def test_all_keys_fail_raises_without_synthetic_success(self):
         fake_frames = [MagicMock(spec=Path) for _ in range(2)]
         for f in fake_frames:
             f.read_bytes.return_value = b"fake_jpeg"
 
-        with patch(
-            "media_processor.services.frame_analysis_service._call_gemini_vision",
-            new=AsyncMock(return_value=None),
+        with (
+            patch(
+                "media_processor.services.frame_analysis_service._call_gemini_vision",
+                new=AsyncMock(return_value=None),
+            ),
+            pytest.raises(RuntimeError, match="all Vision providers failed"),
         ):
-            result = await fas._analyse_batch(
+            await fas._analyse_batch(
                 fake_frames,
                 batch_index=0,
                 start_ms=0,
@@ -231,8 +234,3 @@ class TestAnalyseBatchFallback:
                 interval_s=3.0,
                 api_keys=("key1", "key2"),
             )
-
-        assert result["batch_index"] == 0
-        assert len(result["frame_observations"]) == 2
-        assert "分析失敗" in result["frame_observations"][0]["observation"]
-        assert "Vision API 呼叫失敗" in result["overall_activity_summary"]

@@ -56,6 +56,14 @@ from media_processor.services.settings_store import (
     build_story_tts_config,
     get_llm_api_keys,
 )
+from media_processor.services.trust_report import (
+    DraftTrustReport,
+    StageStatus,
+    TrustEvidenceMetric,
+    TrustSeverity,
+    new_trust_report,
+    trust_report_from_json,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +105,26 @@ def _compute_auto_target_ms(profile_target_ms: int, total_source_ms: int, asset_
 
 def _initial_progress() -> dict[str, str]:
     return dict.fromkeys(_STAGES, "pending")
+
+
+def _initial_trust_report_json() -> dict[str, Any]:
+    return new_trust_report().to_dict()
+
+
+def _trust_report_for_update(blob: Any) -> DraftTrustReport:
+    return trust_report_from_json(blob) or new_trust_report()
+
+
+def _stage_state_to_trust_status(value: str) -> tuple[StageStatus, str | None]:
+    if value == "done":
+        return "success", None
+    if value == "skipped":
+        return "skipped", None
+    if value.startswith("failed"):
+        return "failed", value
+    if value == "running":
+        return "pending", "running"
+    return "pending", None
 
 
 def _failure_reason(exc: Exception) -> str:
@@ -156,6 +184,7 @@ async def _claim_pending_draft(
             pending.status = DraftStatus.PROCESSING.value
             if not pending.progress_steps_json:
                 pending.progress_steps_json = _initial_progress()
+            pending.trust_report_json = _initial_trust_report_json()
             await session.commit()
             await session.refresh(pending)
             return _DraftHandle(
@@ -171,6 +200,7 @@ async def _claim_pending_draft(
             version=version,
             status=DraftStatus.PROCESSING.value,
             progress_steps_json=_initial_progress(),
+            trust_report_json=_initial_trust_report_json(),
         )
         session.add(draft)
         await session.commit()
@@ -203,6 +233,7 @@ async def _adopt_draft_row(project: Project, draft_id: int) -> _DraftHandle:
             )
         draft.status = DraftStatus.PROCESSING.value
         draft.progress_steps_json = _initial_progress()
+        draft.trust_report_json = _initial_trust_report_json()
         draft.prompt_feedback = None
         await session.commit()
         await session.refresh(draft)
@@ -224,7 +255,230 @@ async def _set_stage_state(draft_id: int, stage: str, value: str) -> None:
         blob: dict[str, str] = dict(draft.progress_steps_json or {})
         blob[stage] = value
         draft.progress_steps_json = blob
+        trust_status, message = _stage_state_to_trust_status(value)
+        report = _trust_report_for_update(draft.trust_report_json)
+        report.set_stage(stage, trust_status, message=message)
+        draft.trust_report_json = report.to_dict()
         await session.commit()
+
+
+async def _record_trust_degradation(
+    draft_id: int,
+    *,
+    stage: str,
+    code: str,
+    message: str,
+    severity: TrustSeverity = "warning",
+    fallback_used: str | None = None,
+    evidence: list[TrustEvidenceMetric] | None = None,
+) -> None:
+    async with async_session_maker() as session:
+        draft = await session.get(Draft, draft_id)
+        if draft is None:
+            return
+        if draft.status not in (DraftStatus.PENDING.value, DraftStatus.PROCESSING.value):
+            return
+        report = _trust_report_for_update(draft.trust_report_json)
+        report.add_degradation(
+            stage,
+            code,
+            message,
+            severity=severity,
+            fallback_used=fallback_used,
+            evidence=evidence,
+        )
+        report.set_stage(stage, "degraded", message=message, evidence=evidence)
+        draft.trust_report_json = report.to_dict()
+        await session.commit()
+
+
+async def _record_trust_stage_outcome(
+    draft_id: int,
+    *,
+    stage: str,
+    status: StageStatus,
+    message: str | None = None,
+    evidence: list[TrustEvidenceMetric] | None = None,
+) -> None:
+    async with async_session_maker() as session:
+        draft = await session.get(Draft, draft_id)
+        if draft is None:
+            return
+        if draft.status not in (DraftStatus.PENDING.value, DraftStatus.PROCESSING.value):
+            return
+        report = _trust_report_for_update(draft.trust_report_json)
+        report.set_stage(stage, status, message=message, evidence=evidence)
+        draft.trust_report_json = report.to_dict()
+        await session.commit()
+
+
+async def _record_stabilization_selection_evidence(
+    draft_id: int,
+    project_id: int,
+    *,
+    stabilize_requested: bool,
+) -> None:
+    async with async_session_maker() as session:
+        assets = (
+            (await session.execute(select(Asset).where(Asset.project_id == project_id)))
+            .scalars()
+            .all()
+        )
+    asset_count = len(assets)
+    stabilized_count = sum(
+        1
+        for asset in assets
+        if asset_variants.active_variant(asset) == asset_variants.STABILIZED_VARIANT
+        and asset_variants.stabilization_status(asset) == asset_variants.STABILIZATION_DONE
+    )
+    skipped_count = sum(
+        1
+        for asset in assets
+        if asset_variants.stabilization_status(asset) == asset_variants.STABILIZATION_SKIPPED
+    )
+    failed_count = sum(
+        1
+        for asset in assets
+        if asset_variants.stabilization_status(asset) == asset_variants.STABILIZATION_FAILED
+    )
+    metrics_available = any(isinstance(asset.stabilization_metrics_json, dict) for asset in assets)
+    evidence = [
+        TrustEvidenceMetric("stabilize_requested", stabilize_requested),
+        TrustEvidenceMetric("asset_count", asset_count, unit="assets"),
+        TrustEvidenceMetric("active_stabilized_count", stabilized_count, unit="assets"),
+        TrustEvidenceMetric("skipped_count", skipped_count, unit="assets"),
+        TrustEvidenceMetric("failed_count", failed_count, unit="assets"),
+        TrustEvidenceMetric(
+            "jitter_metrics",
+            [
+                asset.stabilization_metrics_json
+                for asset in assets
+                if asset.stabilization_metrics_json
+            ],
+            available=metrics_available,
+            message=None if metrics_available else "stabilization jitter metrics unavailable",
+        ),
+    ]
+    status: StageStatus = "success"
+    message = "stabilization selection recorded"
+    if stabilize_requested and failed_count:
+        status = "degraded"
+        message = "one or more stabilized variants were unavailable"
+        await _record_trust_degradation(
+            draft_id,
+            stage="stabilization",
+            code="stabilized_variant_unavailable",
+            message=message,
+            fallback_used="raw_variant",
+            evidence=evidence,
+        )
+        return
+    await _record_trust_stage_outcome(
+        draft_id,
+        stage="stabilization",
+        status=status,
+        message=message,
+        evidence=evidence,
+    )
+
+
+def _lost_frame_ratio(point_tracks: dict[int, dict[str, Any]]) -> float | None:
+    total = 0
+    lost = 0
+    for blob in point_tracks.values():
+        frames = blob.get("frames")
+        if not isinstance(frames, list):
+            continue
+        for frame in frames:
+            if not isinstance(frame, dict) or "lost" not in frame:
+                continue
+            total += 1
+            if bool(frame.get("lost")):
+                lost += 1
+    if total == 0:
+        return None
+    return lost / total
+
+
+async def _record_tracking_evidence(
+    draft_id: int,
+    *,
+    auto_reframe_requested: bool,
+    tracking_by_asset: dict[int, dict[str, Any]],
+    custom_roi_by_asset: dict[int, dict[str, Any]],
+    point_track_by_asset: dict[int, dict[str, Any]],
+) -> None:
+    lost_ratio = _lost_frame_ratio(point_track_by_asset)
+    evidence = [
+        TrustEvidenceMetric("auto_reframe_requested", auto_reframe_requested),
+        TrustEvidenceMetric("yolo_tracking_assets", len(tracking_by_asset), unit="assets"),
+        TrustEvidenceMetric("custom_roi_assets", len(custom_roi_by_asset), unit="assets"),
+        TrustEvidenceMetric("point_tracking_assets", len(point_track_by_asset), unit="assets"),
+        TrustEvidenceMetric(
+            "tracking_lost_frame_ratio",
+            lost_ratio,
+            available=lost_ratio is not None,
+            message=None if lost_ratio is not None else "point-tracking loss metric unavailable",
+        ),
+    ]
+    await _record_trust_stage_outcome(
+        draft_id,
+        stage="tracking",
+        status="success" if auto_reframe_requested else "skipped",
+        message="tracking evidence recorded",
+        evidence=evidence,
+    )
+
+
+async def _record_story_tts_coverage(
+    draft_id: int | None,
+    document: story_script.StoryScriptDocument,
+    *,
+    narration_enabled: bool,
+    narration_fallback: bool,
+    narration_rows: dict[int, StoryNarrationAsset],
+) -> None:
+    if draft_id is None or not narration_enabled:
+        return
+    requested_orders = [
+        item.order for item in document.items if story_tts.item_needs_narration(item)
+    ]
+    requested_count = len(requested_orders)
+    done_count = sum(
+        1 for row in narration_rows.values() if row.status == story_tts.NARRATION_STATUS_DONE
+    )
+    async with async_session_maker() as session:
+        failed_count = await session.scalar(
+            select(func.count())
+            .select_from(StoryNarrationAsset)
+            .where(StoryNarrationAsset.draft_id == draft_id)
+            .where(StoryNarrationAsset.status == story_tts.NARRATION_STATUS_FAILED)
+        )
+    failed_count = int(failed_count or 0)
+    timing_source = (
+        "edge_word_boundary"
+        if story_tts.narration_subtitles_by_order(narration_rows)
+        else "story_timing"
+    )
+    evidence = [
+        TrustEvidenceMetric("requested_items", requested_count, unit="items"),
+        TrustEvidenceMetric("done_items", done_count, unit="items"),
+        TrustEvidenceMetric("failed_items", failed_count, unit="items"),
+        TrustEvidenceMetric("fallback_allowed", narration_fallback),
+        TrustEvidenceMetric("subtitle_timing_source", timing_source),
+    ]
+    if requested_count == 0:
+        return
+    if done_count < requested_count:
+        await _record_trust_degradation(
+            draft_id,
+            stage="story_tts",
+            code="story_tts_incomplete_coverage",
+            message="部分 Story/Narrato 旁白未成功產生，輸出會使用可用旁白與字幕 timing fallback。",
+            severity="warning" if narration_fallback else "error",
+            fallback_used="subtitle_timing" if narration_fallback else None,
+            evidence=evidence,
+        )
 
 
 async def _load_segment_volumes(draft_id: int) -> list[bgm_mixer.SegmentVolume]:
@@ -435,7 +689,7 @@ async def _persist_plan(
         await session.commit()
 
 
-async def _mark_failed(draft_id: int, message: str) -> None:
+async def _mark_failed(draft_id: int, message: str, *, stage: str = "render") -> None:
     async with async_session_maker() as session:
         draft = await session.get(Draft, draft_id)
         if draft is None:
@@ -446,6 +700,9 @@ async def _mark_failed(draft_id: int, message: str) -> None:
         draft.prompt_feedback = (
             (draft.prompt_feedback or "") + f"\n[render-failed] {message}"
         ).strip()
+        report = _trust_report_for_update(draft.trust_report_json)
+        report.mark_failed(stage, message)
+        draft.trust_report_json = report.to_dict()
         await session.commit()
 
 
@@ -465,6 +722,8 @@ async def _mark_ready(
         draft.mp4_preview_path = str(output_path)
         if srt_path is not None and srt_path.is_file():
             draft.subtitle_path = str(srt_path)
+        report = _trust_report_for_update(draft.trust_report_json)
+        draft.trust_report_json = report.to_dict()
         await session.commit()
 
 
@@ -710,6 +969,13 @@ async def _story_plan_stage(
                 allow_fallback=narration_fallback,
                 config=tts_config,
             )
+            await _record_story_tts_coverage(
+                draft_id,
+                document,
+                narration_enabled=narration_enabled,
+                narration_fallback=narration_fallback,
+                narration_rows=narration_rows,
+            )
         narration_durations = story_tts.narration_durations_by_order(narration_rows)
         narration_paths = {
             order: str(row.file_path)
@@ -785,6 +1051,24 @@ async def _documentary_plan_stage(
                     await session.commit()
 
         fa_assets = [a for a in assets if getattr(a, "frame_analysis_status", "") == "done"]
+        failed_assets = [a for a in assets if getattr(a, "frame_analysis_status", "") == "failed"]
+        unavailable_assets = [
+            a for a in assets if getattr(a, "frame_analysis_status", "") != "done"
+        ]
+        if draft_id is not None and unavailable_assets:
+            await _record_trust_degradation(
+                draft_id,
+                stage="frame_analysis",
+                code="frame_analysis_incomplete_coverage",
+                message="部分素材沒有可用的逐幀分析，紀錄片腳本只使用已完成分析的素材或改用 Story fallback。",
+                fallback_used="partial_frame_analysis" if fa_assets else "story_mode",
+                evidence=[
+                    TrustEvidenceMetric("asset_count", len(assets), unit="assets"),
+                    TrustEvidenceMetric("done_count", len(fa_assets), unit="assets"),
+                    TrustEvidenceMetric("failed_count", len(failed_assets), unit="assets"),
+                    TrustEvidenceMetric("coverage_ratio", len(fa_assets) / len(assets)),
+                ],
+            )
 
         if fa_assets:
             try:
@@ -818,6 +1102,13 @@ async def _documentary_plan_stage(
                 draft_id=draft_id,
                 allow_fallback=narration_fallback,
                 config=tts_config,
+            )
+            await _record_story_tts_coverage(
+                draft_id,
+                document,
+                narration_enabled=narration_enabled,
+                narration_fallback=narration_fallback,
+                narration_rows=narration_rows,
             )
         narration_durations = story_tts.narration_durations_by_order(narration_rows)
         narration_paths = {
@@ -876,6 +1167,13 @@ async def _drama_explain_plan_stage(
                 draft_id=draft_id,
                 allow_fallback=narration_fallback,
                 config=tts_config,
+            )
+            await _record_story_tts_coverage(
+                draft_id,
+                document,
+                narration_enabled=narration_enabled,
+                narration_fallback=narration_fallback,
+                narration_rows=narration_rows,
             )
         narration_durations = story_tts.narration_durations_by_order(narration_rows)
         narration_paths = {
@@ -1032,11 +1330,21 @@ async def run_render(
                     edit_mode=edit_mode,
                 )
             await _persist_plan(handle, plan, initial_voice_volume=initial_voice_volume)
+            if plan.used_fallback:
+                await _record_trust_degradation(
+                    handle.draft_id,
+                    stage="plan_generation",
+                    code="plan_generation_heuristic_fallback",
+                    message=plan.fallback_reason
+                    or "AI planning failed; heuristic selection was used.",
+                    fallback_used="heuristic",
+                    evidence=[TrustEvidenceMetric("plan_source", "heuristic")],
+                )
     except Exception as exc:  # noqa: BLE001 — record + abort.
         reason = _failure_reason(exc)
         logger.exception("plan stage failed for project %d", project_id)
         await _set_stage_state(handle.draft_id, EditStep.PLAN.value, reason)
-        await _mark_failed(handle.draft_id, f"plan: {exc}")
+        await _mark_failed(handle.draft_id, f"plan: {exc}", stage=EditStep.PLAN.value)
         summary["stages"][EditStep.PLAN.value] = reason
         return summary
     await _set_stage_state(handle.draft_id, EditStep.PLAN.value, "done")
@@ -1061,6 +1369,18 @@ async def run_render(
         secondary_segments_by_asset,
         stabilized_asset_ids,
     ) = await _gather_render_inputs(project_id)
+    await _record_stabilization_selection_evidence(
+        handle.draft_id,
+        project_id,
+        stabilize_requested=stabilize,
+    )
+    await _record_tracking_evidence(
+        handle.draft_id,
+        auto_reframe_requested=auto_reframe_enabled,
+        tracking_by_asset=tracking_by_asset,
+        custom_roi_by_asset=custom_roi_by_asset,
+        point_track_by_asset=point_track_by_asset,
+    )
 
     # v0.30.0 — opt-in AI Smart Camera stage. Resolves the project
     # toggle + render-flag override (priority: explicit kwarg from
@@ -1091,6 +1411,16 @@ async def run_render(
                 if directives:
                     plan = smart_camera_planner.apply_smart_camera_to_plan(plan, directives)
                     await _restore_plan_blob(handle, plan)
+                    await _record_trust_stage_outcome(
+                        handle.draft_id,
+                        stage="smart_camera",
+                        status="success",
+                        message="smart-camera directives generated",
+                        evidence=[
+                            TrustEvidenceMetric("directive_count", len(directives), unit="cuts"),
+                            TrustEvidenceMetric("cut_count", len(plan.segments), unit="cuts"),
+                        ],
+                    )
                     logger.info(
                         "draft %d: smart-camera applied to %d/%d cuts",
                         handle.draft_id,
@@ -1098,6 +1428,12 @@ async def run_render(
                         len(plan.segments),
                     )
                 else:
+                    await _record_trust_stage_outcome(
+                        handle.draft_id,
+                        stage="smart_camera",
+                        status="unavailable",
+                        message="smart-camera ran but produced no directives",
+                    )
                     logger.info(
                         "draft %d: smart-camera ran but produced no directives",
                         handle.draft_id,
@@ -1106,6 +1442,14 @@ async def run_render(
                 logger.warning(
                     "draft %d: smart-camera enabled but no LLM_API_KEYS configured",
                     handle.draft_id,
+                )
+                await _record_trust_degradation(
+                    handle.draft_id,
+                    stage="smart_camera",
+                    code="smart_camera_no_provider",
+                    message="Smart Camera 已啟用，但沒有可用的 Vision provider，已使用靜態鏡頭 fallback。",
+                    fallback_used="static_camera",
+                    evidence=[TrustEvidenceMetric("directive_source", "no_move")],
                 )
                 directives = smart_camera_planner.build_no_move_directives(
                     plan,
@@ -1119,6 +1463,14 @@ async def run_render(
                 "draft %d: smart-camera stage failed; using no-move directives",
                 handle.draft_id,
             )
+            await _record_trust_degradation(
+                handle.draft_id,
+                stage="smart_camera",
+                code="smart_camera_static_fallback",
+                message="Smart Camera 規劃失敗，已使用靜態鏡頭 fallback。",
+                fallback_used="static_camera",
+                evidence=[TrustEvidenceMetric("directive_source", "no_move")],
+            )
             directives = smart_camera_planner.build_no_move_directives(
                 plan,
                 reason="smart-camera stage failed",
@@ -1130,6 +1482,19 @@ async def run_render(
         logger.info(
             "draft %d: smart-camera skip-plan render reused existing directives",
             handle.draft_id,
+        )
+        await _record_trust_stage_outcome(
+            handle.draft_id,
+            stage="smart_camera",
+            status="success",
+            message="reused existing smart-camera directives",
+        )
+    elif not smart_camera_active:
+        await _record_trust_stage_outcome(
+            handle.draft_id,
+            stage="smart_camera",
+            status="skipped",
+            message="smart camera not requested",
         )
 
     if not subtitles_enabled:
@@ -1363,6 +1728,22 @@ async def run_render(
                 break
         await _mark_failed(handle.draft_id, f"render: {exc}")
         return summary
+    await _record_trust_stage_outcome(
+        handle.draft_id,
+        stage="render_output",
+        status="success",
+        message="render output written",
+        evidence=[
+            TrustEvidenceMetric("output_path", str(result.output_path)),
+            TrustEvidenceMetric(
+                "output_bytes",
+                result.output_path.stat().st_size if result.output_path.is_file() else None,
+                available=result.output_path.is_file(),
+                unit="bytes",
+                message=None if result.output_path.is_file() else "render output file unavailable",
+            ),
+        ],
+    )
 
     # Stage 5 — BGM mix. No-op when neither the draft nor the project has
     # a BGM path. A BGM failure only fails the bgm stage, not the whole
@@ -1383,6 +1764,7 @@ async def run_render(
     has_voice_overrides = any(
         sv.voice_volume != 1.0 or sv.bgm_volume is not None for sv in segment_volumes
     )
+    audio_mix_degraded = False
     narration_clips: list[bgm_mixer.NarrationClip] = []
     timeline_cursor_ms = 0
     for seg in plan.segments:
@@ -1420,7 +1802,7 @@ async def run_render(
                 await _set_stage_state(
                     handle.draft_id, EditStep.BGM.value, f"failed:{type(exc).__name__}"
                 )
-                await _mark_failed(handle.draft_id, f"narration: {exc}")
+                await _mark_failed(handle.draft_id, f"narration: {exc}", stage=EditStep.BGM.value)
                 summary["stages"][EditStep.BGM.value] = f"failed:{type(exc).__name__}"
                 return summary
             logger.warning(
@@ -1428,6 +1810,15 @@ async def run_render(
                 handle.draft_id,
                 exc,
             )
+            await _record_trust_degradation(
+                handle.draft_id,
+                stage="audio_mix",
+                code="narration_mix_failed",
+                message="旁白混音失敗，已保留字幕-only 影片輸出。",
+                fallback_used="subtitles_only",
+                evidence=[TrustEvidenceMetric("error", str(exc))],
+            )
+            audio_mix_degraded = True
     if bgm_source_path:
         try:
             tmp_mixed = scratch_dir / f"draft_{handle.draft_id}_bgm.mp4"
@@ -1452,6 +1843,14 @@ async def run_render(
                 handle.draft_id,
                 exc,
             )
+            await _record_trust_degradation(
+                handle.draft_id,
+                stage="bgm_mix",
+                code="bgm_mix_failed",
+                message="BGM 混音失敗，已保留沒有 BGM fallback 的影片輸出。",
+                fallback_used="no_bgm",
+                evidence=[TrustEvidenceMetric("error", str(exc))],
+            )
             await _set_stage_state(
                 handle.draft_id, EditStep.BGM.value, f"failed:{type(exc).__name__}"
             )
@@ -1475,12 +1874,32 @@ async def run_render(
                 handle.draft_id,
                 exc,
             )
+            await _record_trust_degradation(
+                handle.draft_id,
+                stage="audio_mix",
+                code="voice_volume_apply_failed",
+                message="音量覆寫套用失敗，已保留原始音量輸出。",
+                fallback_used="original_audio_volume",
+                evidence=[TrustEvidenceMetric("error", str(exc))],
+            )
+            audio_mix_degraded = True
             await _set_stage_state(
                 handle.draft_id, EditStep.BGM.value, f"failed:{type(exc).__name__}"
             )
             summary["stages"][EditStep.BGM.value] = f"failed:{type(exc).__name__}"
     else:
         await update_state(EditStep.BGM.value, "done")
+    if not audio_mix_degraded:
+        await _record_trust_stage_outcome(
+            handle.draft_id,
+            stage="audio_mix",
+            status="success",
+            message="audio mix stage completed",
+            evidence=[
+                TrustEvidenceMetric("narration_clip_count", len(narration_clips), unit="clips"),
+                TrustEvidenceMetric("bgm_requested", bool(bgm_source_path)),
+            ],
+        )
 
     # v0.18 — watermark / brand-logo overlay. Final stage. Skipped when
     # the project has no watermark configured. A failure here is
@@ -1507,6 +1926,14 @@ async def run_render(
                 "watermark overlay failed for draft %d, keeping un-watermarked mp4: %s",
                 handle.draft_id,
                 exc,
+            )
+            await _record_trust_degradation(
+                handle.draft_id,
+                stage="render_output",
+                code="watermark_overlay_failed",
+                message="浮水印套用失敗，已保留未加浮水印的影片。",
+                fallback_used="no_watermark",
+                evidence=[TrustEvidenceMetric("error", str(exc))],
             )
 
     # M7.2 — persist subtitle cues to ``subtitle_cues`` so the editor can

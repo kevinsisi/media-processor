@@ -58,6 +58,51 @@ EditModeLiteral = Literal[
 ]
 DraftExportStatusLiteral = Literal["queued", "running", "done", "failed"]
 AssetVariantLiteral = Literal["raw", "stabilized"]
+TrustStatusLiteral = Literal["planned", "degraded", "failed", "unknown"]
+TrustSeverityLiteral = Literal["info", "warning", "error"]
+TrustStageStatusLiteral = Literal[
+    "pending", "success", "degraded", "failed", "skipped", "unavailable"
+]
+
+
+class TrustEvidenceMetricOut(BaseModel):
+    name: str
+    available: bool = True
+    value: Any | None = None
+    unit: str | None = None
+    message: str | None = None
+
+
+class TrustStageOutcomeOut(BaseModel):
+    stage: str
+    status: TrustStageStatusLiteral
+    message: str | None = None
+    evidence: list[TrustEvidenceMetricOut] = Field(default_factory=list)
+
+
+class TrustDegradationEventOut(BaseModel):
+    stage: str
+    code: str
+    message: str
+    severity: TrustSeverityLiteral = "warning"
+    fallback_used: str | None = None
+    evidence: list[TrustEvidenceMetricOut] = Field(default_factory=list)
+
+
+class TrustSummaryOut(BaseModel):
+    status: TrustStatusLiteral
+    degradation_count: int = 0
+    highest_severity: TrustSeverityLiteral | None = None
+
+
+class DraftTrustReportOut(BaseModel):
+    schema_version: int
+    generated_at: str
+    status: TrustStatusLiteral
+    stage_outcomes: list[TrustStageOutcomeOut] = Field(default_factory=list)
+    degradation_events: list[TrustDegradationEventOut] = Field(default_factory=list)
+    failing_stage: str | None = None
+    error_message: str | None = None
 
 
 # v0.29.0 — static-crop anchor for source-orientation-mismatch renders.
@@ -456,6 +501,9 @@ class DraftSummary(BaseModel):
     # column.
     style_preset: ClipStylePresetLiteral = "custom"
     edit_mode: EditModeLiteral = "standard"
+    trust_summary: TrustSummaryOut = Field(
+        default_factory=lambda: TrustSummaryOut(status="unknown")
+    )
 
 
 class DraftSegmentOut(BaseModel):
@@ -484,6 +532,7 @@ class DraftDetail(DraftSummary):
     segments: list[DraftSegmentOut]
     cut_plan: CutPlanOut | None = None
     prompt_feedback: str | None = None
+    trust_report: DraftTrustReportOut | None = None
 
 
 class EditTriggerRequest(BaseModel):
