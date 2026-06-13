@@ -36,6 +36,7 @@ from media_processor.models import (
     DraftSegment,
     Project,
 )
+from media_processor.services.trust_report import TrustEvidenceMetric, new_trust_report
 
 
 @pytest.fixture()
@@ -256,6 +257,7 @@ def test_get_project_drafts(app: FastAPI) -> None:
     body: list[dict[str, Any]] = resp.json()
     assert len(body) == 1
     assert body[0]["version"] == 1
+    assert body[0]["trust_summary"]["status"] == "unknown"
 
 
 def test_get_draft_detail_with_segments(app: FastAPI) -> None:
@@ -266,6 +268,40 @@ def test_get_draft_detail_with_segments(app: FastAPI) -> None:
     assert body["version"] == 1
     assert len(body["segments"]) == 1
     assert body["segments"][0]["transition"] == "fade"
+    assert body["trust_summary"]["status"] == "unknown"
+    assert body["trust_report"] is None
+
+
+def test_get_draft_detail_includes_trust_report_fields(app: FastAPI) -> None:
+    import asyncio
+
+    async def set_report() -> None:
+        report = new_trust_report()
+        report.add_degradation(
+            "story_tts",
+            "story_tts_incomplete_coverage",
+            "部分旁白失敗，已使用字幕 fallback。",
+            fallback_used="subtitle_timing",
+            evidence=[TrustEvidenceMetric("failed_items", 1, unit="items")],
+        )
+        async with app.state.test_session_maker() as s:
+            draft = await s.get(Draft, 1)
+            assert draft is not None
+            draft.trust_report_json = report.to_dict()
+            await s.commit()
+
+    asyncio.run(set_report())
+    client = TestClient(app)
+    resp = client.get("/drafts/1")
+    assert resp.status_code == 200
+    body: dict[str, Any] = resp.json()
+    assert body["trust_summary"] == {
+        "status": "degraded",
+        "degradation_count": 1,
+        "highest_severity": "warning",
+    }
+    assert body["trust_report"]["status"] == "degraded"
+    assert body["trust_report"]["degradation_events"][0]["stage"] == "story_tts"
 
 
 def test_get_draft_404(app: FastAPI) -> None:

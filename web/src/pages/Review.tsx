@@ -13,6 +13,7 @@ import {
   useProjectDrafts,
   useReviewMutation,
 } from "../hooks";
+import TrustReportBanner from "../components/TrustReportBanner";
 import "./Review.css";
 
 // Deterministic decorative tone for a segment block. The API does not yet
@@ -210,6 +211,7 @@ function ReviewBody({ project, draft }: ReviewBodyProps) {
               <span className="intel__row-count mono">{draft.status}</span>
             </li>
           </ul>
+          <TrustReportBanner summary={draft.trust_summary} report={draft.trust_report} />
         </aside>
       </div>
 

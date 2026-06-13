@@ -5,6 +5,7 @@ from __future__ import annotations
 from media_processor.services import smart_camera_planner
 from media_processor.services.edit_orchestrator import _should_run_smart_camera_stage
 from media_processor.services.edit_planner import CutPlan, CutPlanSegment
+from media_processor.services.trust_report import TrustEvidenceMetric, new_trust_report
 
 
 def _plan(*segments: CutPlanSegment) -> CutPlan:
@@ -97,3 +98,29 @@ def test_smart_camera_inactive_never_runs() -> None:
         )
         is False
     )
+
+
+def test_optional_stage_fallback_makes_trust_report_degraded() -> None:
+    report = new_trust_report()
+
+    report.add_degradation(
+        "bgm_mix",
+        "bgm_mix_failed",
+        "BGM mix failed; video kept without BGM.",
+        fallback_used="no_bgm",
+        evidence=[TrustEvidenceMetric("fallback_allowed", True)],
+    )
+
+    assert report.summary.status == "degraded"
+    assert report.summary.degradation_count == 1
+    assert report.degradation_events[0].fallback_used == "no_bgm"
+
+
+def test_required_stage_failure_marks_trust_report_failed() -> None:
+    report = new_trust_report()
+
+    report.mark_failed("render_output", "ffmpeg failed before output write")
+
+    assert report.summary.status == "failed"
+    assert report.failing_stage == "render_output"
+    assert report.stage_outcomes[0].status == "failed"

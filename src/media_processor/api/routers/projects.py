@@ -16,7 +16,7 @@ from sqlalchemy.orm import selectinload
 from media_processor.api.config import settings
 from media_processor.api.deps import get_session
 from media_processor.api.routers.assets import thumbnail_urls_for_asset
-from media_processor.api.routers.drafts import _draft_url, _expected_draft_path
+from media_processor.api.routers.drafts import _draft_url, _expected_draft_path, trust_summary_out
 from media_processor.api.routers.watermark_presets import _load_preset_for_apply
 from media_processor.api.schemas import (
     AffectedDraftOut,
@@ -165,6 +165,7 @@ def _draft_summary_with_urls(draft: Draft) -> DraftSummary:
         subtitle_url=_url_for("srt", draft.subtitle_path),
         style_preset=getattr(draft, "style_preset", "custom") or "custom",
         edit_mode=_draft_edit_mode(draft),
+        trust_summary=trust_summary_out(draft.trust_report_json),
     )
 
 

@@ -30,12 +30,14 @@ from media_processor.api.schemas import (
     DraftSegmentOut,
     DraftSegmentPatch,
     DraftSegmentSplitRequest,
+    DraftTrustReportOut,
     EditModeLiteral,
     RenderFlagsOverride,
     SegmentVolumeOut,
     SegmentVolumePatch,
     SubtitleCueOut,
     SubtitleCuePatch,
+    TrustSummaryOut,
 )
 from media_processor.models import (
     Asset,
@@ -62,6 +64,7 @@ from media_processor.services.queue import (
     enqueue_project_edit,
     has_draft_render_job,
 )
+from media_processor.services.trust_report import trust_report_from_json, trust_summary_from_json
 
 router = APIRouter(prefix="/drafts", tags=["drafts"])
 
@@ -287,6 +290,17 @@ def _cut_plan_out(blob: Any | None) -> CutPlanOut | None:
         return None
 
 
+def trust_summary_out(blob: Any | None) -> TrustSummaryOut:
+    return TrustSummaryOut.model_validate(trust_summary_from_json(blob).to_dict())
+
+
+def trust_report_out(blob: Any | None) -> DraftTrustReportOut | None:
+    report = trust_report_from_json(blob)
+    if report is None:
+        return None
+    return DraftTrustReportOut.model_validate(report.to_dict())
+
+
 def serialise_draft_detail(draft: Draft) -> DraftDetail:
     """Map a Draft row + its loaded segments into the response model.
 
@@ -311,6 +325,8 @@ def serialise_draft_detail(draft: Draft) -> DraftDetail:
         prompt_feedback=draft.prompt_feedback,
         style_preset=getattr(draft, "style_preset", "custom") or "custom",
         edit_mode=edit_mode,
+        trust_summary=trust_summary_out(draft.trust_report_json),
+        trust_report=trust_report_out(draft.trust_report_json),
         segments=[
             DraftSegmentOut(
                 id=s.id,

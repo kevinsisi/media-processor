@@ -16,6 +16,7 @@ import AdvancedEditPanel, { type AdvancedTab } from "../components/AdvancedEditP
 import SubtitleEditor from "../components/SubtitleEditor";
 import SubjectClassPicker from "../components/SubjectClassPicker";
 import SubtitleStyleEditor from "../components/SubtitleStyleEditor";
+import TrustReportBanner from "../components/TrustReportBanner";
 import WatermarkPicker from "../components/WatermarkPicker";
 import type {
   ClipStylePreset,
@@ -64,6 +65,32 @@ const DEFAULT_SOURCE_AUDIO_VOLUME = 1.0;
 const SOURCE_AUDIO_VOLUME_MIN = 0;
 const SOURCE_AUDIO_VOLUME_MAX = 1.5;
 const SOURCE_AUDIO_VOLUME_STEP = 0.05;
+
+function publishTitleForTrust(draft: DraftDetail): string {
+  switch (draft.trust_summary?.status ?? "unknown") {
+    case "planned":
+      return "可依計畫發佈";
+    case "degraded":
+      return "可用，但請先確認降級";
+    case "failed":
+      return "這版生成失敗";
+    case "unknown":
+      return "可預覽，但缺少製作證據";
+  }
+}
+
+function publishBodyForTrust(draft: DraftDetail): string {
+  switch (draft.trust_summary?.status ?? "unknown") {
+    case "planned":
+      return "先預覽主成品；沒問題就下載，或建立 Reels 直式版與 YouTube / Web 橫向版。";
+    case "degraded":
+      return "這版有部分階段使用 fallback；請先打開降級原因，確認可接受後再下載或匯出。";
+    case "failed":
+      return "必要階段失敗，請重新產生或調整設定後再試。";
+    case "unknown":
+      return "這版沒有信任報告，請用預覽人工確認字幕、音訊、構圖與輸出品質。";
+  }
+}
 
 function classifyStepState(value: string | undefined): string {
   if (!value) return "pending";
@@ -1912,9 +1939,10 @@ export default function ProjectEdit() {
           {draft.cut_plan?.notes && (
             <p className="edit-card__hint mono">「{draft.cut_plan.notes}」</p>
           )}
+          <TrustReportBanner summary={draft.trust_summary} report={draft.trust_report} />
           {draft.cut_plan?.used_fallback && (
             <p className="edit-hint">
-              已用保守方式產生成品（{draft.cut_plan.fallback_reason || "原因未明"}）。
+              規劃階段使用 fallback：{draft.cut_plan.fallback_reason || "原因未明"}。請以信任報告為準。
             </p>
           )}
           <div className="edit-card__actions">
@@ -1957,11 +1985,13 @@ export default function ProjectEdit() {
           <section className="publish-workbench" aria-label="成品發佈工作台">
             <div className="publish-workbench__intro">
               <p className="publish-workbench__eyebrow mono">發布工作台</p>
-              <h2 className="publish-workbench__title">可以直接拿去發佈</h2>
+              <h2 className="publish-workbench__title">{publishTitleForTrust(draft)}</h2>
               <p className="publish-workbench__body">
-                先預覽主成品；沒問題就下載，或建立 Reels 直式版與 YouTube / Web 橫向版。
+                {publishBodyForTrust(draft)}
               </p>
             </div>
+
+            <TrustReportBanner summary={draft.trust_summary} report={draft.trust_report} />
 
             <dl className="publish-checklist">
               {publishingChecklist.map((item) => (
@@ -2120,7 +2150,7 @@ export default function ProjectEdit() {
                 )}
                 {draft.cut_plan?.used_fallback && (
                   <p className="edit-hint">
-                    已用保守方式產生成品（{draft.cut_plan.fallback_reason || "原因未明"}）。
+                    規劃階段使用 fallback：{draft.cut_plan.fallback_reason || "原因未明"}。請以信任報告為準。
                   </p>
                 )}
               </section>

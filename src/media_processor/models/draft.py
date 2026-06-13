@@ -81,6 +81,7 @@ class Draft(Base):
     prompt_feedback: Mapped[str | None] = mapped_column(Text, nullable=True)
     progress_steps_json: Mapped[Any] = mapped_column(JSON, nullable=True)
     cut_plan_json: Mapped[Any] = mapped_column(JSON, nullable=True)
+    trust_report_json: Mapped[Any] = mapped_column(JSON, nullable=True)
     # v0.21.1 — snapshot of the user-toggled render flags
     # (``transitions`` / ``stabilize`` / ``subtitles`` / ``auto_reframe``)
     # captured on the initial trigger. The skip-plan re-render paths
