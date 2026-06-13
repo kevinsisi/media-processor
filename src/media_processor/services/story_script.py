@@ -632,22 +632,30 @@ def story_document_to_cut_plan(
     profile_name: str,
     narration_durations_ms: dict[int, int] | None = None,
     narration_audio_paths: dict[int, str] | None = None,
+    target_duration_ms: int | None = None,
 ) -> CutPlan:
     segments = []
+    cursor_ms = 0
     for item in document.items:
         timeline_duration = max(item.duration_ms, (narration_durations_ms or {}).get(item.order, 0))
+        if target_duration_ms is not None:
+            remaining_ms = int(target_duration_ms) - cursor_ms
+            if remaining_ms <= 0:
+                break
+            timeline_duration = min(timeline_duration, remaining_ms)
         reason_parts = [item.reason or item.beat_type]
         if item.audio_intent != "original":
             reason_parts.append(f"旁白: {item.narration}")
         reason_parts.append(f"audio_intent={item.audio_intent}")
         if timeline_duration > item.duration_ms:
             reason_parts.append(f"narration_extended_ms={timeline_duration}")
+        asset_end_ms = min(item.source_end_ms, item.source_start_ms + max(1, timeline_duration))
         segments.append(
             CutPlanSegment(
                 order=item.order,
                 asset_id=item.asset_id,
                 asset_start_ms=item.source_start_ms,
-                asset_end_ms=item.source_end_ms,
+                asset_end_ms=asset_end_ms,
                 source_kind="scripted" if item.audio_intent != "original" else "improv",
                 reason=" | ".join(part for part in reason_parts if part),
                 transition_to_next=TRANSITION_DEFAULT,
@@ -656,6 +664,7 @@ def story_document_to_cut_plan(
                 narration_audio_path=(narration_audio_paths or {}).get(item.order),
             )
         )
+        cursor_ms += max(1, timeline_duration)
     return CutPlan(
         schema_version=STORY_PLAN_SCHEMA_VERSION,
         target_duration_ms=sum(max(1, segment.timeline_duration_ms or 0) for segment in segments),
@@ -676,7 +685,11 @@ def story_document_to_srt(
     cues: list[SubtitleCue] = []
     cursor = 0
     max_chars = MAX_LINE_CHARS * MAX_LINES
-    for item in document.items:
+    items = document.items
+    if narration_durations_ms is not None:
+        planned_orders = set(narration_durations_ms)
+        items = tuple(item for item in document.items if item.order in planned_orders)
+    for item in items:
         duration = max(700, item.duration_ms, (narration_durations_ms or {}).get(item.order, 0))
         item_srt = (narration_srt_by_order or {}).get(item.order, "")
         item_cues = _offset_narration_srt(item_srt, cursor, len(cues)) if item_srt else []

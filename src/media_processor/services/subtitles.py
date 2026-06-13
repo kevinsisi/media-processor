@@ -196,6 +196,21 @@ def build_cues(
         timeline_cursor += cut_duration
 
     cues.sort(key=lambda c: c.timeline_start_ms)
+    non_overlapping: list[SubtitleCue] = []
+    for cue in cues:
+        if non_overlapping and non_overlapping[-1].timeline_end_ms > cue.timeline_start_ms:
+            prev = non_overlapping[-1]
+            clamped_prev = SubtitleCue(
+                sequence=prev.sequence,
+                timeline_start_ms=prev.timeline_start_ms,
+                timeline_end_ms=cue.timeline_start_ms,
+                text=prev.text,
+            )
+            if clamped_prev.timeline_end_ms > clamped_prev.timeline_start_ms:
+                non_overlapping[-1] = clamped_prev
+            else:
+                non_overlapping.pop()
+        non_overlapping.append(cue)
     # Re-sequence after sort so SRT numbering is monotonic.
     return [
         SubtitleCue(
@@ -204,7 +219,7 @@ def build_cues(
             timeline_end_ms=c.timeline_end_ms,
             text=c.text,
         )
-        for i, c in enumerate(cues)
+        for i, c in enumerate(non_overlapping)
     ]
 
 

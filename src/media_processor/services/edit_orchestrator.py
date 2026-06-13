@@ -951,6 +951,7 @@ async def _story_plan_stage(
     draft_id: int | None = None,
     narration_enabled: bool = False,
     narration_fallback: bool = True,
+    target_duration_ms: int | None = None,
 ) -> CutPlan:
     """Load or generate a StoryScript and convert it into the normal CutPlan."""
     async with async_session_maker() as session:
@@ -988,6 +989,7 @@ async def _story_plan_stage(
         profile_name=profile_name,
         narration_durations_ms=narration_durations,
         narration_audio_paths=narration_paths,
+        target_duration_ms=target_duration_ms,
     )
 
 
@@ -999,6 +1001,7 @@ async def _documentary_plan_stage(
     draft_id: int | None = None,
     narration_enabled: bool = True,
     narration_fallback: bool = True,
+    target_duration_ms: int | None = None,
 ) -> CutPlan:
     """NarratoAI documentary mode: frame analysis → narration script → TTS → CutPlan.
 
@@ -1122,6 +1125,7 @@ async def _documentary_plan_stage(
         profile_name=profile_name,
         narration_durations_ms=narration_durations,
         narration_audio_paths=narration_paths,
+        target_duration_ms=target_duration_ms,
     )
 
 
@@ -1133,6 +1137,7 @@ async def _drama_explain_plan_stage(
     draft_id: int | None = None,
     narration_enabled: bool = True,
     narration_fallback: bool = True,
+    target_duration_ms: int | None = None,
 ) -> CutPlan:
     """NarratoAI drama explain mode: Whisper transcript → drama explanation → TTS."""
     async with async_session_maker() as session:
@@ -1187,6 +1192,7 @@ async def _drama_explain_plan_stage(
         profile_name=profile_name,
         narration_durations_ms=narration_durations,
         narration_audio_paths=narration_paths,
+        target_duration_ms=target_duration_ms,
     )
 
 
@@ -1303,6 +1309,7 @@ async def run_render(
                     draft_id=handle.draft_id,
                     narration_enabled=story_narration,
                     narration_fallback=story_narration_fallback,
+                    target_duration_ms=target_duration_ms,
                 )
             elif edit_mode == "documentary":
                 plan = await _documentary_plan_stage(
@@ -1312,6 +1319,7 @@ async def run_render(
                     draft_id=handle.draft_id,
                     narration_enabled=story_narration,
                     narration_fallback=story_narration_fallback,
+                    target_duration_ms=target_duration_ms,
                 )
             elif edit_mode == "drama_explain":
                 plan = await _drama_explain_plan_stage(
@@ -1321,6 +1329,7 @@ async def run_render(
                     draft_id=handle.draft_id,
                     narration_enabled=story_narration,
                     narration_fallback=story_narration_fallback,
+                    target_duration_ms=target_duration_ms,
                 )
             else:
                 plan = await _plan_stage(

@@ -105,6 +105,37 @@ def test_story_document_to_cut_plan_maps_audio_intents() -> None:
     assert "audio_intent=original" in plan.segments[1].reason
 
 
+def test_story_document_to_cut_plan_respects_target_duration_cap() -> None:
+    payload = _valid_payload()
+    payload["items"].append(
+        {
+            "order": 3,
+            "asset_id": 10,
+            "source_start_ms": 5_000,
+            "source_end_ms": 8_000,
+            "picture": "第三段",
+            "narration": "這段不應超出指定秒數。",
+            "audio_intent": "narration",
+            "beat_type": "closing",
+            "reason": "結尾",
+        }
+    )
+    document = validate_story_script(payload, project_id=1, asset_durations={10: 8_000})
+
+    plan = story_document_to_cut_plan(
+        document,
+        target_aspect_ratio="9:16",
+        profile_name="universal",
+        narration_durations_ms={1: 6_000, 2: 3_000, 3: 3_000},
+        target_duration_ms=10_000,
+    )
+
+    assert plan.target_duration_ms == 10_000
+    assert [seg.order for seg in plan.segments] == [1, 2, 3]
+    assert [seg.timeline_duration_ms for seg in plan.segments] == [6_000, 3_000, 1_000]
+    assert plan.segments[-1].asset_end_ms == 6_000
+
+
 def test_story_document_to_srt_uses_narration_timeline() -> None:
     document = validate_story_script(_valid_payload(), project_id=1, asset_durations={10: 8_000})
 
@@ -114,6 +145,30 @@ def test_story_document_to_srt_uses_narration_timeline() -> None:
     assert "這不是一般的展示車" in srt
     assert "這不是一般的展示車。" not in srt
     assert "00:00:02,500 --> 00:00:04,500" in srt
+
+
+def test_story_document_to_srt_only_emits_planned_orders_when_durations_provided() -> None:
+    payload = _valid_payload()
+    payload["items"].append(
+        {
+            "order": 3,
+            "asset_id": 10,
+            "source_start_ms": 5_000,
+            "source_end_ms": 8_000,
+            "picture": "第三段",
+            "narration": "這段已被目標秒數裁掉。",
+            "audio_intent": "narration",
+            "beat_type": "closing",
+            "reason": "結尾",
+        }
+    )
+    document = validate_story_script(payload, project_id=1, asset_durations={10: 8_000})
+
+    srt = story_document_to_srt(document, narration_durations_ms={1: 2_500, 2: 2_000})
+
+    assert "這不是一般的展示車" in srt
+    assert "保留現場說明聲" in srt
+    assert "這段已被目標秒數裁掉" not in srt
 
 
 def test_story_document_to_srt_paginates_long_narration() -> None:

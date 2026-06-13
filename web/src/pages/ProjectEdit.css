@@ -6,7 +6,7 @@
   padding: var(--space-7) var(--space-7) var(--space-9);
   /* v0.43.0 — reserve space so the sticky generate footer never covers
      the last DraftComments thread / queue inspector. */
-  padding-bottom: 100px;
+  padding-bottom: 180px;
 }
 
 .edit-hero {
@@ -1235,7 +1235,7 @@
 
 @media (max-width: 540px) {
   .project-edit {
-    padding: var(--space-5) var(--space-4) var(--space-7);
+    padding: var(--space-5) var(--space-4) 180px;
   }
   .publish-workbench {
     padding: var(--space-4);

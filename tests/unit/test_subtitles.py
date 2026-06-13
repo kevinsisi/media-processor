@@ -162,6 +162,24 @@ def test_build_cues_xfade_overlap_three_cuts() -> None:
     assert cues[2].timeline_start_ms == 2_000 + 2_500 - 2 * TRANSITION_OVERLAP_MS
 
 
+def test_build_cues_clamps_adjacent_overlap_after_xfade_offset() -> None:
+    cuts = [
+        CutPlanSegment(0, 1, 0, 5_700, "scripted", ""),
+        CutPlanSegment(1, 2, 0, 2_800, "scripted", ""),
+    ]
+    plan = _plan(cuts)
+    transcripts = {
+        1: _FakeTranscript([{"idx": 0, "start_ms": 4_520, "end_ms": 5_700, "text": "前一句"}]),
+        2: _FakeTranscript([{"idx": 0, "start_ms": 0, "end_ms": 2_800, "text": "後一句"}]),
+    }
+
+    cues = build_cues(plan, transcripts)  # type: ignore[arg-type]
+
+    assert len(cues) == 2
+    assert cues[0].timeline_end_ms == cues[1].timeline_start_ms
+    assert cues[0].timeline_end_ms == 5_200
+
+
 def test_render_srt_round_trip() -> None:
     cues = [
         SubtitleCue(1, 0, 1_500, "你好"),
