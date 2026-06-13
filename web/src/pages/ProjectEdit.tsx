@@ -2234,13 +2234,15 @@ export default function ProjectEdit() {
         );
       })()}
 
-      <StickyGenerateFooter
-        state={footerState}
-        label={footerLabel}
-        onClick={footerOnClick}
-        onOpenQueue={() => setQueueModalOpen(true)}
-        disabled={seedLoading}
-      />
+      {footerState !== "ready" && (
+        <StickyGenerateFooter
+          state={footerState}
+          label={footerLabel}
+          onClick={footerOnClick}
+          onOpenQueue={() => setQueueModalOpen(true)}
+          disabled={seedLoading}
+        />
+      )}
 
       {selectedDraftId !== null && <DraftComments draftId={selectedDraftId} />}
 
