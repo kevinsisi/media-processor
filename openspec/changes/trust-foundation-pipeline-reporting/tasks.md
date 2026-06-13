@@ -29,4 +29,4 @@
 - [x] 4.3 Add API tests for trust summary/report fields on new and old drafts.
 - [x] 4.4 Add frontend tests or build-time coverage for trust banner rendering states.
 - [x] 4.5 Run `py -m pytest tests/unit -q`, `py -m ruff check src tests`, `py -m ruff format --check src tests`, `py -m mypy src`, and web build checks.
-- [ ] 4.6 Verify production CI/CD and run at least one production render smoke that demonstrates planned or degraded trust reporting.
+- [x] 4.6 Verify production CI/CD and run at least one production render smoke that demonstrates planned or degraded trust reporting.
