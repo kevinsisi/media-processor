@@ -8,7 +8,7 @@ import type {
 } from "../api/types";
 import "./Settings.css";
 
-const DEFAULT_KEY_MANAGER_URL = "http://key.sisihome.org:7823";
+const DEFAULT_KEY_MANAGER_URL = "http://100.126.226.79:7823";
 
 const SOURCE_LABEL: Record<SettingsOut["llm_api_keys"]["source"], string> = {
   db: "已在系統內管理",

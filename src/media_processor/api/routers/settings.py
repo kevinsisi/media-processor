@@ -43,7 +43,7 @@ router = APIRouter(prefix="/settings", tags=["settings"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
-DEFAULT_KEY_MANAGER_URL = "http://key.sisihome.org:7823"
+DEFAULT_KEY_MANAGER_URL = "http://100.126.226.79:7823"
 
 
 class KeyPoolOut(BaseModel):

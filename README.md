@@ -2,7 +2,7 @@
 
 Content factory pipeline for novice-friendly Instagram and Facebook short-video production.
 
-**Status:** v0.43.5 / M9.15.34–M9.15.36 — edit-time mode selection, Narrato Story mode, and optional Story TTS narration.
+**Status:** v0.43.6 / M9.15.39 — key-manager service-to-service default uses direct RPi Tailscale URL; builds on v0.43.5 edit-time and Narrato Story/TTS work.
 
 ## Spec
 
