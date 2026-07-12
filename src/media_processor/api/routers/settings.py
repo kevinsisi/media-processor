@@ -157,10 +157,18 @@ def _opencode_models_from_payload(data: object) -> list[OpenCodeModelOut]:
         if not isinstance(provider_entry, dict):
             continue
         provider_id = str(provider_entry.get("id") or "")
+        # opencode-go is the paid Zen subscription (every model 401s on a 0
+        # balance); openai is banned by the No-OpenAI rule. Never surface either.
+        if provider_id in ("opencode-go", "openai"):
+            continue
         raw_models = provider_entry.get("models") or []
         model_entries = raw_models.values() if isinstance(raw_models, dict) else raw_models
         for model_entry in model_entries:
             if not isinstance(model_entry, dict):
+                continue
+            # Only free models: paid Zen models return 401 "Insufficient balance".
+            cost = model_entry.get("cost") if isinstance(model_entry.get("cost"), dict) else {}
+            if not (cost.get("input") == 0 and cost.get("output") == 0):
                 continue
             model_id = str(model_entry.get("id") or "")
             model_name = str(model_entry.get("name") or model_id)
