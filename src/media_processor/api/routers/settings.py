@@ -167,7 +167,8 @@ def _opencode_models_from_payload(data: object) -> list[OpenCodeModelOut]:
             if not isinstance(model_entry, dict):
                 continue
             # Only free models: paid Zen models return 401 "Insufficient balance".
-            cost = model_entry.get("cost") if isinstance(model_entry.get("cost"), dict) else {}
+            cost_raw = model_entry.get("cost")
+            cost: dict[object, object] = cost_raw if isinstance(cost_raw, dict) else {}
             if not (cost.get("input") == 0 and cost.get("output") == 0):
                 continue
             model_id = str(model_entry.get("id") or "")
