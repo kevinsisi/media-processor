@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     # when OpenCode is unavailable. Password stays env-only (HomeProject canonical
     # deployment at provider-amd.sisihome.org is no-auth).
     opencode_servers: str = Field(default="")  # comma or newline separated base URLs
-    opencode_model: str = Field(default="openai/gpt-5.5")
+    opencode_model: str = Field(default="opencode/mimo-v2.5-free")
     opencode_variant: str = Field(default="medium")
     opencode_server_password: str = Field(default="")
 

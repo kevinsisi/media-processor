@@ -217,12 +217,13 @@ def test_opencode_model_payload_parser_accepts_provider_dict() -> None:
         {
             "all": [
                 {
-                    "id": "openai",
+                    "id": "opencode",
                     "models": {
-                        "gpt-5.5": {
-                            "id": "gpt-5.5",
-                            "providerID": "openai",
-                            "name": "GPT 5.5",
+                        "big-pickle": {
+                            "id": "big-pickle",
+                            "providerID": "opencode",
+                            "name": "Big Pickle",
+                            "cost": {"input": 0, "output": 0},
                         }
                     },
                 }
@@ -230,7 +231,9 @@ def test_opencode_model_payload_parser_accepts_provider_dict() -> None:
         }
     )
 
-    assert [(m.id, m.name, m.provider) for m in models] == [("openai/gpt-5.5", "GPT 5.5", "openai")]
+    assert [(m.id, m.name, m.provider) for m in models] == [
+        ("opencode/big-pickle", "Big Pickle", "opencode")
+    ]
 
 
 def test_create_upload_session_accepts_large_video_size(app: FastAPI) -> None:

@@ -141,7 +141,7 @@ class TestAnalyseAssetNoKeys:
                 api_keys=(),
                 opencode_config=OpenCodeConfig(
                     servers=("http://opencode.local",),
-                    model="openai/gpt-5.5",
+                    model="opencode/mimo-v2.5-free",
                     variant="medium",
                     password="",
                 ),
@@ -203,7 +203,7 @@ class TestAnalyseBatchFallback:
                 api_keys=("key1",),
                 opencode_config=OpenCodeConfig(
                     servers=("http://opencode.local",),
-                    model="openai/gpt-5.5",
+                    model="opencode/mimo-v2.5-free",
                     variant="medium",
                     password="",
                 ),

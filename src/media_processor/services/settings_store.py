@@ -234,7 +234,7 @@ async def get_opencode_text_model(session: AsyncSession) -> tuple[str, str]:
     env_val = settings.opencode_model
     if env_val and env_val.strip():
         return env_val.strip(), "env"
-    return "openai/gpt-5.5", "default"
+    return "opencode/mimo-v2.5-free", "default"
 
 
 async def get_opencode_text_variant(session: AsyncSession) -> tuple[str, str]:

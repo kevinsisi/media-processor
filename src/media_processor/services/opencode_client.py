@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class OpenCodeConfig:
     servers: tuple[str, ...]  # base URLs in priority order
-    model: str  # "provider/id", e.g. "openai/gpt-5.5"
+    model: str  # "provider/id", e.g. "opencode/mimo-v2.5-free"
     variant: str  # "medium" | "high" | "default"
     password: str  # empty = no-auth
     timeout_s: float = 30.0

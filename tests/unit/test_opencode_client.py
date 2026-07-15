@@ -44,7 +44,7 @@ async def test_call_opencode_text_uses_general_agent_and_text_system_prompt(
         system_prompt="你是精準執行器。",
         server_url="http://opencode.test",
         password="",
-        model="openai/gpt-5.5",
+        model="opencode/mimo-v2.5-free",
         variant="medium",
         timeout_s=5.0,
     )
@@ -81,7 +81,7 @@ async def test_call_opencode_vision_uses_text_system_prompt_and_file_parts(
         system_prompt="只輸出 JSON。",
         server_url="http://opencode.test",
         password="",
-        model="openai/gpt-5.5",
+        model="opencode/mimo-v2.5-free",
         variant="medium",
         timeout_s=5.0,
     )
