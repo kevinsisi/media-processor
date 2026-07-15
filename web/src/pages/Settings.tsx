@@ -519,7 +519,7 @@ export default function Settings() {
               onChange={(e) => setOcTextModel(e.target.value)}
             >
               <option value="">
-                — 使用預設（{ocStatus ? ocStatus.text_model : "openai/gpt-5.5"}）—
+                — 使用預設（{ocStatus ? ocStatus.text_model : "opencode/mimo-v2.5-free"}）—
               </option>
               {Object.entries(modelsByProvider)
                 .sort(([a], [b]) => a.localeCompare(b))
